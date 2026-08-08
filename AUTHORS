@@ -1,0 +1,21 @@
+# Authors
+
+This repository is a Go port of the Hypernode distributed ledger and a
+derivative work of it; both are licensed AGPL-3.0 (see LICENSE).
+
+## Original design and Java implementation
+
+The design, consensus model, naming registry, and governance mechanism
+originate in the upstream project:
+
+  Hypernode distributed ledger — JauntyJackalope351 and contributors
+  https://github.com/JauntyJackalope351/hypernode-ledger
+
+## Go port
+
+  eval-apply-co-uk
+  https://github.com/eval-apply-co-uk
+
+The Go re-implementation, its hardening (see findings.md), the adversarial
+test harness, the wallet/admin UI module, and the documentation in this
+repository.

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>go_ledger — admin / governance</title>
+<style>
+ body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+ h1 { font-size: 1.4rem; }
+ h2 { font-size: 1.1rem; margin-top: 0; }
+ .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+ .big { font-size: 1.8rem; font-weight: 600; }
+ .key { font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; color: #555; }
+ label { display: block; margin: 0.6rem 0 0.15rem; font-size: 0.9rem; }
+ input[type=text] { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+ button { margin-top: 0.9rem; padding: 0.55rem 1.1rem; border: 0; border-radius: 6px; background: #2d6cdf; color: #fff; font-size: 1rem; cursor: pointer; }
+ table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.75rem; }
+ th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #eee; }
+ td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
+ .msg { background: #e8f5e9; border: 1px solid #a5d6a7; padding: 0.5rem 0.75rem; border-radius: 6px; }
+ .err { background: #fdecea; border: 1px solid #f5c6cb; padding: 0.5rem 0.75rem; border-radius: 6px; }
+ .warn { background: #fff8e1; border: 1px solid #ffe082; padding: 0.5rem 0.75rem; border-radius: 6px; }
+ .muted { color: #888; font-size: 0.85rem; }
+ .inline { margin: 0; display: inline; }
+ .vote { margin: 0; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+ .ready { color: #2e7d32; font-weight: 600; }
+</style>
+</head>
+<body>
+ <h1>admin / governance</h1>
+ <p><a href="/">← back to wallet</a></p>
+ {{if .Message}}<p class="msg">{{.Message}}</p>{{end}}
+ {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+
+ <div class="card">
+   <div class="muted">current network parameters</div>
+   <div class="big">cost {{.TransactionCost}}</div>
+   <div class="muted" style="margin-top:0.4rem;">timing profile — block interval {{.BlockIntervalMs}} ms · step timeout {{.StepTimeoutMs}} ms · max peers {{.MaxPeers}} (0 = all-to-all) · max message {{.MaxMessageBytes}} bytes (0 = unbounded)</div>
+   <div class="muted" style="margin-top:0.3rem;">validators — total power {{.TotalPower}}, quorum (&gt; ⅔) {{.Quorum}}</div>
+   {{if not .IsValidator}}<p class="warn" style="margin-top:0.6rem;">This wallet is not a validator. You can submit votes, but only a validator's vote counts toward the quorum.</p>{{end}}
+ </div>
+
+ <div class="card">
+   <h2>Change network parameters</h2>
+   <p class="muted">Propose a new operating profile, or add your vote to an existing proposal — it takes
+   effect once &gt; ⅔ of validator power agrees. Leave a field blank to keep its current value. The
+   timing is coupled: the <em>step timeout</em> must be long enough for gossip to reach every node at
+   the chosen <em>max peers</em> fan-out, or the node rejects the profile.</p>
+   <form method="post" action="/admin/parameter">
+     <label for="cost">transaction cost</label>
+     <input type="text" id="cost" name="cost" placeholder="current: {{.TransactionCost}}">
+     <label for="blockIntervalMs">block interval, ms (the exchange-window cadence)</label>
+     <input type="text" id="blockIntervalMs" name="blockIntervalMs" placeholder="current: {{.BlockIntervalMs}}">
+     <label for="stepTimeoutMs">step timeout, ms (must cover the gossip fan-out)</label>
+     <input type="text" id="stepTimeoutMs" name="stepTimeoutMs" placeholder="current: {{.StepTimeoutMs}}">
+     <label for="maxPeers">max peers (0 = all-to-all; the gossip fan-out)</label>
+     <input type="text" id="maxPeers" name="maxPeers" placeholder="current: {{.MaxPeers}}">
+     <label for="maxMessageBytes">max message bytes (caps one serialized payment/update; 0 = unbounded)</label>
+     <input type="text" id="maxMessageBytes" name="maxMessageBytes" placeholder="current: {{.MaxMessageBytes}}">
+     <button type="submit">Submit vote</button>
+   </form>
+   {{if .ParameterProposals}}
+   <table>
+     <thead><tr><th>proposed profile</th><th class="amt">power</th><th>status</th><th></th></tr></thead>
+     <tbody>
+     {{range .ParameterProposals}}
+       <tr>
+         <td>cost {{.NewTransactionCost}} · {{.NewBlockIntervalMs}}/{{.NewStepTimeoutMs}} ms · peers {{.NewMaxPeers}} · msg {{.NewMaxMessageBytes}} B</td>
+         <td class="amt">{{.VotedPower}} / {{$.Quorum}}</td>
+         <td>{{if .Reached}}<span class="ready">ready ✓</span>{{else}}pending{{end}}{{if not .AmendsCurrent}} <span class="muted">(stale)</span>{{end}}</td>
+         <td><form class="inline" method="post" action="/admin/parameter"><input type="hidden" name="cost" value="{{.NewTransactionCost}}"><input type="hidden" name="blockIntervalMs" value="{{.NewBlockIntervalMs}}"><input type="hidden" name="stepTimeoutMs" value="{{.NewStepTimeoutMs}}"><input type="hidden" name="maxPeers" value="{{.NewMaxPeers}}"><input type="hidden" name="maxMessageBytes" value="{{.NewMaxMessageBytes}}"><button class="vote" type="submit">vote</button></form></td>
+       </tr>
+     {{end}}
+     </tbody>
+   </table>
+   {{end}}
+ </div>
+
+ <div class="card">
+   <h2>Reassign a balance</h2>
+   <p class="muted">A &gt; ⅔-ratified override of an account's balance — the community's deliberate
+   exception to ordinary payments (it can mint or reduce). Bound to the balance the account holds now,
+   so a stale certificate can't replay. Use with care.</p>
+   <form method="post" action="/admin/reassignment">
+     <label for="account">account (name or public key)</label>
+     <input type="text" id="account" name="account" placeholder="a registered name like 'coop', or a public key" required>
+     <label for="amount">new balance</label>
+     <input type="text" id="amount" name="amount" placeholder="e.g. 500.00" required>
+     <button type="submit">Submit vote</button>
+   </form>
+   {{if .Reassignments}}
+   <table>
+     <thead><tr><th>account</th><th class="amt">change</th><th class="amt">power</th><th>status</th><th></th></tr></thead>
+     <tbody>
+     {{range .Reassignments}}
+       <tr>
+         <td class="key">{{.Account}}</td>
+         <td class="amt">{{.PreviousAmount}} → {{.NewAmount}}</td>
+         <td class="amt">{{.VotedPower}} / {{$.Quorum}}</td>
+         <td>{{if .Reached}}<span class="ready">ready ✓</span>{{else}}pending{{end}}{{if not .AmendsCurrent}} <span class="muted">(stale)</span>{{end}}</td>
+         <td><form class="inline" method="post" action="/admin/reassignment"><input type="hidden" name="account" value="{{.Account}}"><input type="hidden" name="amount" value="{{.NewAmount}}"><button class="vote" type="submit">vote</button></form></td>
+       </tr>
+     {{end}}
+     </tbody>
+   </table>
+   {{end}}
+ </div>
+
+ <p class="muted">Votes are signed with your wallet key. A change enacts only when &gt; ⅔ of validator
+ power has voted for the same proposal; each node re-verifies the certificate when it applies the block.</p>
+</body>
+</html>
