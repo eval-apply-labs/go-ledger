@@ -1,0 +1,6 @@
+# Never commit keys or built binaries
+wallet.json
+*.key
+/wallet
+/go_ledger_ui
+*.exe

@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build · vet · gofmt · test -race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      # Both the engine (root module) and the wallet (ui/, its own module) are checked. The tree has
+      # zero third-party dependencies and ui/ points at the root via a replace directive, so every
+      # step runs fully offline — nothing is fetched.
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: build
+        run: |
+          go build ./...
+          go build -C ui ./...
+
+      - name: vet
+        run: |
+          go vet ./...
+          go vet -C ui ./...
+
+      - name: test -race
+        env:
+          # Shared runners execute the timing-sensitive chaos/gossip schedules up to ~10x slower
+          # than a developer machine (observed twice; the failing seeds replay green locally).
+          # Stretch those tests' real-time deadlines here instead of loosening them for everyone —
+          # see testTimeSlack in node/sync_test.go.
+          GOLEDGER_CHAOS_SLACK: 4
+        run: |
+          go test -race ./...
+          go test -C ui -race ./...

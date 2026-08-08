@@ -1,0 +1,17 @@
+# Go build output
+/server
+/go_ledger
+*.exe
+*.test
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# built binaries (make build / make demo)
+bin/
+/demo
+/keygen
+/ui/ui
+/ui/wallet
