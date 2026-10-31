@@ -1,0 +1,178 @@
+{
+ "slice": "S9",
+ "report": {
+  "branchHead": "8c242ea89a9a7bacdc38672ee4ccae5273bba70d",
+  "commits": [
+   {
+    "hash": "e6edb89",
+    "subject": "phase 2 S9: the wallet and admin pages of spec 7"
+   },
+   {
+    "hash": "9423e93",
+    "subject": "phase 2 S9: Sign refuses a change whose requestor is another name; the last-name warning says what to do"
+   },
+   {
+    "hash": "8c242ea",
+    "subject": "phase 2 S9: the wallet command's doc names what it now does"
+   }
+  ],
+  "summary": "S9 is built on branch p2-s9 in the worktree <scratch>/wt/p2-s9. All of spec §7 is in, and only ui/*.go and ui/templates/*.html changed. No file owned by S6 was touched.\n\nThe main page (ui/main.go, ui/templates/wallet.html):\n- Name status: the wallet's name; \"<name> becomes yours at block N\" when a pending key change is to this wallet's key; otherwise \"not registered\", with the key's fingerprint (first 16 hex digits of SHA-256 of the raw key) and a button that copies the full key.\n- The three warnings of §7.5:\n  - a pending key or bank change on the wallet's own name, worded as the spec gives it;\n  - the name is frozen;\n  - the last name the wallet held now has another key.\n- The freeze button:\n  - it asks for confirmation before it signs;\n  - it names the block height + lookahead, or the name's PendingHeight if that is sooner;\n  - the page shows the freeze as sent until a verified state shows the name frozen, and says it \"did not land, contact your bank, or another bank\" once its block has committed without it;\n  - when no state verifies, it still signs a freeze for the last name the wallet held.\n- A payment is reviewed before it is signed: the review shows the payee's name as the wallet read it, and the payee's bank of record.\n- The account form takes a delegate, a description and an address.\n- The accounts table shows each name's bank, frozen mark, balance and key fingerprint, and never a full key.\n- What a person types as a name is lowercased and trimmed, then checked. The pages show the result.\n\n<keyfile>.state (ui/wallet.go walletState) now keeps:\n- the last name the wallet verified as its own, and the newest height it verified. A state older than that height is refused, also after a restart (ui/trust.go verifiedState).\n- the blocks of the name requests the wallet signed as fee payer. The payment counter skips those blocks.\n- the freeze the wallet last sent.\n\nThe new Requests page (ui/requests.go, ui/templates/requests.html):\n- Draft: registration, key change or bank change. It fills in the bank, fee and block from the verified state, with a lead of 120 blocks by default and at most 3600. It signs nothing and shows the facts and the request text.\n- Sign: checks the pasted text against the verified state and signs only the roles this wallet holds (requestor, bank, new key).\n- Submit: posts a complete request to /hdls/name-request.\n- It is also the bank's desk: it lists the pending changes on the bank's customers and reminds the operator to check the holder in person or by a second channel.\n- It offers the wallet's hash name (§7.7), and a registration drafted without a name uses it.\n\nThe admin page (ui/admin.go, ui/templates/admin.html):\n- The name-action draft covers every kind of action:\n  - an optional balance;\n  - a new key;\n  - a bank, or \"-\" for none;\n  - freeze or unfreeze;\n  - creating a new name.\n- The draft shows the name's current key fingerprint, balance, bank of record, frozen mark and pending change, and shows the draft as text.\n- The Sign step takes a pasted draft. The new key's wallet signs the proof of possession; validators vote only once that proof is there.\n- The Sign step shows what it signed.\n- SignReassignment and SubmitReassignment accept actions without amounts. The pending table shows the new fields.\n\nOrchestrator notes, each fixed:\n- Each page and each action reads the checkpoint once (node.Checkpoint is passed in).\n- At first use, /hdls/status is asked without holding the mutex.\n- The signer is built from the seed once.\n- Upper-case names are lowercased instead of refused.\n- The account form has its address field.\n- The admin page drafts every kind of name action.",
+  "tests": [
+   {
+    "name": "TestUnregisteredWalletShowsItsKeyFingerprint",
+    "failsWithoutChange": "Fails when the accounts table prints full keys instead of fingerprints (mutation in render). At the parent commit the page printed every key in full and showed no fingerprint."
+   },
+   {
+    "name": "TestPendingKeyShowsBecomesYours",
+    "failsWithoutChange": "Fails with the PendingKey == wallet key branch removed from render: 'alice becomes yours at block 50' is not shown."
+   },
+   {
+    "name": "TestPendingChangeOnOwnNameShowsAWarning",
+    "failsWithoutChange": "Fails when render does not set PendingChange: the key-change and bank-change warnings are missing."
+   },
+   {
+    "name": "TestFrozenNameShowsAWarning",
+    "failsWithoutChange": "Fails when render does not set Frozen: there is no frozen warning, and the freeze button still shows."
+   },
+   {
+    "name": "TestFreezeButtonSubmitsAFreeze",
+    "failsWithoutChange": "Fails with the confirm step removed from the /freeze handler: status 303, signed before it was confirmed."
+   },
+   {
+    "name": "TestFreezeNamesTheBlockBeforeThePendingChange",
+    "failsWithoutChange": "Fails with the PendingHeight rule removed from Freeze: a change pending for block 11 gets a freeze for block 13, want 11."
+   },
+   {
+    "name": "TestFreezeThatDidNotLandIsReported",
+    "failsWithoutChange": "Fails when freezeStatus never compares the state's height with the freeze's block: 'did not land' is never shown."
+   },
+   {
+    "name": "TestFreezeWorksWhenNoStateVerifies",
+    "failsWithoutChange": "Fails without the last-name fallback in Freeze: 'no state verifies', and no freeze is sent."
+   },
+   {
+    "name": "TestWalletRefusesAnOlderState",
+    "failsWithoutChange": "Fails with the NewestHeight check removed from verifiedState: the state of block 8 is accepted after block 9's."
+   },
+   {
+    "name": "TestPaymentShowsThePayeesBank",
+    "failsWithoutChange": "Fails when /send signs at once without the review: the payee's name and bank are not shown, and a payment is sent."
+   },
+   {
+    "name": "TestHashNameConvention",
+    "failsWithoutChange": "Fails when the hash name takes 16 bytes instead of 15: the golden value k-2ztia3qrz3qzu7eyt52el6in for the key of seed 0..31 does not match."
+   },
+   {
+    "name": "TestNameActionDraftCollectsTheNewKeyProof",
+    "failsWithoutChange": "Fails without the new-key role in SignReassignment: the new key's wallet cannot sign the proof. At the parent commit the admin page could not draft a new key at all."
+   },
+   {
+    "name": "TestWalletRefusesNonCanonicalNames",
+    "failsWithoutChange": "Fails without lowercasing in typedName: '  SHOP' is refused instead of reviewed as 'shop'."
+   },
+   {
+    "name": "TestAccountFormTakesAnAddress",
+    "failsWithoutChange": "Fails when the /update handler drops the address field: 'nothing to update'."
+   },
+   {
+    "name": "TestPagesReadTheCheckpointOnce",
+    "failsWithoutChange": "Fails with one extra verifiedState call in renderAdmin, as the old IsValidator did: 2 reads, want 1. At the parent commit the main page read the checkpoint twice."
+   },
+   {
+    "name": "TestFirstUseAsksForTheNetworkIdWithoutTheMutex",
+    "failsWithoutChange": "Fails when the mutex is held across the status call, as the old code did: the status handler's TryLock fails."
+   },
+   {
+    "name": "TestWalletBuildsItsSignerOnce",
+    "failsWithoutChange": "Fails when signer() builds a new signer on every call: 'the wallet built a second signer'."
+   },
+   {
+    "name": "TestRegistrationCollectsThreeSignatures",
+    "failsWithoutChange": "Fails when the bank role is skipped for a wallet that is also the requestor: the bank signs only as requestor."
+   },
+   {
+    "name": "TestSignStepSignsOnlyTheRolesThisWalletHolds",
+    "failsWithoutChange": "Two mutations, each fails it. (1) Any registered wallet signs as requestor: the payer's bank signs as requestor and bank. (2) Without the requestor-is-the-name check: the payer signs another name's key change."
+   },
+   {
+    "name": "TestRequestsLeaveThePaymentCounterAlone",
+    "failsWithoutChange": "Fails without the skip loop in nextPaymentBlockID: payments name blocks 13 and 14, want 13 and 15."
+   },
+   {
+    "name": "TestDeskListsThePendingChangesOnItsCustomers",
+    "failsWithoutChange": "Fails when the desk lists only key changes and incoming bank changes: erin's bank change away from the bank is missing."
+   },
+   {
+    "name": "TestNameActionWithoutAmountsIsSignedAndSubmitted",
+    "failsWithoutChange": "Fails with the old refusal of a draft without amounts: 'unreadable name action draft'."
+   },
+   {
+    "name": "TestWalletWhoseNameHasAnotherKeySaysSo",
+    "failsWithoutChange": "Fails when render does not show LastName: the 'now has another key' warning is missing."
+   }
+  ],
+  "deviations": "1. To read the checkpoint once per page, the steps that render a page take the verified node.Checkpoint as an argument: ReviewPayment, DraftParameters, DraftReassignment, SignParameters, SignReassignment, DraftNameRequest and SignNameRequest. The actions that redirect read it once themselves: Send, UpdateAccount, Freeze, SubmitParameters and SubmitReassignment. These were removed: Wallet.Name, Balance, accounts, committedState, IsValidator, and governanceView.Validators. Whether the wallet is a validator now comes from the verified checkpoint's validators, not from the node's unverified governance view. Old tests were rewritten to match (a verified() helper, and balanceOf instead of Balance).\n2. \"Before it signs, it shows the payee's name and bank of record\" is read as a review step. POST /send now reviews by default, and step=confirm signs.\n3. The admin Sign step signs by role:\n   - the wallet whose key is NewKey signs only the proof of possession;\n   - any other wallet votes under its registered name, as parameter votes already did, and only once the action passes FitsState with the proof. So the new key's wallet must sign first, as §7.6 orders.\n   - The Sign step now also shows the facts of what it signed, for both parameter votes and name actions.\n   - SubmitReassignment takes the new key's proof from any pasted text when the first text has none.\n4. The freeze:\n   - It uses the same /hdls/status height in progress as payments.\n   - It takes PendingHeight only if that block has not passed and is sooner than height + lookahead.\n   - With no verified state, it uses the unverified status height and the last name, and cannot see a pending change.\n   - The page reports \"did not land\" once a verified state's height has reached the freeze's block. The report stays until the name shows frozen or another freeze is sent.\n5. Requests page:\n   - Sign refuses a freeze, since freezes go through the button. It does not run the full shape check, because the request is not yet complete. It checks the kind, the fee, that the block has not passed, and that a key or bank change's requestor is its name, then runs NameRequestFitsState.\n   - Draft refuses up front when no bank can co-sign: a registration whose requestor is neither seated nor has a bank of record, or a key change of a name with no bank of record.\n   - A request's block is kept for the payment counter only when the wallet signs as requestor (all three kinds carry a fee). A freeze's block is not kept, since §7.3 says the wallet's own payment in that block simply lapses.\n6. \"The pending changes on the bank's customers\" is read as every pending change on names whose bank of record is this bank, a bank change away from it included (the old bank is not asked), plus the bank changes to it.\n7. Names are lowercased with strings.ToLower, which also maps a few non-ASCII letters to ASCII (for example the Kelvin sign to k). The result is always shown before anything is signed.\n8. Size: about 980 production Go lines added and 360 removed, about 220 template lines, and about 840 test lines. That is above the estimate of 550 production and 450 test lines, mostly because of the one-read-per-page signature changes and the new Requests page.",
+  "suite": "All passed on 8c242ea, with GOTOOLCHAIN=auto (go1.27.3) and GOLEDGER_CHAOS_SLACK=4.\n- gofmt -l . printed nothing outside review/.\n- go vet ./... and go vet -C ui ./... passed.\n- go build ./... and go build -C ui -o /dev/null . passed.\n- go test -race -count=1 ./... passed twice: consensus about 56 s and 52 s, node about 62 s each, ledger, signing, cmd/server and cmd/demo ok. The root module was run on 9423e93. The only change since then is a comment in ui/main.go.\n- go test -C ui -race -count=1 ./... passed twice during the full run, and twice more on 8c242ea (about 33 to 37 s each).\n- go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed in 93 s.\nNo time limit was changed.\nThe mutation proofs ran against a scratch copy at <scratch>/p2-scratch/s9-mut, using mutate.py and mutations*.json in the same folder: 24 mutations, each fails its test.",
+  "openIssues": "- The counter skips a block that one of the wallet's requests names, but nothing checks the other way round. If a short lead puts a request in a block one of the payer's own payments already names, the node refuses the request (409) or the payment lapses. §7.3 only asks for the counter to skip; refusing such a request would take about 3 lines in SignNameRequest.\n- The wallet does not check R9 (a freeze, or a ⅔ freeze, that would leave no name seated). The node refuses it with 409, and the page shows the reason.\n- The copy button uses navigator.clipboard, which browsers allow only in a secure context. localhost works, which is the default -listen address. A wallet opened by LAN IP over plain http cannot copy its full key, and a key change needs the new wallet's full key. A show-on-demand field would fix it, if the owner wants that.\n- Drafts use the validator set the checkpoint carries (the set that signed the last block), as the code already did for votes. In dynamic mode it can differ from the set for the next block; the node checks again.\n- With no verified state, the freeze relies on the unverified /hdls/status height and cannot see a pending change.\n- Docs are S11's. ui/README.md and ui/USER_MANUAL.md must cover:\n  - the Requests page and the desk;\n  - the freeze button and \"did not land\";\n  - the payment review that shows the payee's bank;\n  - the address field;\n  - hash names;\n  - the new fields of <keyfile>.state (requestBlockIDs, lastName, newestHeight, freezeName, freezeBlockID);\n  - lowercased names.\n- Merge with S6: S9 uses only ledger.NameRequest, ledger.Reassignment, consensus.ValidatorSet and Vote/Commit, and node.Checkpoint/GovernanceView. If S6 changes any of those types, the ui tests need a small fix after the merge."
+ },
+ "verdict": {
+  "confirmed": true,
+  "problems": [
+   {
+    "severity": "minor",
+    "file": "ui/requests.go",
+    "problem": "SignNameRequest has no upper bound on BlockID. It refuses only a block that has passed, so the bank's desk (and a requestor) will co-sign request text that names a block any distance ahead. That signature stays usable until the chain reaches that block, which defeats the short life the 3,600-block intake window (spec 4.3, Q24) gives every request signature. The function's comment says it checks the request 'as a node would apart from the signatures', which is not true: a node also refuses BlockID > H + 3600 and runs the shape check.",
+    "evidence": "Adversarial test in <scratch>/p2-scratch/verify-S9-3/ui/adversarial_test.go (TestAdversarialFarFutureRequestIsSigned): at state height 9 / status height 10, the bank wallet's SignNameRequest signed a registration for block 1,000,010 'as [requestor bank]' with err nil, and kept 1000010 in RequestBlockIDs.",
+    "fix": "In SignNameRequest, also refuse request.BlockID > checkpoint.State.Height + 1 + maxRequestLead (one more case in the existing switch), and make the comment say what is checked."
+   },
+   {
+    "severity": "minor",
+    "file": "ui/wallet.go",
+    "problem": "nextPaymentBlockID skips request blocks only after it applies the blockSlack bound. A run of request blocks at the window's edge therefore pushes a payment past height + lookahead + blockSlack, and even past the node's H + 64, which the node refuses. The counter then latches, and later payments are refused with a message that blames the node ('the node reported a wrong height before; restart the wallet'). The comment 'The block is never more than blockSlack past height + lookahead' is false once the skip runs.",
+    "evidence": "<scratch>/p2-scratch/verify-S9-3/ui/counter_adversarial_test.go: at height 10 with request blocks 13..80 kept (a desk that paid for many registrations), the payment names block 81. window+slack is 45 and node intake max is 74. The next call errors with 'this wallet named block 81, far past the node's height 10: the node reported a wrong height before'. It takes many consecutive request blocks, so it is unlikely at village scale.",
+    "fix": "Run the skip loop before the blockSlack check, so the bound applies to the block actually named, or refuse when the skip passes the bound. Either way, correct the comment."
+   },
+   {
+    "severity": "minor",
+    "file": "ui/wallet.go",
+    "problem": "Spec 3.2 says the wallet lowercases and trims a typed name and shows the result. UpdateAccount lowercases the delegate and signs it at once. The result is not shown before or after signing: the success message does not name it, and the page shows no delegates. Payments, requests and name actions do show it.",
+    "evidence": "TestAdversarialKelvinSign in <scratch>/p2-scratch/verify-S9-3/ui/adversarial_test.go: POST /update with delegate \"Kay\" (Kelvin sign) signs Delegate \"kay\" with no review. The redirect message is only 'account update submitted — it appears once its block commits'.",
+    "fix": "Name the lowercased delegate in the /update success message, for example 'delegation to kay submitted'. This is the smallest change. Otherwise add a review step like the payment's."
+   },
+   {
+    "severity": "minor",
+    "file": "ui/requests_test.go",
+    "problem": "Two of the slice's rules are covered by code but not by any test. (1) TestRequestsLeaveThePaymentCounterAlone claims the request block survives a restart, but keepRequestBlock's saveState is masked by the Freeze() that follows, which also writes the state file. (2) TestPagesReadTheCheckpointOnce covers the draft steps but not the Requests Sign step or the admin Sign step.",
+    "evidence": "My mutation run (<scratch>/p2-scratch/verify-S9-logs/mutations.txt): M5c (drop saveState from keepRequestBlock) and M18b (an extra verifiedState call in SignNameRequest) both PASS their tests. An adversarial test confirms that the current code reads the checkpoint once for each sign step.",
+    "fix": "In TestRequestsLeaveThePaymentCounterAlone, restart the bank wallet before calling Freeze, or check RequestBlockIDs in the reloaded state first. Add the /requests sign step and the /admin/reassignment sign step to the map in TestPagesReadTheCheckpointOnce."
+   },
+   {
+    "severity": "minor",
+    "file": "ui/admin.go",
+    "problem": "In SignReassignment, the validator path only checks that NewKeySignature is non-empty (FitsState checks presence), so it votes on a proof it never verified. Its facts then say '(its proof of possession: true)' even for a bogus proof. SubmitReassignment takes the proof from the first text that carries one, so a bogus proof in the first text blocks a valid one in a later text. Consensus is not at risk: votes do not cover the proof, and Valid verifies it.",
+    "evidence": "TestAdversarialSubmitTakesTheFirstProof: a validator signed a vote over a 4412-character bogus proof with err nil, and its facts showed 'new key: … (its proof of possession: true)'. SubmitReassignment, with the bogus-proof text first and two texts carrying the valid proof after it, failed with 'the state these votes bind to has changed … or the new key's proof is missing'.",
+    "fix": "Verify the proof under NewKey (one ML-DSA verify) in the validator path before voting. In SubmitReassignment, take the first proof that verifies, not the first non-empty one."
+   }
+  ],
+  "evidence": "The scratch copy <scratch>/p2-scratch/verify-S9-1 is an archive of p2-s9 HEAD 8c242ea. The worktree is clean, and git diff 5525c3b..HEAD changes only ui/*.go and ui/templates/*.html. All runs used GOTOOLCHAIN=auto (go1.27.3) and GOLEDGER_CHAOS_SLACK=4. Logs are in <scratch>/p2-scratch/verify-S9-logs/.\n\nStatic checks: gofmt -l . printed nothing outside review/. go vet ./... and go vet -C ui ./... are clean. go build ./... and go build -C ui -o /dev/null . pass.\n\nSuites: go test -race -count=1 ./... passed twice (consensus 57 s and 54 s, node 61 s and 62 s, ledger, signing, cmd/server and cmd/demo ok). go test -C ui -race -count=1 ./... passed twice, in about 35 s each. The run with -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed in 93 s. No time limit was changed.\n\nSpec check: I compared each item of §7.1 to §7.7 and S9's scope in §10.2 with the code. Done:\n- name status, with 'becomes yours' and the fingerprint plus copy button;\n- the last name and newest height in <keyfile>.state, with an older state refused (also after a restart);\n- the three warnings;\n- the freeze: confirm step, height + lookahead or a sooner PendingHeight, the did-not-land report, and the last-name fallback;\n- the Requests page: draft with a lead (default 120, max 3600), sign per role, submit;\n- request blocks kept for the fee payer and skipped by the counter;\n- the desk's pending list and its reminder;\n- hash names: 15 bytes, lowercase base32, 26 characters;\n- the payment review showing the payee's bank;\n- the delegate, description and address form;\n- the accounts table with fingerprints only;\n- the admin parameter draft (ten parameters) and the name-action draft (every kind of action, new-key proof signed first, then votes);\n- one checkpoint read per page.\n\nI counted reads: every page, review and draft step, every sign step and every redirecting action reads the checkpoint once; the submit step for requests reads none. The deviations are reasonable readings: verified checkpoint passed in, payment review step, roles in the admin sign step, Sign refuses a freeze, desk scope, strings.ToLower. Nothing of S6, S10 or S11 is touched or half-built. Naming follows the rule, and I found no dead code or old-format path from this slice. Signed preimages go only through the existing ledger Sign* functions, and JSON round-trips of NameRequest and Reassignment keep every field. Every mutating route checks POST and sits behind guard; GET /requests never signs.\n\nMutations: I ran 41 of my own with <scratch>/p2-scratch/verify-S9-tools/mutate.py, mutations.json and mutations2.json. Each of the 16 tests the spec lists, and the builder's 7 extra tests, fails when its rule is reverted. Only M5c (request-block persistence) and M18b (an extra read in the Requests sign step) went uncaught; both are reported as test gaps. My first M19 mutation deadlocked, so I replaced it with a proper hold-across-status mutation, which the test catches.\n\nAdversarial tests (<scratch>/p2-scratch/verify-S9-3/ui/adversarial_test.go and counter_adversarial_test.go):\n- a far-future BlockID is signed;\n- the request-block skip runs past the window;\n- a Kelvin-sign delegate is signed as 'kay' without being shown;\n- a bogus admin proof gets a vote and its first-text placement blocks submission;\n- a full key-change flow (holder, then new key, then bank) yields a complete, valid request;\n- every action reads the checkpoint once.\n\nAll findings are minor; nothing is wrong at the consensus or signature level."
+ },
+ "fix": {
+  "branchHead": "0411b0d78ad68eaa9eff799556d7d6c23ca2018c",
+  "fixed": [
+   "0544895 ui/wallet.go nextPaymentBlockID (counter past the window): the wallet now skips its own request blocks first and applies the limit (height + lookahead + blockSlack) to the block it actually names. If the skips go past the limit, it refuses with 'wait for the chain to advance' and does not blame the node. The code is about as long as before, and its behaviour is otherwise unchanged; TestBlockIDCounterRecoversFromBadHeight passes as it is. The comment now says 'skips included'. New test TestRequestBlocksKeepPaymentsInsideTheWindow fails on the parent: with request blocks 13..50 at height 10, the payment named block 51 (the window ends at 45).",
+   "0544895 ui/requests_test.go (request block surviving a restart): TestRequestsLeaveThePaymentCounterAlone now reloads the bank wallet before Freeze, which also writes the state file. With saveState removed from keepRequestBlock it now fails ('blocks 13 and 14, want 13 and 15'); before this change it passed with that removal.",
+   "777daa7 ui/requests.go SignNameRequest (no upper bound on the block): it now also refuses BlockID > checkpoint.State.Height + 1 + maxRequestLead. That is the node's own intake window from node/requestpool.go, where the height in progress is the committed height + 1. The comment now lists what the step checks (kind, fee, requestor, intake window, NameRequestFitsState) and says the full shape check waits for Submit. New test TestSignStepRefusesABlockOutsideTheIntakeWindow checks blocks 9, 3611 and 1000010 (refused, no block kept) and 3610 (signed). On the parent it fails: 3611 and 1000010 were signed and kept.",
+   "dbd59f3 ui/wallet.go UpdateAccount and ui/main.go /update (delegate not shown): UpdateAccount now returns the signed ledger.AccountUpdate, and the /update message names a delegate as the wallet read it, e.g. 'account update submitted, delegating to shop — it appears once its block commits'. Five test call sites were updated for the new return value. TestWalletRefusesNonCanonicalNames now delegates to ' Shop ' through the form and checks the message. With the message reverted it fails.",
+   "b7ba70a ui/wallet_test.go TestPagesReadTheCheckpointOnce (sign steps untested): it now also runs the /requests sign step, the /admin/reassignment sign step and the /admin/parameter sign step. Each must render its page (status 200) and read the checkpoint once. One extra verifiedState call in SignNameRequest, SignReassignment or SignParameters each fails it with '2 times, want once'.",
+   "0411b0d ui/admin.go SignReassignment and SubmitReassignment (proof of possession never checked): the validator path now verifies the new key's proof before it hands over its vote, so a sole validator no longer submits a certificate with a bad proof, and the facts line 'proof of possession: true' is now accurate. The ledger has no exported proof check (voteFields is unexported, and ledger/ is outside S9's files), so the wallet calls Reassignment.Valid with a validator set holding only its own name. There its fresh vote is a quorum and only the proof can fail. This costs one signature and two verifies; a short comment explains it. SubmitReassignment now first checks that the votes reach the quorum, then tries each pasted text's proof in order until the certificate is Valid. The error now says the proof is 'missing or does not verify'. New test TestNameActionVotesOnlyOnAProofThatVerifies covers both. With the vote check removed, the validator signs over a forged proof (err nil). With the parent's SubmitReassignment, a forged proof in the first text makes the submit fail.",
+   "Suites on 0411b0d, GOTOOLCHAIN=auto (go1.27.3), GOLEDGER_CHAOS_SLACK=4: gofmt -l . printed nothing outside review/; go vet ./... and go vet -C ui ./... passed; go build ./... and go build -C ui -o /dev/null . passed. go test -race -count=1 ./... passed twice (consensus about 56 s and 55 s, node about 63 s and 64 s). go test -C ui -race -count=1 ./... passed twice (35 s each). go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed in 93 s. No time limit was changed.",
+   "Only ui/*.go changed, all inside S9's file list. The mutation and parent checks ran in the scratch copy <scratch>/p2-scratch/s9-followup, and the suite logs are in <scratch>/p2-scratch/s9-followup-logs."
+  ],
+  "notFixed": [
+   "None of the five reported problems is left open, and none was wrong. One improvement left for a later slice that owns ledger/: an exported check of the new key's proof, for example ledger.VerifyReassignmentNewKey, would let SignReassignment check it with one verify instead of calling Valid with a one-name set. Adding it was outside S9's files, and nothing forced the edit.",
+   "Edge case, not reported, left as it is: Draft names the /hdls/status height + lead, while Sign's new upper bound uses the verified checkpoint's height + 1 + 3600. Only when a node's status runs more than a block ahead of its own checkpoint can a draft at the very largest lead (3600) be refused at Sign. The fix then is to draft again with a shorter lead."
+  ],
+  "suite": "All passed on 0411b0d (GOTOOLCHAIN=auto go1.27.3, GOLEDGER_CHAOS_SLACK=4): gofmt clean (review/ ignored); vet and build passed for the root module and ui; root race suite passed twice (consensus about 56/55 s, node about 63/64 s, plus ledger, signing, cmd/server, cmd/demo); ui race suite passed twice (35 s each); node -count=3 Chaos|Restart|SignLog|Resume|CatchUp passed in 93 s. No time limit was changed."
+ },
+ "recheck": null
+}

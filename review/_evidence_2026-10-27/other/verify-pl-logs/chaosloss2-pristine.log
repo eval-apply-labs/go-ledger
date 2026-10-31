@@ -1,0 +1,62 @@
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087749373604576 (set GOLEDGER_CHAOS_SEED=1793087749373604576 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.06s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087753435749167 (set GOLEDGER_CHAOS_SEED=1793087753435749167 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.15s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087757587275792 (set GOLEDGER_CHAOS_SEED=1793087757587275792 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.10s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087761685306815 (set GOLEDGER_CHAOS_SEED=1793087761685306815 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.11s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087765800143711 (set GOLEDGER_CHAOS_SEED=1793087765800143711 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.15s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087769954167393 (set GOLEDGER_CHAOS_SEED=1793087769954167393 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.12s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087774079286455 (set GOLEDGER_CHAOS_SEED=1793087774079286455 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.10s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087778176073226 (set GOLEDGER_CHAOS_SEED=1793087778176073226 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.14s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087782313297607 (set GOLEDGER_CHAOS_SEED=1793087782313297607 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.13s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087786448957944 (set GOLEDGER_CHAOS_SEED=1793087786448957944 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.08s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087790533234167 (set GOLEDGER_CHAOS_SEED=1793087790533234167 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.12s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087794649996338 (set GOLEDGER_CHAOS_SEED=1793087794649996338 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.10s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087798746736193 (set GOLEDGER_CHAOS_SEED=1793087798746736193 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.12s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087802873521882 (set GOLEDGER_CHAOS_SEED=1793087802873521882 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.11s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087806988349679 (set GOLEDGER_CHAOS_SEED=1793087806988349679 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.11s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087811098660184 (set GOLEDGER_CHAOS_SEED=1793087811098660184 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.11s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087815211402491 (set GOLEDGER_CHAOS_SEED=1793087815211402491 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.12s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087819332037889 (set GOLEDGER_CHAOS_SEED=1793087819332037889 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.12s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087823455505701 (set GOLEDGER_CHAOS_SEED=1793087823455505701 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.14s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793087827596117386 (set GOLEDGER_CHAOS_SEED=1793087827596117386 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.11s)
+PASS
+EXIT=0

@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>go_ledger — name requests</title>
+<style>
+ body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+ h1 { font-size: 1.4rem; }
+ h2 { font-size: 1.1rem; margin-top: 0; }
+ .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+ .key { font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; color: #555; }
+ label { display: block; margin: 0.6rem 0 0.15rem; font-size: 0.9rem; }
+ input[type=text], select, textarea { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+ textarea { font-family: ui-monospace, monospace; font-size: 0.8rem; }
+ button { margin-top: 0.9rem; padding: 0.55rem 1.1rem; border: 0; border-radius: 6px; background: #2d6cdf; color: #fff; font-size: 1rem; cursor: pointer; }
+ button.small { margin-top: 0; padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+ table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+ th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #eee; }
+ .msg { background: #e8f5e9; border: 1px solid #a5d6a7; padding: 0.5rem 0.75rem; border-radius: 6px; }
+ .err { background: #fdecea; border: 1px solid #f5c6cb; padding: 0.5rem 0.75rem; border-radius: 6px; }
+ .warn { background: #fff8e1; border: 1px solid #ffe082; padding: 0.5rem 0.75rem; border-radius: 6px; }
+ .muted { color: #888; font-size: 0.85rem; }
+ .review { border-color: #ffe082; background: #fffdf5; }
+ .review li { margin: 0.25rem 0; word-break: break-all; }
+</style>
+</head>
+<body>
+ <h1>name requests</h1>
+ <p><a href="/">← back to wallet</a></p>
+ {{if .Message}}<p class="msg">{{.Message}}</p>{{end}}
+ {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+
+ {{with .Step}}
+ <div class="card review">
+   {{if .Signed}}
+   <h2>Signed as {{range $index, $role := .Signed}}{{if $index}} and {{end}}{{$role}}{{end}}</h2>
+   {{else}}
+   <h2>Draft: nothing is signed yet</h2>
+   {{end}}
+   <ul>{{range .Facts}}<li>{{.}}</li>{{end}}</ul>
+   <textarea readonly rows="6">{{.Text}}</textarea>
+   <p class="muted">Nothing was sent. Hand this text to the next signer, who signs it on this page in
+   their own wallet. Whoever holds the request with every signature submits it below. A request that
+   misses its block is drafted and signed again.</p>
+ </div>
+ {{end}}
+
+ <div class="card">
+   <div>{{if .Name}}your name: <strong>{{.Name}}</strong>{{else if .Verified}}<strong>not registered</strong>{{else}}<strong>No verified state</strong>: this page cannot show your name.{{end}}</div>
+   <div class="muted" style="margin-top:0.4rem;">your key: <span class="key">{{.Fingerprint}}</span>
+     <button type="button" class="small" data-key="{{.PublicKey}}" onclick="navigator.clipboard.writeText(this.dataset.key)">copy my full key</button></div>
+   <div class="muted" style="margin-top:0.4rem;">your hash name, for a wallet that wants no name of its own: <strong>{{.HashName}}</strong></div>
+ </div>
+
+ <div class="card">
+   <h2>1. Draft</h2>
+   <p class="muted">The draft fills in what the ledger says, signs nothing, and shows the request as
+   text. Each request costs the new key fee{{if .Fee}}, {{.Fee}}{{end}}, paid by its requestor.</p>
+   <form method="post" action="/requests">
+     <input type="hidden" name="step" value="draft">
+     <label for="kind">request</label>
+     <select id="kind" name="kind">
+       <option value="registration">registration: bind this wallet's key to a name</option>
+       <option value="key-change">key change or sale: move my name to another wallet's key</option>
+       <option value="bank-change">bank change: move my name to another bank</option>
+     </select>
+     <label for="name">registration: the name to register (blank for your hash name)</label>
+     <input type="text" id="name" name="name" placeholder="e.g. alice, or {{.HashName}}">
+     <label for="requestor">registration: the requestor, who pays the fee (often your bank)</label>
+     <input type="text" id="requestor" name="requestor" placeholder="e.g. bank-a">
+     <label for="newKey">key change: the new wallet's full key (it copies it from its own page)</label>
+     <textarea id="newKey" name="newKey" rows="2"></textarea>
+     <label for="bank">bank change: the new bank</label>
+     <input type="text" id="bank" name="bank" placeholder="e.g. bank-b">
+     <label for="lead">blocks the signers need (at most {{.MaxLead}})</label>
+     <input type="text" id="lead" name="lead" placeholder="{{.Lead}}">
+     <button type="submit">Draft request</button>
+   </form>
+ </div>
+
+ <div class="card">
+   <h2>2. Sign</h2>
+   <p class="muted">Paste request text, your own draft or one handed to you. The wallet checks it
+   against the ledger and signs every role it holds: requestor, bank, or new key.</p>
+   <p class="warn">Signing as a bank: co-sign only after checking the holder in person or by a second
+   channel. Before you submit or hand on what you signed, check that its new key, if it has one, has
+   the fingerprint the new key's own wallet page shows as "your key".</p>
+   <form method="post" action="/requests">
+     <input type="hidden" name="step" value="sign">
+     <textarea name="request" rows="4" required></textarea>
+     <button type="submit">Sign my roles</button>
+   </form>
+ </div>
+
+ <div class="card">
+   <h2>3. Submit</h2>
+   <form method="post" action="/requests">
+     <input type="hidden" name="step" value="submit">
+     <textarea name="request" rows="4" required></textarea>
+     <button type="submit">Submit request</button>
+   </form>
+ </div>
+
+ {{if .Customers}}
+ <div class="card">
+   <h2>Pending changes on your customers</h2>
+   <p class="muted">Tell each customer. If they did not ask for the change, they freeze their name now.</p>
+   <table>
+     <thead><tr><th>name</th><th>change</th><th>takes effect at block</th></tr></thead>
+     <tbody>
+     {{range .Customers}}<tr><td>{{.Name}}</td><td>{{.Change}}</td><td>{{.At}}</td></tr>{{end}}
+     </tbody>
+   </table>
+ </div>
+ {{end}}
+</body>
+</html>

@@ -1,0 +1,524 @@
+=== RUN   TestNodeRegistersNameViaUpdate
+--- PASS: TestNodeRegistersNameViaUpdate (0.21s)
+=== RUN   TestDeriveValidatorsByStake
+--- PASS: TestDeriveValidatorsByStake (0.00s)
+=== RUN   TestDynamicValidatorAdmission
+--- PASS: TestDynamicValidatorAdmission (0.00s)
+=== RUN   TestIntakeRefusesOversizedPayment
+--- PASS: TestIntakeRefusesOversizedPayment (0.00s)
+=== RUN   TestBackupMirrorsSnapshot
+--- PASS: TestBackupMirrorsSnapshot (0.01s)
+=== RUN   TestMempoolBounds
+--- PASS: TestMempoolBounds (0.00s)
+=== RUN   TestStragglerCatchUp
+--- PASS: TestStragglerCatchUp (0.00s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:322: chaos scenarios skipped in -short
+--- SKIP: TestChaosLossDupReorderKeepsAgreementAndProgress (0.00s)
+=== RUN   TestChaosLostProposalRecoversViaReGossip
+    chaos_test.go:401: chaos scenarios skipped in -short
+--- SKIP: TestChaosLostProposalRecoversViaReGossip (0.00s)
+=== RUN   TestChaosMinorityPartitionCannotProgressOrFork
+    chaos_test.go:466: chaos scenarios skipped in -short
+--- SKIP: TestChaosMinorityPartitionCannotProgressOrFork (0.00s)
+=== RUN   TestChaos2x2PartitionFreezesThenRecovers
+    chaos_test.go:516: chaos scenarios skipped in -short
+--- SKIP: TestChaos2x2PartitionFreezesThenRecovers (0.00s)
+=== RUN   TestChaosGossipIsolatedNodeTracksViaCheckpoints
+    chaos_test.go:550: chaos scenarios skipped in -short
+--- SKIP: TestChaosGossipIsolatedNodeTracksViaCheckpoints (0.00s)
+=== RUN   TestChaosEquivocatorIsSlashedWithoutFork
+    chaos_test.go:600: chaos scenarios skipped in -short
+--- SKIP: TestChaosEquivocatorIsSlashedWithoutFork (0.00s)
+=== RUN   TestChaosGovernanceCycleReplayStaysInert
+    chaos_test.go:675: chaos scenarios skipped in -short
+--- SKIP: TestChaosGovernanceCycleReplayStaysInert (0.00s)
+=== RUN   TestChaosDynamicAdmissionConverges
+    chaos_test.go:741: chaos scenarios skipped in -short
+--- SKIP: TestChaosDynamicAdmissionConverges (0.00s)
+=== RUN   TestChaosSoak
+    chaos_test.go:788: chaos scenarios skipped in -short
+--- SKIP: TestChaosSoak (0.00s)
+=== RUN   TestNodeEnactsParameterChangeByVote
+--- PASS: TestNodeEnactsParameterChangeByVote (0.03s)
+=== RUN   TestNodesReachConsensusOverHTTP
+--- PASS: TestNodesReachConsensusOverHTTP (0.08s)
+=== RUN   TestResolveEndpointServesNameAndAddress
+--- PASS: TestResolveEndpointServesNameAndAddress (0.00s)
+=== RUN   TestResolveToleratesRawPlusInKey
+--- PASS: TestResolveToleratesRawPlusInKey (0.00s)
+=== RUN   TestZeroBlockIntervalDoesNotRecurse
+--- PASS: TestZeroBlockIntervalDoesNotRecurse (0.04s)
+=== RUN   TestMempoolDedupsMalleatedDuplicate
+--- PASS: TestMempoolDedupsMalleatedDuplicate (0.00s)
+=== RUN   TestNodesReachConsensusAndApplyPayment
+--- PASS: TestNodesReachConsensusAndApplyPayment (0.02s)
+=== RUN   TestVerifyCheckpointSkippingTrust
+--- PASS: TestVerifyCheckpointSkippingTrust (0.00s)
+=== RUN   TestIntakeRefusesOverdraw
+--- PASS: TestIntakeRefusesOverdraw (0.00s)
+=== RUN   TestIntakeRefusesUnresolvableRecipient
+--- PASS: TestIntakeRefusesUnresolvableRecipient (0.00s)
+=== RUN   TestMempoolDropsOverdrawnOnBalanceDrop
+--- PASS: TestMempoolDropsOverdrawnOnBalanceDrop (0.00s)
+=== RUN   TestResolvePeersFromOnChainAddresses
+--- PASS: TestResolvePeersFromOnChainAddresses (0.00s)
+=== RUN   TestNodePersistsAndReloads
+--- PASS: TestNodePersistsAndReloads (0.08s)
+=== RUN   TestOnProposalRelaysFirstSightOnlyNeverDuplicates
+--- PASS: TestOnProposalRelaysFirstSightOnlyNeverDuplicates (0.00s)
+=== RUN   TestNodeEnactsReassignmentByVote
+--- PASS: TestNodeEnactsReassignmentByVote (0.03s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (4.26s)
+=== RUN   TestNodeSyncsFromCheckpoint
+--- PASS: TestNodeSyncsFromCheckpoint (0.05s)
+=== RUN   TestNodeRejectsUnverifiableCheckpoint
+--- PASS: TestNodeRejectsUnverifiableCheckpoint (0.32s)
+=== RUN   TestFullMeshNeighbors
+--- PASS: TestFullMeshNeighbors (0.00s)
+=== RUN   TestGroupParametersScalesDimension
+--- PASS: TestGroupParametersScalesDimension (0.00s)
+=== RUN   TestHypercubeConnectedAndReducesFanout
+--- PASS: TestHypercubeConnectedAndReducesFanout (0.00s)
+=== RUN   TestConsensusOverHypercubeTopology
+--- PASS: TestConsensusOverHypercubeTopology (0.05s)
+=== RUN   TestDeriveValidatorsSaturatesHugeStake
+--- PASS: TestDeriveValidatorsSaturatesHugeStake (0.00s)
+=== RUN   TestNodeRegistersNameViaUpdate
+--- PASS: TestNodeRegistersNameViaUpdate (0.21s)
+=== RUN   TestDeriveValidatorsByStake
+--- PASS: TestDeriveValidatorsByStake (0.00s)
+=== RUN   TestDynamicValidatorAdmission
+--- PASS: TestDynamicValidatorAdmission (0.00s)
+=== RUN   TestIntakeRefusesOversizedPayment
+--- PASS: TestIntakeRefusesOversizedPayment (0.00s)
+=== RUN   TestBackupMirrorsSnapshot
+--- PASS: TestBackupMirrorsSnapshot (0.01s)
+=== RUN   TestMempoolBounds
+--- PASS: TestMempoolBounds (0.00s)
+=== RUN   TestStragglerCatchUp
+--- PASS: TestStragglerCatchUp (0.00s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:322: chaos scenarios skipped in -short
+--- SKIP: TestChaosLossDupReorderKeepsAgreementAndProgress (0.00s)
+=== RUN   TestChaosLostProposalRecoversViaReGossip
+    chaos_test.go:401: chaos scenarios skipped in -short
+--- SKIP: TestChaosLostProposalRecoversViaReGossip (0.00s)
+=== RUN   TestChaosMinorityPartitionCannotProgressOrFork
+    chaos_test.go:466: chaos scenarios skipped in -short
+--- SKIP: TestChaosMinorityPartitionCannotProgressOrFork (0.00s)
+=== RUN   TestChaos2x2PartitionFreezesThenRecovers
+    chaos_test.go:516: chaos scenarios skipped in -short
+--- SKIP: TestChaos2x2PartitionFreezesThenRecovers (0.00s)
+=== RUN   TestChaosGossipIsolatedNodeTracksViaCheckpoints
+    chaos_test.go:550: chaos scenarios skipped in -short
+--- SKIP: TestChaosGossipIsolatedNodeTracksViaCheckpoints (0.00s)
+=== RUN   TestChaosEquivocatorIsSlashedWithoutFork
+    chaos_test.go:600: chaos scenarios skipped in -short
+--- SKIP: TestChaosEquivocatorIsSlashedWithoutFork (0.00s)
+=== RUN   TestChaosGovernanceCycleReplayStaysInert
+    chaos_test.go:675: chaos scenarios skipped in -short
+--- SKIP: TestChaosGovernanceCycleReplayStaysInert (0.00s)
+=== RUN   TestChaosDynamicAdmissionConverges
+    chaos_test.go:741: chaos scenarios skipped in -short
+--- SKIP: TestChaosDynamicAdmissionConverges (0.00s)
+=== RUN   TestChaosSoak
+    chaos_test.go:788: chaos scenarios skipped in -short
+--- SKIP: TestChaosSoak (0.00s)
+=== RUN   TestNodeEnactsParameterChangeByVote
+--- PASS: TestNodeEnactsParameterChangeByVote (0.03s)
+=== RUN   TestNodesReachConsensusOverHTTP
+--- PASS: TestNodesReachConsensusOverHTTP (0.03s)
+=== RUN   TestResolveEndpointServesNameAndAddress
+--- PASS: TestResolveEndpointServesNameAndAddress (0.00s)
+=== RUN   TestResolveToleratesRawPlusInKey
+--- PASS: TestResolveToleratesRawPlusInKey (0.00s)
+=== RUN   TestZeroBlockIntervalDoesNotRecurse
+--- PASS: TestZeroBlockIntervalDoesNotRecurse (0.04s)
+=== RUN   TestMempoolDedupsMalleatedDuplicate
+--- PASS: TestMempoolDedupsMalleatedDuplicate (0.00s)
+=== RUN   TestNodesReachConsensusAndApplyPayment
+--- PASS: TestNodesReachConsensusAndApplyPayment (0.02s)
+=== RUN   TestVerifyCheckpointSkippingTrust
+--- PASS: TestVerifyCheckpointSkippingTrust (0.00s)
+=== RUN   TestIntakeRefusesOverdraw
+--- PASS: TestIntakeRefusesOverdraw (0.00s)
+=== RUN   TestIntakeRefusesUnresolvableRecipient
+--- PASS: TestIntakeRefusesUnresolvableRecipient (0.00s)
+=== RUN   TestMempoolDropsOverdrawnOnBalanceDrop
+--- PASS: TestMempoolDropsOverdrawnOnBalanceDrop (0.00s)
+=== RUN   TestResolvePeersFromOnChainAddresses
+--- PASS: TestResolvePeersFromOnChainAddresses (0.00s)
+=== RUN   TestNodePersistsAndReloads
+--- PASS: TestNodePersistsAndReloads (0.09s)
+=== RUN   TestOnProposalRelaysFirstSightOnlyNeverDuplicates
+--- PASS: TestOnProposalRelaysFirstSightOnlyNeverDuplicates (0.00s)
+=== RUN   TestNodeEnactsReassignmentByVote
+--- PASS: TestNodeEnactsReassignmentByVote (0.03s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.89s)
+=== RUN   TestNodeSyncsFromCheckpoint
+--- PASS: TestNodeSyncsFromCheckpoint (0.03s)
+=== RUN   TestNodeRejectsUnverifiableCheckpoint
+--- PASS: TestNodeRejectsUnverifiableCheckpoint (0.33s)
+=== RUN   TestFullMeshNeighbors
+--- PASS: TestFullMeshNeighbors (0.00s)
+=== RUN   TestGroupParametersScalesDimension
+--- PASS: TestGroupParametersScalesDimension (0.00s)
+=== RUN   TestHypercubeConnectedAndReducesFanout
+--- PASS: TestHypercubeConnectedAndReducesFanout (0.00s)
+=== RUN   TestConsensusOverHypercubeTopology
+--- PASS: TestConsensusOverHypercubeTopology (0.05s)
+=== RUN   TestDeriveValidatorsSaturatesHugeStake
+--- PASS: TestDeriveValidatorsSaturatesHugeStake (0.00s)
+=== RUN   TestNodeRegistersNameViaUpdate
+--- PASS: TestNodeRegistersNameViaUpdate (0.21s)
+=== RUN   TestDeriveValidatorsByStake
+--- PASS: TestDeriveValidatorsByStake (0.00s)
+=== RUN   TestDynamicValidatorAdmission
+--- PASS: TestDynamicValidatorAdmission (0.00s)
+=== RUN   TestIntakeRefusesOversizedPayment
+--- PASS: TestIntakeRefusesOversizedPayment (0.00s)
+=== RUN   TestBackupMirrorsSnapshot
+--- PASS: TestBackupMirrorsSnapshot (0.01s)
+=== RUN   TestMempoolBounds
+--- PASS: TestMempoolBounds (0.00s)
+=== RUN   TestStragglerCatchUp
+--- PASS: TestStragglerCatchUp (0.00s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:322: chaos scenarios skipped in -short
+--- SKIP: TestChaosLossDupReorderKeepsAgreementAndProgress (0.00s)
+=== RUN   TestChaosLostProposalRecoversViaReGossip
+    chaos_test.go:401: chaos scenarios skipped in -short
+--- SKIP: TestChaosLostProposalRecoversViaReGossip (0.00s)
+=== RUN   TestChaosMinorityPartitionCannotProgressOrFork
+    chaos_test.go:466: chaos scenarios skipped in -short
+--- SKIP: TestChaosMinorityPartitionCannotProgressOrFork (0.00s)
+=== RUN   TestChaos2x2PartitionFreezesThenRecovers
+    chaos_test.go:516: chaos scenarios skipped in -short
+--- SKIP: TestChaos2x2PartitionFreezesThenRecovers (0.00s)
+=== RUN   TestChaosGossipIsolatedNodeTracksViaCheckpoints
+    chaos_test.go:550: chaos scenarios skipped in -short
+--- SKIP: TestChaosGossipIsolatedNodeTracksViaCheckpoints (0.00s)
+=== RUN   TestChaosEquivocatorIsSlashedWithoutFork
+    chaos_test.go:600: chaos scenarios skipped in -short
+--- SKIP: TestChaosEquivocatorIsSlashedWithoutFork (0.00s)
+=== RUN   TestChaosGovernanceCycleReplayStaysInert
+    chaos_test.go:675: chaos scenarios skipped in -short
+--- SKIP: TestChaosGovernanceCycleReplayStaysInert (0.00s)
+=== RUN   TestChaosDynamicAdmissionConverges
+    chaos_test.go:741: chaos scenarios skipped in -short
+--- SKIP: TestChaosDynamicAdmissionConverges (0.00s)
+=== RUN   TestChaosSoak
+    chaos_test.go:788: chaos scenarios skipped in -short
+--- SKIP: TestChaosSoak (0.00s)
+=== RUN   TestNodeEnactsParameterChangeByVote
+--- PASS: TestNodeEnactsParameterChangeByVote (0.03s)
+=== RUN   TestNodesReachConsensusOverHTTP
+--- PASS: TestNodesReachConsensusOverHTTP (0.03s)
+=== RUN   TestResolveEndpointServesNameAndAddress
+--- PASS: TestResolveEndpointServesNameAndAddress (0.00s)
+=== RUN   TestResolveToleratesRawPlusInKey
+--- PASS: TestResolveToleratesRawPlusInKey (0.00s)
+=== RUN   TestZeroBlockIntervalDoesNotRecurse
+--- PASS: TestZeroBlockIntervalDoesNotRecurse (0.04s)
+=== RUN   TestMempoolDedupsMalleatedDuplicate
+--- PASS: TestMempoolDedupsMalleatedDuplicate (0.00s)
+=== RUN   TestNodesReachConsensusAndApplyPayment
+--- PASS: TestNodesReachConsensusAndApplyPayment (0.02s)
+=== RUN   TestVerifyCheckpointSkippingTrust
+--- PASS: TestVerifyCheckpointSkippingTrust (0.00s)
+=== RUN   TestIntakeRefusesOverdraw
+--- PASS: TestIntakeRefusesOverdraw (0.00s)
+=== RUN   TestIntakeRefusesUnresolvableRecipient
+--- PASS: TestIntakeRefusesUnresolvableRecipient (0.00s)
+=== RUN   TestMempoolDropsOverdrawnOnBalanceDrop
+--- PASS: TestMempoolDropsOverdrawnOnBalanceDrop (0.00s)
+=== RUN   TestResolvePeersFromOnChainAddresses
+--- PASS: TestResolvePeersFromOnChainAddresses (0.00s)
+=== RUN   TestNodePersistsAndReloads
+--- PASS: TestNodePersistsAndReloads (0.09s)
+=== RUN   TestOnProposalRelaysFirstSightOnlyNeverDuplicates
+--- PASS: TestOnProposalRelaysFirstSightOnlyNeverDuplicates (0.00s)
+=== RUN   TestNodeEnactsReassignmentByVote
+--- PASS: TestNodeEnactsReassignmentByVote (0.03s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.86s)
+=== RUN   TestNodeSyncsFromCheckpoint
+--- PASS: TestNodeSyncsFromCheckpoint (0.04s)
+=== RUN   TestNodeRejectsUnverifiableCheckpoint
+--- PASS: TestNodeRejectsUnverifiableCheckpoint (0.33s)
+=== RUN   TestFullMeshNeighbors
+--- PASS: TestFullMeshNeighbors (0.00s)
+=== RUN   TestGroupParametersScalesDimension
+--- PASS: TestGroupParametersScalesDimension (0.00s)
+=== RUN   TestHypercubeConnectedAndReducesFanout
+--- PASS: TestHypercubeConnectedAndReducesFanout (0.00s)
+=== RUN   TestConsensusOverHypercubeTopology
+--- PASS: TestConsensusOverHypercubeTopology (0.04s)
+=== RUN   TestDeriveValidatorsSaturatesHugeStake
+--- PASS: TestDeriveValidatorsSaturatesHugeStake (0.00s)
+=== RUN   TestNodeRegistersNameViaUpdate
+--- PASS: TestNodeRegistersNameViaUpdate (0.21s)
+=== RUN   TestDeriveValidatorsByStake
+--- PASS: TestDeriveValidatorsByStake (0.00s)
+=== RUN   TestDynamicValidatorAdmission
+--- PASS: TestDynamicValidatorAdmission (0.00s)
+=== RUN   TestIntakeRefusesOversizedPayment
+--- PASS: TestIntakeRefusesOversizedPayment (0.00s)
+=== RUN   TestBackupMirrorsSnapshot
+--- PASS: TestBackupMirrorsSnapshot (0.01s)
+=== RUN   TestMempoolBounds
+--- PASS: TestMempoolBounds (0.00s)
+=== RUN   TestStragglerCatchUp
+--- PASS: TestStragglerCatchUp (0.00s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:322: chaos scenarios skipped in -short
+--- SKIP: TestChaosLossDupReorderKeepsAgreementAndProgress (0.00s)
+=== RUN   TestChaosLostProposalRecoversViaReGossip
+    chaos_test.go:401: chaos scenarios skipped in -short
+--- SKIP: TestChaosLostProposalRecoversViaReGossip (0.00s)
+=== RUN   TestChaosMinorityPartitionCannotProgressOrFork
+    chaos_test.go:466: chaos scenarios skipped in -short
+--- SKIP: TestChaosMinorityPartitionCannotProgressOrFork (0.00s)
+=== RUN   TestChaos2x2PartitionFreezesThenRecovers
+    chaos_test.go:516: chaos scenarios skipped in -short
+--- SKIP: TestChaos2x2PartitionFreezesThenRecovers (0.00s)
+=== RUN   TestChaosGossipIsolatedNodeTracksViaCheckpoints
+    chaos_test.go:550: chaos scenarios skipped in -short
+--- SKIP: TestChaosGossipIsolatedNodeTracksViaCheckpoints (0.00s)
+=== RUN   TestChaosEquivocatorIsSlashedWithoutFork
+    chaos_test.go:600: chaos scenarios skipped in -short
+--- SKIP: TestChaosEquivocatorIsSlashedWithoutFork (0.00s)
+=== RUN   TestChaosGovernanceCycleReplayStaysInert
+    chaos_test.go:675: chaos scenarios skipped in -short
+--- SKIP: TestChaosGovernanceCycleReplayStaysInert (0.00s)
+=== RUN   TestChaosDynamicAdmissionConverges
+    chaos_test.go:741: chaos scenarios skipped in -short
+--- SKIP: TestChaosDynamicAdmissionConverges (0.00s)
+=== RUN   TestChaosSoak
+    chaos_test.go:788: chaos scenarios skipped in -short
+--- SKIP: TestChaosSoak (0.00s)
+=== RUN   TestNodeEnactsParameterChangeByVote
+--- PASS: TestNodeEnactsParameterChangeByVote (0.03s)
+=== RUN   TestNodesReachConsensusOverHTTP
+--- PASS: TestNodesReachConsensusOverHTTP (0.04s)
+=== RUN   TestResolveEndpointServesNameAndAddress
+--- PASS: TestResolveEndpointServesNameAndAddress (0.00s)
+=== RUN   TestResolveToleratesRawPlusInKey
+--- PASS: TestResolveToleratesRawPlusInKey (0.00s)
+=== RUN   TestZeroBlockIntervalDoesNotRecurse
+--- PASS: TestZeroBlockIntervalDoesNotRecurse (0.05s)
+=== RUN   TestMempoolDedupsMalleatedDuplicate
+--- PASS: TestMempoolDedupsMalleatedDuplicate (0.00s)
+=== RUN   TestNodesReachConsensusAndApplyPayment
+--- PASS: TestNodesReachConsensusAndApplyPayment (0.02s)
+=== RUN   TestVerifyCheckpointSkippingTrust
+--- PASS: TestVerifyCheckpointSkippingTrust (0.00s)
+=== RUN   TestIntakeRefusesOverdraw
+--- PASS: TestIntakeRefusesOverdraw (0.00s)
+=== RUN   TestIntakeRefusesUnresolvableRecipient
+--- PASS: TestIntakeRefusesUnresolvableRecipient (0.00s)
+=== RUN   TestMempoolDropsOverdrawnOnBalanceDrop
+--- PASS: TestMempoolDropsOverdrawnOnBalanceDrop (0.00s)
+=== RUN   TestResolvePeersFromOnChainAddresses
+--- PASS: TestResolvePeersFromOnChainAddresses (0.00s)
+=== RUN   TestNodePersistsAndReloads
+--- PASS: TestNodePersistsAndReloads (0.09s)
+=== RUN   TestOnProposalRelaysFirstSightOnlyNeverDuplicates
+--- PASS: TestOnProposalRelaysFirstSightOnlyNeverDuplicates (0.00s)
+=== RUN   TestNodeEnactsReassignmentByVote
+--- PASS: TestNodeEnactsReassignmentByVote (0.03s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.90s)
+=== RUN   TestNodeSyncsFromCheckpoint
+--- PASS: TestNodeSyncsFromCheckpoint (0.04s)
+=== RUN   TestNodeRejectsUnverifiableCheckpoint
+--- PASS: TestNodeRejectsUnverifiableCheckpoint (0.33s)
+=== RUN   TestFullMeshNeighbors
+--- PASS: TestFullMeshNeighbors (0.00s)
+=== RUN   TestGroupParametersScalesDimension
+--- PASS: TestGroupParametersScalesDimension (0.00s)
+=== RUN   TestHypercubeConnectedAndReducesFanout
+--- PASS: TestHypercubeConnectedAndReducesFanout (0.00s)
+=== RUN   TestConsensusOverHypercubeTopology
+--- PASS: TestConsensusOverHypercubeTopology (0.05s)
+=== RUN   TestDeriveValidatorsSaturatesHugeStake
+--- PASS: TestDeriveValidatorsSaturatesHugeStake (0.00s)
+=== RUN   TestNodeRegistersNameViaUpdate
+--- PASS: TestNodeRegistersNameViaUpdate (0.21s)
+=== RUN   TestDeriveValidatorsByStake
+--- PASS: TestDeriveValidatorsByStake (0.00s)
+=== RUN   TestDynamicValidatorAdmission
+--- PASS: TestDynamicValidatorAdmission (0.00s)
+=== RUN   TestIntakeRefusesOversizedPayment
+--- PASS: TestIntakeRefusesOversizedPayment (0.00s)
+=== RUN   TestBackupMirrorsSnapshot
+--- PASS: TestBackupMirrorsSnapshot (0.01s)
+=== RUN   TestMempoolBounds
+--- PASS: TestMempoolBounds (0.00s)
+=== RUN   TestStragglerCatchUp
+--- PASS: TestStragglerCatchUp (0.00s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:322: chaos scenarios skipped in -short
+--- SKIP: TestChaosLossDupReorderKeepsAgreementAndProgress (0.00s)
+=== RUN   TestChaosLostProposalRecoversViaReGossip
+    chaos_test.go:401: chaos scenarios skipped in -short
+--- SKIP: TestChaosLostProposalRecoversViaReGossip (0.00s)
+=== RUN   TestChaosMinorityPartitionCannotProgressOrFork
+    chaos_test.go:466: chaos scenarios skipped in -short
+--- SKIP: TestChaosMinorityPartitionCannotProgressOrFork (0.00s)
+=== RUN   TestChaos2x2PartitionFreezesThenRecovers
+    chaos_test.go:516: chaos scenarios skipped in -short
+--- SKIP: TestChaos2x2PartitionFreezesThenRecovers (0.00s)
+=== RUN   TestChaosGossipIsolatedNodeTracksViaCheckpoints
+    chaos_test.go:550: chaos scenarios skipped in -short
+--- SKIP: TestChaosGossipIsolatedNodeTracksViaCheckpoints (0.00s)
+=== RUN   TestChaosEquivocatorIsSlashedWithoutFork
+    chaos_test.go:600: chaos scenarios skipped in -short
+--- SKIP: TestChaosEquivocatorIsSlashedWithoutFork (0.00s)
+=== RUN   TestChaosGovernanceCycleReplayStaysInert
+    chaos_test.go:675: chaos scenarios skipped in -short
+--- SKIP: TestChaosGovernanceCycleReplayStaysInert (0.00s)
+=== RUN   TestChaosDynamicAdmissionConverges
+    chaos_test.go:741: chaos scenarios skipped in -short
+--- SKIP: TestChaosDynamicAdmissionConverges (0.00s)
+=== RUN   TestChaosSoak
+    chaos_test.go:788: chaos scenarios skipped in -short
+--- SKIP: TestChaosSoak (0.00s)
+=== RUN   TestNodeEnactsParameterChangeByVote
+--- PASS: TestNodeEnactsParameterChangeByVote (0.03s)
+=== RUN   TestNodesReachConsensusOverHTTP
+--- PASS: TestNodesReachConsensusOverHTTP (0.03s)
+=== RUN   TestResolveEndpointServesNameAndAddress
+--- PASS: TestResolveEndpointServesNameAndAddress (0.00s)
+=== RUN   TestResolveToleratesRawPlusInKey
+--- PASS: TestResolveToleratesRawPlusInKey (0.00s)
+=== RUN   TestZeroBlockIntervalDoesNotRecurse
+--- PASS: TestZeroBlockIntervalDoesNotRecurse (0.04s)
+=== RUN   TestMempoolDedupsMalleatedDuplicate
+--- PASS: TestMempoolDedupsMalleatedDuplicate (0.00s)
+=== RUN   TestNodesReachConsensusAndApplyPayment
+--- PASS: TestNodesReachConsensusAndApplyPayment (0.02s)
+=== RUN   TestVerifyCheckpointSkippingTrust
+--- PASS: TestVerifyCheckpointSkippingTrust (0.00s)
+=== RUN   TestIntakeRefusesOverdraw
+--- PASS: TestIntakeRefusesOverdraw (0.00s)
+=== RUN   TestIntakeRefusesUnresolvableRecipient
+--- PASS: TestIntakeRefusesUnresolvableRecipient (0.00s)
+=== RUN   TestMempoolDropsOverdrawnOnBalanceDrop
+--- PASS: TestMempoolDropsOverdrawnOnBalanceDrop (0.00s)
+=== RUN   TestResolvePeersFromOnChainAddresses
+--- PASS: TestResolvePeersFromOnChainAddresses (0.00s)
+=== RUN   TestNodePersistsAndReloads
+--- PASS: TestNodePersistsAndReloads (0.08s)
+=== RUN   TestOnProposalRelaysFirstSightOnlyNeverDuplicates
+--- PASS: TestOnProposalRelaysFirstSightOnlyNeverDuplicates (0.00s)
+=== RUN   TestNodeEnactsReassignmentByVote
+--- PASS: TestNodeEnactsReassignmentByVote (0.03s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.85s)
+=== RUN   TestNodeSyncsFromCheckpoint
+--- PASS: TestNodeSyncsFromCheckpoint (0.04s)
+=== RUN   TestNodeRejectsUnverifiableCheckpoint
+--- PASS: TestNodeRejectsUnverifiableCheckpoint (0.32s)
+=== RUN   TestFullMeshNeighbors
+--- PASS: TestFullMeshNeighbors (0.00s)
+=== RUN   TestGroupParametersScalesDimension
+--- PASS: TestGroupParametersScalesDimension (0.00s)
+=== RUN   TestHypercubeConnectedAndReducesFanout
+--- PASS: TestHypercubeConnectedAndReducesFanout (0.00s)
+=== RUN   TestConsensusOverHypercubeTopology
+--- PASS: TestConsensusOverHypercubeTopology (0.03s)
+=== RUN   TestDeriveValidatorsSaturatesHugeStake
+--- PASS: TestDeriveValidatorsSaturatesHugeStake (0.00s)
+=== RUN   TestNodeRegistersNameViaUpdate
+--- PASS: TestNodeRegistersNameViaUpdate (0.21s)
+=== RUN   TestDeriveValidatorsByStake
+--- PASS: TestDeriveValidatorsByStake (0.00s)
+=== RUN   TestDynamicValidatorAdmission
+--- PASS: TestDynamicValidatorAdmission (0.00s)
+=== RUN   TestIntakeRefusesOversizedPayment
+--- PASS: TestIntakeRefusesOversizedPayment (0.00s)
+=== RUN   TestBackupMirrorsSnapshot
+--- PASS: TestBackupMirrorsSnapshot (0.01s)
+=== RUN   TestMempoolBounds
+--- PASS: TestMempoolBounds (0.00s)
+=== RUN   TestStragglerCatchUp
+--- PASS: TestStragglerCatchUp (0.00s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:322: chaos scenarios skipped in -short
+--- SKIP: TestChaosLossDupReorderKeepsAgreementAndProgress (0.00s)
+=== RUN   TestChaosLostProposalRecoversViaReGossip
+    chaos_test.go:401: chaos scenarios skipped in -short
+--- SKIP: TestChaosLostProposalRecoversViaReGossip (0.00s)
+=== RUN   TestChaosMinorityPartitionCannotProgressOrFork
+    chaos_test.go:466: chaos scenarios skipped in -short
+--- SKIP: TestChaosMinorityPartitionCannotProgressOrFork (0.00s)
+=== RUN   TestChaos2x2PartitionFreezesThenRecovers
+    chaos_test.go:516: chaos scenarios skipped in -short
+--- SKIP: TestChaos2x2PartitionFreezesThenRecovers (0.00s)
+=== RUN   TestChaosGossipIsolatedNodeTracksViaCheckpoints
+    chaos_test.go:550: chaos scenarios skipped in -short
+--- SKIP: TestChaosGossipIsolatedNodeTracksViaCheckpoints (0.00s)
+=== RUN   TestChaosEquivocatorIsSlashedWithoutFork
+    chaos_test.go:600: chaos scenarios skipped in -short
+--- SKIP: TestChaosEquivocatorIsSlashedWithoutFork (0.00s)
+=== RUN   TestChaosGovernanceCycleReplayStaysInert
+    chaos_test.go:675: chaos scenarios skipped in -short
+--- SKIP: TestChaosGovernanceCycleReplayStaysInert (0.00s)
+=== RUN   TestChaosDynamicAdmissionConverges
+    chaos_test.go:741: chaos scenarios skipped in -short
+--- SKIP: TestChaosDynamicAdmissionConverges (0.00s)
+=== RUN   TestChaosSoak
+    chaos_test.go:788: chaos scenarios skipped in -short
+--- SKIP: TestChaosSoak (0.00s)
+=== RUN   TestNodeEnactsParameterChangeByVote
+--- PASS: TestNodeEnactsParameterChangeByVote (0.03s)
+=== RUN   TestNodesReachConsensusOverHTTP
+--- PASS: TestNodesReachConsensusOverHTTP (0.02s)
+=== RUN   TestResolveEndpointServesNameAndAddress
+--- PASS: TestResolveEndpointServesNameAndAddress (0.00s)
+=== RUN   TestResolveToleratesRawPlusInKey
+--- PASS: TestResolveToleratesRawPlusInKey (0.00s)
+=== RUN   TestZeroBlockIntervalDoesNotRecurse
+--- PASS: TestZeroBlockIntervalDoesNotRecurse (0.05s)
+=== RUN   TestMempoolDedupsMalleatedDuplicate
+--- PASS: TestMempoolDedupsMalleatedDuplicate (0.00s)
+=== RUN   TestNodesReachConsensusAndApplyPayment
+--- PASS: TestNodesReachConsensusAndApplyPayment (0.02s)
+=== RUN   TestVerifyCheckpointSkippingTrust
+--- PASS: TestVerifyCheckpointSkippingTrust (0.00s)
+=== RUN   TestIntakeRefusesOverdraw
+--- PASS: TestIntakeRefusesOverdraw (0.00s)
+=== RUN   TestIntakeRefusesUnresolvableRecipient
+--- PASS: TestIntakeRefusesUnresolvableRecipient (0.00s)
+=== RUN   TestMempoolDropsOverdrawnOnBalanceDrop
+--- PASS: TestMempoolDropsOverdrawnOnBalanceDrop (0.00s)
+=== RUN   TestResolvePeersFromOnChainAddresses
+--- PASS: TestResolvePeersFromOnChainAddresses (0.00s)
+=== RUN   TestNodePersistsAndReloads
+--- PASS: TestNodePersistsAndReloads (0.09s)
+=== RUN   TestOnProposalRelaysFirstSightOnlyNeverDuplicates
+--- PASS: TestOnProposalRelaysFirstSightOnlyNeverDuplicates (0.00s)
+=== RUN   TestNodeEnactsReassignmentByVote
+--- PASS: TestNodeEnactsReassignmentByVote (0.03s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (6.57s)
+=== RUN   TestNodeSyncsFromCheckpoint
+--- PASS: TestNodeSyncsFromCheckpoint (0.04s)
+=== RUN   TestNodeRejectsUnverifiableCheckpoint
+--- PASS: TestNodeRejectsUnverifiableCheckpoint (0.33s)
+=== RUN   TestFullMeshNeighbors
+--- PASS: TestFullMeshNeighbors (0.00s)
+=== RUN   TestGroupParametersScalesDimension
+--- PASS: TestGroupParametersScalesDimension (0.00s)
+=== RUN   TestHypercubeConnectedAndReducesFanout
+--- PASS: TestHypercubeConnectedAndReducesFanout (0.00s)
+=== RUN   TestConsensusOverHypercubeTopology
+--- PASS: TestConsensusOverHypercubeTopology (0.03s)
+=== RUN   TestDeriveValidatorsSaturatesHugeStake
+--- PASS: TestDeriveValidatorsSaturatesHugeStake (0.00s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/node	23.777s

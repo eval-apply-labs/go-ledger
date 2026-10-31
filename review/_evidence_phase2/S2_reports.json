@@ -1,0 +1,156 @@
+{
+ "slice": "S2",
+ "builder": {
+  "branchHead": "ed1bffccbe095f990e3a186dbbfc33f4010005e2",
+  "commits": [
+   {
+    "hash": "54197be",
+    "subject": "phase 2 S2: amounts are plain decimals in JSON and signed fields"
+   },
+   {
+    "hash": "96cf99d",
+    "subject": "phase 2 S2: the state carries its height, and the node takes it from there"
+   },
+   {
+    "hash": "c60eeb0",
+    "subject": "phase 2 S2: the ten parameters, their bounds and DefaultParameters"
+   },
+   {
+    "hash": "81c2cc3",
+    "subject": "phase 2 S2: caps on a single payment and on a balance"
+   },
+   {
+    "hash": "ed1bffc",
+    "subject": "phase 2 S2: the amount comment says below 10^18, not 10^18 units"
+   }
+  ],
+  "summary": "S2 is built on branch p2-s2 in <scratch>/wt/p2-s2, on top of df99946. It has five commits, and each one builds and passes the suite.\n\n1. Amounts (spec 3.3, E6, E7).\n   - `ParseAmount` takes only 1 to 18 digits, optionally followed by a point and 1 to 8 more digits. It builds the value from those digits, so a fraction a/b, a sign, an exponent or another base is never accepted.\n   - `FormatAmount` writes the one canonical form, and \"\" for nil. It replaces `RatString` in payment signatures, reassignment votes, the parameter fields, the accounts digest, the governance view, the reassignment pool key and the admin review text.\n   - `Account`, `Payment`, `Reassignment` and `LedgerParameters` write amounts through value-receiver `MarshalJSON` methods.\n   - A required amount that is null or missing is refused when decoding. Only a reassignment's two amounts may be null.\n\n2. Height (E1, spec 3.1, 3.5, rule 1).\n   - `LedgerState` gains `Height`. The state digest is now lp(\"go-ledger state v2\"), the accounts digest, the parameter digest, the sequence and the height.\n   - `ApplyBlock` accepts only the block at the state's height plus one, and returns a state at that block's height.\n   - The node holds one committed `LedgerState`. Its height in progress is `state.Height + 1`; it keeps no separate counter.\n   - `Config.Genesis` is now a `LedgerState`. `TransactionCost`, `Timeout`, `MinBlockInterval`, `MaxMessageBytes` and `MaxPeers` are gone from `Config` (spec 6.1). The re-gossip interval is the genesis step timeout.\n   - A checkpoint's state is at its commit's height, for the node and the wallet. cmd/server and the demo build the genesis state.\n\n3. Parameters (spec 2.4, 3.4, 3.5).\n   - Five new parameters: `NewKeyFee`, `ChangeDelayBlocks`, `RetainBlocks`, `MaxPaymentAmount`, `MaxAccountBalance`. `MaxPeers` and `MaxMessageBytes` become int64.\n   - `fields()` and the parameter vote cover all ten. The parameter digest is lp(\"go-ledger parameters v2\") followed by the ten fields.\n   - `Acceptable` enforces every floor and ceiling in 3.4 and refuses a nil amount.\n   - `ledger.DefaultParameters()` returns the 2.4 defaults. The demo and the ledger, node and wallet test fixtures start from it.\n   - The governance view shows all ten parameters, both those in force and those of each pooled change, through one `ParametersView`. The admin page shows and drafts all ten and refuses what `Acceptable` refuses. cmd/server reads the five new parameters from the node config; any left out takes its default.\n\n4. Caps (spec 5.6, rules 17 and 23).\n   - `MaxPaymentAmount` is enforced at intake, in `ProposeBlock` and in `ApplyBlock`.\n   - `MaxAccountBalance`: intake checks one payment against the payee's committed balance (`ledger.CreditFitsBalanceCap`). `ProposeBlock` keeps a running balance per payee. `ApplyBlock` enforces rule 23 against the pre-block cap; a new account counts as rising from zero.\n   - `Reassignment.Valid` now takes the pre-block state and refuses a `NewAmount` above the larger of the cap and `PreviousAmount`. The wallet refuses such a reassignment draft before signing.\n\n5. A one-word comment fix in ledger/amount.go.\n\nProof that the tests fail without the change: about 45 behaviours were reverted one at a time in scratch copies under <scratch>/p2-scratch/s2-mut-*, using the scripts in <scratch>/p2-scratch/s2-tools/. Each revert failed at least one new test. Eight older rejection tests were moved to correct pre-block heights; each still fails for its own reason when its check is removed, not because of the height. No time limit was changed.\n\nRewritten old tests: four amount tests (fractions are now refused, null is refused, and the JSON form changed), every node test Config (now built through the `testGenesis` helper), the hand-built test checkpoints (now built through `checkpointOf`), the ledger states (now given an explicit height through `buildLedgerState(height, …)`), and the cmd/server and wallet tests that read the removed fields.",
+  "tests": [
+   {
+    "name": "TestAmountParserRefusesFractionsExponentsAndOverlongDigits (ledger)",
+    "failsWithoutChange": "Yes: run against the parent's parser in a scratch copy, it fails because 1/2, 1/10 and 19-digit integers are accepted."
+   },
+   {
+    "name": "TestAmountsTravelAsPlainDecimals (ledger; a value, a pointer and nested fields)",
+    "failsWithoutChange": "Yes: it fails with pointer-receiver MarshalJSON, with no MarshalJSON at all, and with only the transaction cost written canonically. Each writes a/b."
+   },
+   {
+    "name": "TestRequiredAmountRefusesNull (ledger)",
+    "failsWithoutChange": "Yes: it fails when nil is accepted, and when only TransactionCost is required among the four parameter amounts."
+   },
+   {
+    "name": "TestFormatAmountIsCanonical (ledger)",
+    "failsWithoutChange": "Yes: it fails with RatString as the canonical form."
+   },
+   {
+    "name": "TestSignedFieldsCarryPlainDecimals (ledger)",
+    "failsWithoutChange": "Yes: it fails with RatString in the payment, reassignment-vote and parameter fields."
+   },
+   {
+    "name": "TestApplyBlockRequiresTheNextHeight (ledger)",
+    "failsWithoutChange": "Yes: it fails without the height rule (blocks labelled 1, 3, 4, 6 and 7 apply)."
+   },
+   {
+    "name": "TestStateDigestCoversTheHeight (ledger)",
+    "failsWithoutChange": "Yes: it fails with the height left out of the digest."
+   },
+   {
+    "name": "TestStateDigestLayout (ledger, golden: state and parameter preimages built by hand)",
+    "failsWithoutChange": "Yes: it fails without the height, without the state tag, without the parameters tag, and with only five parameter fields."
+   },
+   {
+    "name": "TestNodeHeightComesFromState (node)",
+    "failsWithoutChange": "Yes: it fails with a height counted from 1 regardless of the genesis, and with a first-height check of 'height 1' (the node then waits 5 s before block 8)."
+   },
+   {
+    "name": "TestEveryParameterIsInTheDigest (ledger)",
+    "failsWithoutChange": "Yes: it fails with the five-field fields(). The test also checks that it covers every LedgerParameters field."
+   },
+   {
+    "name": "TestAcceptableEnforcesTheFloorsAndCeilings (ledger)",
+    "failsWithoutChange": "Yes: it fails with any one of these removed: the positive fee and caps, the delay ceiling, the retention bounds, the max-peers ceiling, the message ceiling."
+   },
+   {
+    "name": "TestGovernanceViewShowsTheTenParameters (node)",
+    "failsWithoutChange": "Yes: it fails with a view that shows only five parameters."
+   },
+   {
+    "name": "TestParameterDraftCarriesTheTenParameters (ui)",
+    "failsWithoutChange": "Yes: it fails with a draft that ignores the retention field, and with a draft that skips Acceptable."
+   },
+   {
+    "name": "TestLoadReadsTheNewParameters (cmd/server)",
+    "failsWithoutChange": "Yes: it fails with a config that ignores changeDelayBlocks."
+   },
+   {
+    "name": "TestPaymentAboveTheLargestPaymentIsRefused (node: intake, proposer, apply)",
+    "failsWithoutChange": "Yes: it fails with the cap check removed at intake, in ProposeBlock, or in ApplyBlock. Its forged block has a correct digest, so only the cap can refuse it."
+   },
+   {
+    "name": "TestPaymentLiftingAPayeeAboveTheBalanceCapIsRefused (node: intake, proposer, apply)",
+    "failsWithoutChange": "Yes: it fails with the intake check removed, with a credit checked without the payee's balance, with no running balance, with no proposer cap check, and with no rule 23."
+   },
+   {
+    "name": "TestLoweredCapAppliesFromTheNextBlock (ledger)",
+    "failsWithoutChange": "Yes: it fails with no rule 23, with rule 23 judged against the post-block cap, and with rule 23 lacking the 'did not rise' exception."
+   },
+   {
+    "name": "TestReassignmentCannotRaiseABalanceAboveTheCap (ledger)",
+    "failsWithoutChange": "Yes: it fails with the reassignment cap removed, and with the cap lacking its PreviousAmount exception."
+   },
+   {
+    "name": "TestReassignmentDraftRefusesABalanceAboveTheCap (ui)",
+    "failsWithoutChange": "Yes: it fails with the draft check removed."
+   }
+  ],
+  "deviations": "Readings taken where the spec is silent or would need more than S2. Each is the smallest reading consistent with the decisions.\n\n1. Null and missing amounts. \"No null for a required amount\" also refuses a required amount whose field is missing entirely. Go decodes a missing field as nil, just like null, so refusing only null would still let nil amounts in.\n\n2. Reassignment cap now, in Valid. The cap from 4.8 rule 3 (NewAmount at most the larger of MaxAccountBalance and PreviousAmount) is added to Reassignment.Valid now. Without it, rule 23 (an S2 rule) would refuse any block whose reassignment raises a balance above the cap, and since every node pools that certificate, every proposer would build blocks that never apply. Valid now takes the pre-block LedgerState instead of (accounts, sequence). The rest of 4.8 is left to S5. The wallet's reassignment draft refuses such an amount up front; otherwise it would sign it and later report a misleading \"the state changed\" error.\n\n3. Checkpoint wire shape kept. The Checkpoint keeps its current fields. Its state's height is taken from Commit.Height (Checkpoint.state() in the node; the same rule in ui/trust.go). S4 redefines the Checkpoint with State and an explicit State.Height == Commit.Height check.\n\n4. Config fields removed now. Config loses TransactionCost, Timeout, MinBlockInterval, MaxMessageBytes and MaxPeers now (spec 6.1), because they live in Genesis.Parameters and keeping them would leave two sources of truth. Validators and ValidatorThreshold stay until S3's Chain.\n\n5. When a node starts at once. startFirstHeight's \"a new network starts at once\" now reads \"a node still at its genesis state\" (state height equals genesis height), rather than \"height 1\".\n\n6. Governance view shape. /hdls/governance now nests the parameters as \"parameters\" and each pool entry's as \"newParameters\", using one ParametersView, instead of flat fields. The JSON shape changes; the wallet was updated to match. DraftParameters now takes a parameterForm struct with ten text fields instead of five positional strings.\n\n7. Interim message bound. DefaultParameters().MaxMessageBytes is the interim 12000, and MinMessageBytes stays 10000, as the orchestrator said; S3 sets 6400 and 5000. The demo uses DefaultParameters() exactly; spec 8.3's changeDelayBlocks 20 and retainBlocks 1000 are left to S8.\n\n8. Running balance counts credits only. ProposeBlock's running balance per payee adds credits and does not subtract the payee's own payments in the same block. This is conservative: it may leave out a payment rule 23 would accept, but it never builds a block that rule 23 refuses.\n\n9. JSON field order. In each JSON object that holds amounts, the amount fields now come last (a side effect of the value-receiver writer). This is cosmetic and deterministic.\n\n10. Files outside S2's list. These were touched only where S2's own changes required it, with no added scope: node/reassignment.go, node/peerdns.go, node/updatepool.go, node/sync.go, node/messages.go, ui/trust.go, ui/main.go, ui/wallet.go, and ledger/digest.go.",
+  "suite": "All passed on HEAD ed1bffc (logs in <scratch>/p2-scratch/s2-logs/).\n\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: clean.\n- go build ./... and go build -C ui -o /dev/null .: OK.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., run twice: both passed, in 62 s and 59 s wall time. consensus took 59.9 s and 56.1 s, node 58.3 s and 58.4 s, ledger 13.5 s and 13.8 s.\n- The same with -C ui, run twice: both passed (29.3 s and 29.4 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: passed in 100.9 s.\n\nNo data races, and no test was retried. A smoke run of the demo node committed blocks (height 2 to 5 in 3 s) and served the ten parameters on /hdls/governance.",
+  "openIssues": "1. Rule 17's lower bound is not enforced yet. ApplyBlock still accepts a payment below the transaction cost, as before; ProposeBlock and intake already refuse one. This belongs to S3's final ApplyBlock.\n\n2. A parameter vote can stop all payments. Acceptable does not require TransactionCost to be at most MaxPaymentAmount, because spec 3.4 lists no such bound. A vote setting MaxPaymentAmount below the cost would stop every payment until another vote reverses it. The owner may want this as one more bound; it would be about one line.\n\n3. Old snapshots fail with an unclear message. A Phase 1 snapshot now fails to load, with a parse error (an amount like \"1/10\") or \"its commit does not verify\". It does not yet say that it belongs to an earlier network, as spec 0.2 asks. That message probably belongs with S4's new snapshot format.\n\n4. Intake checks the balance cap without pooled payments. It checks one payment against the committed balance, as spec 5.6 says, so pooled payments to the same payee are not added up there. ProposeBlock's running balance keeps such payments out of a block, and the extras lapse when their block passes.\n\n5. The pool key is no longer canonical. node/reassignment.go's reassignmentKey uses FormatAmount now, but it still keys only on (account, amounts, sequence). Spec 4.8's full key belongs to S5."
+ },
+ "check": {
+  "confirmed": true,
+  "problems": [
+   {
+    "severity": "minor",
+    "file": "ledger/block.go",
+    "problem": "Two nil guards on the transaction cost no longer guard anything. ProposeBlock (ledger/block.go:186, `if transactionCost != nil && ...`) and admitPayment (node/node.go:547, `cost != nil && ...`) still skip their check when the cost is nil, as if a nil cost were allowed. A few lines later the new S2 code (creditedBalance, also reached through CreditFitsBalanceCap) subtracts the cost without any check and panics on nil. Spec 3.4 lets ledger code assume parameters that pass Acceptable, and Acceptable refuses a nil cost, so the guards are dead. They also tell a reader the opposite of what the code assumes.",
+    "evidence": "Scratch test <scratch>/p2-scratch/verify-S2-2/ledger/zz_verify_s2_nilcost_test.go calls ProposeBlock with Parameters.TransactionCost = nil and one valid payment. Result: 'ProposeBlock panicked with a nil cost: runtime error: invalid memory address or nil pointer dereference'. At the parent df99946 the same guard did make a nil cost harmless. No production path reaches a nil cost: cmd/server and the demo build parameters that pass Acceptable, and decoding refuses a missing amount.",
+    "fix": "Drop `transactionCost != nil &&` at ledger/block.go:186 and `cost != nil &&` at node/node.go:547, so every cost check assumes, as the new code does, that parameters pass Acceptable. Leave ProcessPayments' documented conservation clamp alone."
+   },
+   {
+    "severity": "minor",
+    "file": "ledger/digest.go",
+    "problem": "Nothing tests the switch of the accounts digest's Amount field from RatString to FormatAmount (ledger/digest.go:31), which is an S2 behaviour under spec 3.3/3.5. The golden TestStateDigestLayout takes the accounts digest from StateDigest itself, so the encoding of that field is never compared with a preimage built by hand. This breaks the shared rule that every new behaviour has a test that fails without it.",
+    "evidence": "Mutation 'accounts-digest-ratstring' (in <scratch>/p2-scratch/verify-S2-tools/mutate_digest.py) puts back `account.Amount.RatString()` (nil gives \"\") in StateDigest and runs every ledger test: NOT CAUGHT. Log: <scratch>/p2-scratch/verify-S2-logs/mut-accounts-digest-ratstring.log.",
+    "fix": "S3's planned golden TestAccountsDigestLayout covers this field when S3 rewrites the accounts digest, so S2 can leave it if S3 lands next. Otherwise TestStateDigestLayout could check one account with amount 10.5 against a preimage built by hand that carries \"10.5\"."
+   },
+   {
+    "severity": "minor",
+    "file": "ledger/block.go",
+    "problem": "An inaccurate comment. WithinMessageBound's doc (ledger/block.go:16) still names a 'huge-denominator amount' as one of the entries the bound keeps out. Since S2's parser, an amount is at most 27 characters of plain decimal, so no such amount can be decoded. Only the megabyte name, description and comment example still applies.",
+    "evidence": "grep -rn -i 'denominator' over the production code finds only ledger/block.go:16 (and an unrelated consensus quorum comment). ParseAmount refuses every a/b form and anything longer than 18+1+8 characters (TestAmountParserRefusesFractionsExponentsAndOverlongDigits).",
+    "fix": "Remove 'huge-denominator amount, ' from the parenthetical at ledger/block.go:16."
+   },
+   {
+    "severity": "minor",
+    "file": "node/node_test.go",
+    "problem": "A needless wrapper in the test code. testParameters() (node/node_test.go:15) only returns ledger.DefaultParameters(), and testGenesis is its single caller. The owner asked for no speculative generality.",
+    "evidence": "grep -rn 'testParameters()' node/ finds only the definition (node_test.go:15) and the one call in testGenesis (node_test.go:22).",
+    "fix": "Inline it: `parameters := ledger.DefaultParameters()` in testGenesis, and delete testParameters."
+   }
+  ],
+  "evidence": "All checks were run on scratch copies of p2-s2 HEAD ed1bffc, made with git archive. The worktree is unchanged and clean.\n\nFull suite (scratch copy verify-S2-1; log at <scratch>/p2-scratch/verify-S2-logs/suite-1.log):\n- gofmt -l . reports nothing outside review/.\n- go vet in the root module and in ui: clean.\n- go build in the root module and in ui: OK.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., run twice: passed both times, in 64 s and 61 s. consensus took 57.0 s and 60.5 s, node 59.1 s and 59.7 s, ledger 14.4 s and 13.7 s.\n- The same with -C ui, run twice: passed (32 s, 31 s).\n- -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: passed in 99.4 s.\n- Extra check: GOARCH=386 build of both modules and vet of ledger, node and cmd: OK.\n\nEach listed test fails without its change. Script: <scratch>/p2-scratch/verify-S2-tools/mutate.py; results in verify-S2-logs/mutations.txt. Each mutation reverts one change in a fresh archive copy. All 38 were caught by a named test failure, never by a build failure:\n- height: no height rule; height left out of the digest; no state tag; no parameter tag.\n- parameter fields: five fields; nine fields.\n- amounts: pointer receivers; a/b accepted by the parser; 19-digit integers accepted; null accepted; only the cost required; FormatAmount replaced by RatString.\n- Acceptable: no retention bounds; no delay ceiling; no message ceiling; no max-peers ceiling; nil fee accepted.\n- payment cap: removed at intake, in the proposer, in ApplyBlock.\n- balance cap: no intake check; no running balance; no proposer check; no rule 23 (node and ledger tests); rule 23 against the post-block cap; proposer against the post-block cap; rule 23 without the did-not-rise exception; reassignment cap removed.\n- node: genesis height ignored; first height 'height 1'; Checkpoint.state() without the height (7 catch-up and restart tests fail).\n- views and wallet: five-field governance view; cmd/server ignoring retainBlocks; ui draft ignoring retainBlocks; ui draft skipping Acceptable; ui reassignment draft without the cap; ui trust check without the height (15 ui tests fail).\n\nThe rewritten older rejection tests still test what they did before:\n- Six older ApplyBlock checks were removed one at a time (mutate_old.py): block id, pin, recipient, balance, evidence window, reassignment exclusion. Each was caught by its own older test.\n- A probe printing every height-rule refusal showed that across all ledger and node tests only TestApplyBlockRequiresTheNextHeight reaches that rule. No older rejection test passes on the height alone.\n\nAdversarial tests (scratch copy verify-S2-2, ledger/zz_verify_s2_test.go and others):\n- 150 random states, with random caps, costs, balances, names, and random payments by key, by name and to new keys. Some iterations add a reassignment or a cap-moving parameter change. Every ProposeBlock block applies and passes an independent check of rule 23 and the payment cap.\n- 300 forged blocks carrying only payments: ApplyBlock agrees with an independent cap oracle every time (40 accepted, 227 refused).\n- Rule 23 lets a payee above a lowered cap apply a net decrease.\n- Parser fuzz: 200,000 random strings checked against a reference grammar and big.Rat's value, and 100,000 random grid values that round-trip canonically.\n- A block with a payment and a reassignment, and a state, round-trip through JSON byte for byte and still apply; map and interface values are encoded canonically too.\n- null in place of NewParameters, Parameters, an account or a payment is refused.\n- The admin template renders all ten parameters, in force and pooled.\n\nDemo smoke test: it committed to height 6 within 6 s. /hdls/governance serves the ten parameters, and the checkpoint's amounts are in canonical form.\n\nDeviations: all ten hold up. Deviation 2 (the reassignment cap in Valid now) is needed. Without it every node pools a certificate that rule 23 refuses, every proposer carries it, and the chain halts.\n\nNot reported as problems:\n- The builder's open issues 1 and 2: the cost floor of rule 17 in ApplyBlock was already unenforced before S2, and no slice clearly owns it. A cost above MaxPaymentAmount is an owner question; spec 3.4 sets no such bound.\n- Putting RatString back in the reassignment pool key also goes uncaught, but the key behaves the same either way."
+ },
+ "fix": {
+  "branchHead": "f2e257e7085813d99ef11805d7ece26365e834ac",
+  "fixed": [
+   "51d9964 'phase 2 S2: the cost checks assume the cost is set (review follow-up)'. Minor, dead nil guards. I dropped `transactionCost != nil &&` in ProposeBlock (ledger/block.go) and `cost := ...; cost != nil &&` in admitPayment (node/node.go). Both cost checks now assume parameters that pass Acceptable (spec 3.4), as creditedBalance and CreditFitsBalanceCap already did. Nothing changes for parameters that pass Acceptable: a nil cost already panicked in creditedBalance. So there is no new test. TestBelowCostPaymentIsNotCarried (ledger) and TestIntakeRefusesFarFutureAndBelowCostPayments (node) still cover both comparisons. I left two things alone. ProcessPayments' documented conservation clamp stays, as the check asked. The two `TransactionCost == nil` checks in ui/admin.go (SignParameters, SubmitParameters) also stay, because they are not dead. A scratch probe showed that JSON with no NewParameters key decodes with no error and leaves the cost nil (a null value does give an error). So those checks are what tells a pasted non-parameter draft apart.",
+   "8643254 'phase 2 S2: the golden digest test checks the accounts digest's amount (review follow-up)'. Minor, untested accounts-digest amount. TestStateDigestLayout (ledger/digest_test.go) now builds the accounts-digest preimage by hand: lp(\"A\"), lp(\"a\"), lp(\"10.5\"), lp(\"A\"), lp(\"\"), lp(\"\"), in the layout the accounts digest keeps until spec 3.5's replaces it in S3. It compares that with StateDigest, then uses it in the hand-built state preimage. Proof, in a scratch copy with the amount written by RatString again (21/2), in <scratch>/p2-scratch/s2-followup-mut-accounts-digest-ratstring. With the old test file, every ledger test passed. With the new one, only TestStateDigestLayout fails: \"the accounts digest does not carry the amount as the canonical decimal 10.5\". S3's TestAccountsDigestLayout will rewrite this part.",
+   "b93f6ef 'phase 2 S2: the message-bound comment no longer names a huge-denominator amount (review follow-up)'. Minor, inaccurate comment. I removed 'huge-denominator amount, ' from WithinMessageBound's doc in ledger/block.go and reflowed the lines. Comment only. A grep found no other stale mention in production code. The comment in ledger/amount_test.go about a growing denominator explains why fractions are refused, and it is still accurate.",
+   "f2e257e 'phase 2 S2: testGenesis calls DefaultParameters itself (review follow-up)'. Minor, needless test wrapper. I deleted testParameters from node/node_test.go. testGenesis now calls ledger.DefaultParameters() directly, and its comment says 'the default parameters'. This was the only caller: grep over all Go code outside review/ finds no other. Test code only."
+  ],
+  "notFixed": [],
+  "suite": "Everything passed on HEAD f2e257e. Logs are in <scratch>/p2-scratch/s2-followup-logs/.\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: clean.\n- go build ./... and go build -C ui -o /dev/null .: OK.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., run twice: both passed, in 63 s and 58 s. consensus took 60.9 s and 57.5 s, node 56.1 s and 56.2 s, ledger 13.5 s and 13.7 s. cmd/demo, cmd/server and signing passed too.\n- The same with -C ui, run twice: both passed (29.0 s and 29.2 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: passed in 98.4 s.\nNo data race in any log, no test was retried, and no time limit was changed. The worktree is clean, with four follow-up commits on ed1bffc, authored by eval-apply-labs."
+ },
+ "secondCheck": null
+}

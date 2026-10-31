@@ -1,0 +1,195 @@
+--- a/node/messages.go
++++ b/node/messages.go
+@@ -10,6 +10,8 @@
+ package node
+ 
+ import (
++	"crypto/sha256"
++	"encoding/json"
+ 	"strconv"
+ 
+ 	"github.com/eval-apply-labs/go-ledger/consensus"
+@@ -42,19 +44,32 @@
+ 	Signature  string // proposer's signature over the fields, domain "proposal", network-bound
+ }
+ 
+-func proposalSignFields(height int64, round, validRound int32, digest [32]byte) [][]byte {
++func proposalSignFields(height int64, round, validRound int32, block ledger.Block) [][]byte {
++	body := blockBodyHash(block)
+ 	return [][]byte{
+ 		[]byte(strconv.FormatInt(height, 10)),
+ 		[]byte(strconv.FormatInt(int64(round), 10)),
+ 		[]byte(strconv.FormatInt(int64(validRound), 10)),
+-		digest[:],
++		block.StateDigest[:],
++		body[:],
+ 	}
++}
++
++// blockBodyHash binds the whole block (not just its claimed result digest) into the proposal
++// signature, so a copied signature cannot carry a swapped body. JSON re-encoding of decoded values is
++// deterministic (sorted keys, normalized big.Rat), so sender and receiver hash the same bytes.
++func blockBodyHash(b ledger.Block) [32]byte {
++	encoded, err := json.Marshal(b)
++	if err != nil {
++		return [32]byte{}
++	}
++	return sha256.Sum256(encoded)
+ }
+ 
+ // SignProposal fills in p.Proposer/p.Signature: the proposer signs (height, round, validRound, block
+ // digest). Because the block's digest is signed, the block cannot be swapped without invalidating it.
+ func SignProposal(signer *signing.Signer, p *ProposalMsg) error {
+-	sig, err := signer.SignBase64(signing.DomainProposal, proposalSignFields(p.Height, p.Round, p.ValidRound, p.Block.StateDigest)...)
++	sig, err := signer.SignBase64(signing.DomainProposal, proposalSignFields(p.Height, p.Round, p.ValidRound, p.Block)...)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -66,7 +81,7 @@
+ // VerifyProposal reports whether p carries a valid signature by p.Proposer over its fields (the
+ // caller must additionally check p.Proposer is the round's scheduled proposer).
+ func VerifyProposal(scheme signing.Scheme, networkID string, p ProposalMsg) bool {
+-	return signing.VerifyBase64(scheme, networkID, p.Proposer, signing.DomainProposal, p.Signature, proposalSignFields(p.Height, p.Round, p.ValidRound, p.Block.StateDigest)...)
++	return signing.VerifyBase64(scheme, networkID, p.Proposer, signing.DomainProposal, p.Signature, proposalSignFields(p.Height, p.Round, p.ValidRound, p.Block)...)
+ }
+ 
+ // Message is what nodes exchange: a proposal, a (self-contained, signed) vote, or a gossiped
+--- a/node/node.go
++++ b/node/node.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"errors"
+ 	"math/big"
++	"sort"
+ 	"time"
+ 
+ 	"github.com/eval-apply-labs/go-ledger/consensus"
+@@ -64,6 +65,7 @@
+ 	reassignment *ledger.Reassignment
+ 	step         consensus.Step
+ 	round        int32
++	height       int64 // for evTimeout: the height whose driver armed the timer
+ 	query        chan Snapshot
+ 	govQuery     chan GovernanceView
+ 	checkpoint   *Checkpoint
+@@ -112,6 +114,7 @@
+ 	lastCommitVals *consensus.ValidatorSet // the set that signed lastCommit (served in checkpoints)
+ 
+ 	pendingSlashes        map[string]consensus.Evidence      // equivocation proofs to carry into the next block (by offender)
++	proposalEquivocations map[string][2]ProposalMsg          // two different signed proposals for one (height, round), by proposer
+ 	paramProposals        map[string]*ledger.ParameterChange // accumulating parameter-change votes (by proposal)
+ 	reassignmentProposals map[string]*ledger.Reassignment    // accumulating balance-reassignment votes (by proposal)
+ }
+@@ -141,6 +144,7 @@
+ 		heightVotes:           map[string]consensus.Vote{},
+ 		heightProposals:       map[int32]ProposalMsg{},
+ 		pendingSlashes:        map[string]consensus.Evidence{},
++		proposalEquivocations: map[string][2]ProposalMsg{},
+ 		paramProposals:        map[string]*ledger.ParameterChange{},
+ 		reassignmentProposals: map[string]*ledger.Reassignment{},
+ 	}
+@@ -272,7 +276,9 @@
+ 		n.rememberVote(*e.vote)
+ 		n.relay(Message{Type: MsgVote, From: n.self, Vote: e.vote})
+ 	case evTimeout:
+-		if n.driver != nil {
++		// A timer belongs to the height that armed it: a stale one from an earlier height must not
++		// fire into the current driver (same round number, different height).
++		if n.driver != nil && e.height == n.height {
+ 			n.process(n.driver.Timeout(e.step, e.round))
+ 		}
+ 	case evPayment:
+@@ -483,6 +489,31 @@
+ 	n.blocks[candidateBlock.StateDigest] = candidateBlock
+ 	n.driver = consensus.NewDriver(n.cfg.Signer, n.heightVals, n.cfg.Scheme, n.cfg.NetworkID, n.height, candidateBlock.StateDigest)
+ 	n.process(n.driver.Start())
++	// Replay what arrived for this height during the post-commit window (before the driver existed).
++	rounds := make([]int32, 0, len(n.heightProposals))
++	for r := range n.heightProposals {
++		rounds = append(rounds, r)
++	}
++	sort.Slice(rounds, func(i, j int) bool { return rounds[i] < rounds[j] })
++	height := n.height
++	for _, r := range rounds {
++		if n.driver == nil || n.height != height {
++			return // decided (and committed) during the replay
++		}
++		p := n.heightProposals[r]
++		if p.Proposer == n.self {
++			continue
++		}
++		_, valid := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, p.Block, n.heightVals)
++		n.blocks[p.Block.StateDigest] = p.Block
++		n.process(n.driver.ReceiveProposal(consensus.Proposal{Round: p.Round, Digest: p.Block.StateDigest, ValidRound: p.ValidRound, Valid: valid}))
++	}
++	for _, v := range n.heightVotes {
++		if n.driver == nil || n.height != height {
++			return
++		}
++		n.process(n.driver.ReceiveVote(v))
++	}
+ }
+ 
+ // onProposal ingests a proposal and returns whether it was AUTHENTIC (so the caller relays it). A
+@@ -492,17 +523,34 @@
+ // ApplyBlock) sets the driver's Valid flag but does not gate relay: an authentic proposal of an
+ // invalid block is still relayed so peers can see it and prevote nil.
+ func (n *Node) onProposal(p ProposalMsg) bool {
+-	if p.Height != n.height || n.driver == nil {
++	if p.Height != n.height {
+ 		return false
+ 	}
+-	if held, ok := n.heightProposals[p.Round]; ok && held.Block.StateDigest == p.Block.StateDigest {
+-		// We already hold this round's proposal, so do NOT relay this duplicate. The proposal was
+-		// flooded on its first sight, and reGossipProposal periodically re-broadcasts the AUTHENTIC
+-		// held copy, so propagation is covered. Relaying the duplicate would be unsafe: only its
+-		// StateDigest is matched here (an attacker-settable field the proposal signature covers but
+-		// the block BODY is not), so a copied digest can carry a swapped, unverified body — and the
+-		// proposer's own broadcast bypasses relay() dedup, so it, uniquely, would re-flood that body.
++	if n.driver == nil {
++		if !n.started {
++			return false // pre-start: adopt()'s job
++		}
++		// Post-commit window: the next height's driver does not exist yet. Authenticate against the
++		// NEW height's schedule and hold the proposal; startHeight replays it into the new driver.
++		if _, held := n.heightProposals[p.Round]; held || p.Round < 0 || p.Round > 1 {
++			return false
++		}
++		if p.Proposer != n.validatorsFor(n.accounts).ProposerAt(p.Height, p.Round) || !VerifyProposal(n.cfg.Scheme, n.cfg.NetworkID, p) {
++			return false
++		}
++		n.rememberProposal(p)
++		return true
++	}
++	if held, ok := n.heightProposals[p.Round]; ok {
++		// First authentic proposal per round wins (as in the driver): never re-validate, store or relay
++		// another. A DIFFERENT validly-signed one from the same proposer is proposal equivocation.
++		if held.Proposer == p.Proposer && held.Signature != p.Signature && VerifyProposal(n.cfg.Scheme, n.cfg.NetworkID, p) {
++			n.proposalEquivocations[p.Proposer] = [2]ProposalMsg{held, p}
++		}
+ 		return false
++	}
++	if p.Round < 0 || p.Round > n.driver.Round()+1 {
++		return false // no lookahead beyond the next round: bounds per-height ApplyBlock work
+ 	}
+ 	if p.Proposer != n.driver.Proposer(p.Round) || !VerifyProposal(n.cfg.Scheme, n.cfg.NetworkID, p) {
+ 		return false // wrong proposer or bad signature — drop, don't relay
+@@ -598,8 +646,9 @@
+ // per-step timeout is the GOVERNED value from committed parameters (see stepTimeout).
+ func (n *Node) arm(step consensus.Step, round int32) {
+ 	d := n.stepTimeout() * time.Duration(round+1)
++	height := n.height
+ 	time.AfterFunc(d, func() {
+-		n.enqueue(event{kind: evTimeout, step: step, round: round})
++		n.enqueue(event{kind: evTimeout, step: step, round: round, height: height})
+ 	})
+ }
+ 
+@@ -667,6 +716,7 @@
+ 	n.heightVotes = map[string]consensus.Vote{} // previous height's votes are done; start the new height clean
+ 	n.heightProposals = map[int32]ProposalMsg{}
+ 	n.blocks = map[[32]byte]ledger.Block{}
++	n.driver = nil            // the decided driver is done; the next one is built by startHeight
+ 	n.resolvePeersFromState() // re-resolve gossip peers from any address changes this block (peer DNS)
+ 	interval := n.blockInterval()
+ 	if interval <= 0 {

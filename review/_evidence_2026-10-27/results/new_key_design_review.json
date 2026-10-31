@@ -1,0 +1,589 @@
+{
+ "design": "Phase 2 new_key message (name registration, key and bank changes)",
+ "date": "2026-10-27",
+ "reviews": [
+  {
+   "lens": "attacker",
+   "issues": [
+    {
+     "title": "The bank co-signature can be routed around: the thief picks or switches the bank",
+     "severity": "high",
+     "about": "proposal, A5",
+     "scenario": "Mallory steals the key of the name alice. With one payment she can already drain the balance (E44, report lines 89-91), so the bank co-signature is the only thing that stops her taking the name. Once she has it, every 'pay alice' credits an account she controls. The proposal does not say which bank counts as 'the requestor's bank'. (a) If the request names its own bank, Mallory picks whichever bank co-signs automatically. (b) If it is the bank alice delegates to (A5's second option), Mallory first sends a delegation update, which needs only the account's key (ledger/account_update.go:107-109; Phase 2 keeps delegation as a key-signed update). She moves the name in the next block. (c) If the recorded bank can be changed with only the account's key, the same two steps work. (d) If the right bank co-signs whenever the old key has signed, two signatures protect no better than one against a key thief.",
+     "recommendation": "Record the vouching bank, by name, in the name's state at registration. A key change needs that recorded bank's co-signature. Never derive the bank from the delegation. Change the recorded bank only with the current bank's co-signature, or by the two-thirds name vote. State as bank policy in the docs: co-sign a key change only after checking the holder in person or through a second channel, never on the old key's signature alone.",
+     "confidence": "high"
+    },
+    {
+     "title": "A bank that can change its own key can lose its seat to a key thief, or dodge its burn",
+     "severity": "high",
+     "about": "proposal, A4, A8",
+     "scenario": "The proposal does not say who a bank's own bank is. Suppose a validator's name may co-sign its own key change, or any other bank may. (1) A thief steals bank V's key (the eMudhra case) and asks to move the name v-bank to the thief's key. Stake is delegated to the name, so the seat, its delegated power and its governance votes pass to the thief at the next height. The burn rule never fires: the real bank's later votes simply fail to verify, and they don't conflict with anything. (2) V double-signs at height h, then changes its key before the evidence lands. In Phase 2, votes name their validator and nodes look the key up, so after the change the old votes no longer verify against V's key. If they are checked against the recorded validator set instead, the burn hits a key V no longer uses. Today a node carries evidence only against current validators and drops proofs for offenders that left the set (node/node.go:507-519, :862-866). V keeps its seat and stake. A4's delay helps only if the bank is watching and a burn is defined to cancel the pending change.",
+     "recommendation": "One rule: refuse new_key for any name in the current validator set. A seat's key changes only by the two-thirds name vote, which is rare and is already the recovery path. Also state that a burn freezes the name that held the key and cancels any pending change of it. For E13: evidence must stay admissible against a name that held a seat at the evidence's height, not only against a current validator, because leaving the set is the same escape.",
+     "confidence": "medium"
+    },
+    {
+     "title": "A4's stop fails in the theft case, burns honest retries, and can undo a recovery vote",
+     "severity": "medium",
+     "about": "A4, A2",
+     "scenario": "(1) Mallory has alice's key, and alice's bank co-signs carelessly. In one block Mallory pays alice's balance minus the fee to a mule and submits the key change. The fee empties the account, and the change waits N blocks. Alice sees it and signs a different request, but the owner's rule refuses a request whose requestor lacks the cash. Her request is refused at intake, never relayed, and never forms the 'conflicting pair'. If the stop also needs her bank's co-signature, she must reach the bank within N blocks. (2) Alice signs a change for block h+3 at the bank counter, and it misses its block. About 48 requests of 16 KB fit the 768 KiB budget (ledger/block.go:30), and the window is 64 blocks (node/mempool.go:13), about a minute at one block per second. She re-signs for a later block (A2 forces a different BlockID), or her wallet generates a new key. Both copies were gossiped, so one dishonest validator can carry them as two different requests by the old key. Her key is burned and her name frozen until a two-thirds vote. (3) Nothing cancels a pending change. If the banks vote alice to a fresh key before block h+N, Mallory's change still fires at h+N and takes the name back. Also, a colluding bank that is alice's reference node can hide the pending change from her wallet.",
+     "recommendation": "Define the conflict against committed state, not as a pair of submitted requests. While a change of name X is pending, accept a request for X signed by X's current key that names a different new key, with no fee and no bank co-signature. Including it burns that key, freezes X and cancels the change; E5's exclusion applies to that block. The BlockID is not part of the conflict, and requests that never committed never count. A pending change takes effect only if X's key is still the key that signed it and X is not frozen, so a two-thirds vote or a freeze cancels it. The wallet stores the new key before signing and reuses it on retry. It also reads pending changes from a second node.",
+     "confidence": "high"
+    },
+    {
+     "title": "Free names, hash names included, can be sniped from gossip",
+     "severity": "medium",
+     "about": "proposal, A9",
+     "scenario": "Alice's bank submits a registration of alice for block h+3. Gossip is plain HTTP, so anyone on the LAN can read it (report E15). A dishonest bank, or a customer of a bank that co-signs registrations automatically, submits its own registration of alice for block h+1. That lands two blocks earlier, and Alice's fails because the name is taken. No proposer slot is needed. The owner says a name can be a hash of the key. If that form is only a convention, the sniper registers Bob's hash name to its own key. Anyone who pays the name Bob's wallet derived and showed him before his registration landed then pays the sniper. Lookalike names (aIice for alice) work the same way until the character set is fixed (report lines 745-746).",
+     "recommendation": "Make the hash form self-certifying. A name with a reserved prefix (for example 'k-' plus 26 base32 characters of the key's SHA-256: 28 bytes, within MaxAccountNameLength at ledger/account_update.go:67) is valid only for the key it hashes, checked at registration. That is about 3 lines. Readable names stay first-come. The co-signing bank is recorded in state, so a snipe can be traced to it and goes to the two-thirds name vote. Bulk squatting costs one fee and one bank signature per name, so it needs no further rule. Optional node policy, with no new rule: a bank keeps its own registrations out of gossip and includes them in a block it proposes. Don't build commit-reveal.",
+     "confidence": "medium"
+    },
+    {
+     "title": "16 KB requests can fill the pools and load the event loop",
+     "severity": "medium",
+     "about": "proposal, A1, A7",
+     "scenario": "With a 1952-byte key and three 3309-byte signatures, a request is about 16 KB of base64 JSON. About 48 fit the 768 KiB block budget, against about 170 payments. Suppose intake copies today's update intake (window, existing account, size, dedup: node/updatepool.go:63-67) and checks per request that the requestor has the cash. Then a requestor holding one fee can pool thousands of requests for different names or new keys, each co-signed by a bank that signs automatically. Only the requests that land pay. The update pool shares the 10,000-slot default (cmd/server/config.go:175-177, node/node.go:152). That is about 160 MB per node, and honest registrations are then refused or silently dropped (the E21 pattern). Separately, a message that carries no key can't be verified in the HTTP handler, which is where updates are verified today (node/httptransport.go:176). Junk requests that name a real requestor and bank then each cost a signature verification on the node's single event loop (the E6 and E12 pattern).",
+     "recommendation": "Count each pending request's fee as the requestor's outgoing, at intake and in the post-commit purge. Reuse mempool.outgoingFor and dropOverdrawn (node/mempool.go:57-95, node/node.go:565-568). Pool at most one request per requestor per BlockID. ProposeBlock and ApplyBlock take payments first. A block carries at most one request per name, per new key and per requestor, and only requests that apply. Run the cheap checks first: size, window, requestor and recorded bank exist, balance covers the fee. Then verify off the loop against the published committed accounts (node/node.go:404-407) and re-check on the loop. A registration signed by the bank as requestor and by the new key needs two signatures, not three (about 11 KB).",
+     "confidence": "high"
+    },
+    {
+     "title": "The fee is outside what anyone signs",
+     "severity": "low",
+     "about": "proposal, A2, A4",
+     "scenario": "(1) A fee change ratified inside the 64-block window changes what an already-signed request costs. A payment's debit is capped by its signed amount, because the cost comes out of it (ledger/ledger.go:212-214); a key change's debit is not. (2) Unless the fee counts in the overdraw sum (ledger/ledger.go:194-203), a request plus payments that together exceed the balance either drive it negative or ride in the block for free. (3) With the fee in that sum but no BlockID, as proposed, a dishonest proposer can hold a co-signed request. It includes the request in the block where the requestor's own payment brings the total over the balance, and the ban destroys the whole balance (ledger/ledger.go:239-242). (4) A two-thirds coalition can set the fee to 0, making registration free apart from the bank co-signature, or very high, stopping self-service changes. That is no new power, since two-thirds can already reassign names.",
+     "recommendation": "Sign the fee. A request applies only if its fee equals the current parameter; otherwise it lapses. Count the fee in the overdraw sum. Keep A2's BlockID so a request can't be timed. Bound the fee and N in LedgerParameters.Acceptable: the fee at least TransactionCost and below a ceiling, N between a floor and a ceiling (the lesson of E19).",
+     "confidence": "high"
+    }
+   ],
+   "amendments": [
+    {
+     "id": "A1",
+     "verdict": "keep",
+     "reason": "Without it, a bank or a typo can bind a name to a key nobody holds, and every payment to that name is stuck until a two-thirds vote. A bank could also bind a stranger's key; with one key per name, that blocks the stranger's own registration. The new key must sign the whole request, name included, or its signature can be lifted onto another name. The cost is one signature and one verification."
+    },
+    {
+     "id": "A2",
+     "verdict": "change",
+     "reason": "Keep the BlockID. Without it a request never leaves the pools (E21), and a proposer can time it to trip the overdraw ban (issue 6). Drop the current-key field: the requestor's signature is already verified against the name's current key in state, so a request fails once the key changes. All three signatures should cover one preimage (name, new key, recorded bank, fee, BlockID), so no co-signature or proof of possession can be reused on another request."
+    },
+    {
+     "id": "A3",
+     "verdict": "drop",
+     "reason": "A key change moves no balance, so E5's hazard (a balance set after the block's payments, ledger/block.go:189-199, :280-285) does not arise. Payments in the block where the key switches verify against the pre-block key. Pooled payments signed by the old key fail verification in ProposeBlock (ledger/block.go:128). The freeze that A4's stop triggers is covered by E5's rule for freezes, already planned under E29."
+    },
+    {
+     "id": "A4",
+     "verdict": "change",
+     "reason": "Keep the N-block delay for assigned names; it is the owner's 'n frames' for sales. Redefine the conflict as in issue 3: a stop signed by the current key against the committed pending change, accepted without fee or bank, regardless of BlockID. The stop burns the key, freezes the name and cancels the change; a two-thirds vote or a freeze also cancels it. Bound N in Acceptable. Only the holder of the current key can send a stop, so no third party can trigger a burn. A4 does not give payments a conflict slot, so E44 stays with the freeze vote. Against a thief who is watching, self-service always ends at the two-thirds vote. What it buys is routine and mass key replacement (the eMudhra case) without a vote per name."
+    },
+    {
+     "id": "A5",
+     "verdict": "change",
+     "reason": "Record the bank by name at registration. Never derive it from the delegation, which the key alone can change (issue 1). Change it only with the current bank's co-signature or by two-thirds. Don't require the bank to hold a seat when it co-signs, or dynamic-mode stake changes strand its customers. While a bank's key is burned or its name frozen, its customers use the two-thirds path until the bank's name gets a new key. Cost: each name's bank becomes public, which narrows a hash name's anonymity to one bank's customers."
+    },
+    {
+     "id": "A6",
+     "verdict": "keep",
+     "reason": "If co-signatures were a burn slot, any customer could burn its bank by asking it to co-sign two different key changes for the customer's own name, and a burned key leaves the validator set (E13). A separate domain is already the rule (signing/domain.go:5-7); what matters is that this domain has no conflict slot. A co-signature can't be forged without the bank's key, and A2's single preimage stops reuse. In Phase 3, the bank's counter software should reach only this domain of the bank's signer."
+    },
+    {
+     "id": "A7",
+     "verdict": "change",
+     "reason": "With names as identity, an unnamed key can neither sign nor pay, so a free name's requestor is a funded named account anyway. Make it the bank itself: it pays the fee, is recorded as the name's bank and signs once, and the new key signs too (A1). That removes the sponsor role, the question of whose bank co-signs, and one 3.3 KB signature. A sponsor pays the bank with an ordinary payment. The requestor field then goes away: an assigned name is its own requestor, and a free name's requestor is its bank."
+    },
+    {
+     "id": "A8",
+     "verdict": "change",
+     "reason": "Keep, and extend it. A burned key can't be a requestor, a bank co-signer or a new key. A new key must not be held by another name, so a burn maps to exactly one name. A name whose key is burned changes key only by the two-thirds vote."
+    },
+    {
+     "id": "A9",
+     "verdict": "drop",
+     "reason": "No users exist and the owner allows a clean genesis, so nothing needs migrating. The Phase 2 genesis lists named accounts, and its validation (E39) rejects an unnamed one. The owner's first point, that unnamed keys can't receive, needs no rule either: with names as identity there are no unnamed accounts. Hash names, if wanted, use issue 4's self-certifying form. The Phase 1 name claim in AccountUpdate (ledger/account_update.go:98-105) becomes dead code, since new_key is the only way a name gets a key."
+    }
+   ]
+  },
+  {
+   "lens": "banks-lifecycle",
+   "issues": [
+    {
+     "title": "A bank re-keying itself by new_key: one stolen key takes the seat, and a double-signer escapes its burn",
+     "severity": "high",
+     "about": "proposal + A5, A8",
+     "scenario": "Today a bank backs itself: an account created by a credit delegates to its own key (ledger/ledger.go:237), and the wallet's delegate field is 'its own key, for a bank' (ui/wallet.go:128). If 'the requestor's bank' means that, a bank's new_key carries two signatures from one key.\n\nCapture: a thief who recovers bank A's weak key (the eMudhra case) sends new_key{A -> K_thief}, signed twice with that key. From the next block, A's seat and all stake delegated to the name A answer to K_thief. The real bank can no longer sign as A, so no conflicting pair can form and the burn rule never fires. Only a ⅔ name vote ends it. With 3 equal banks the other two are below quorum, so the chain halts.\n\nEscape: a dishonest validator V pools new_key{V -> K2} before height h, then double-signs prevotes at h with its old key. Honest proposers build h from their pools (node/node.go:588-597), so block h commits the change. The evidence lands at h+1 and burns a key that no longer holds the seat. The plan burns keys ('a committed burn set of canonical keys', review:443) and removes only 'a seat whose key is burned' (review:115).\n\nSide effect: a self-re-key also spoils every in-flight ⅔ certificate that carries A's old-key vote (ledger/reassignment.go:100-106). The E18 filter keeps that vote, because A is still a member by name (node/reassignment.go:64-68).",
+     "recommendation": "new_key refuses a name that is in the validator set of that height, and a name with no recorded bank. Genesis gives validators no bank, and genesis validation rejects an account that is its own bank. A seated name's key then changes only through the ⅔ name vote, which is what the burn-set plan already says: 'the seat comes back when the name is voted to a new key' (review:695). About two lines.",
+     "confidence": "high"
+    },
+    {
+     "title": "'The requestor's bank' read as the delegate lets a key thief choose the bank; for a free name the wrong bank vouches",
+     "severity": "high",
+     "about": "proposal + A5, A7",
+     "scenario": "An account changes its delegate with its own signature alone (ledger/account_update.go:107-109). It must stay that way: re-delegating is how holders keep stake from concentrating (docs/managing-the-currency.md:72-75, which already calls the delegate 'its bank').\n\nIf the co-signing bank is the delegate (A5's second option), a thief holding Alice's key sends an update {Delegated: lax-bank} at block h. At h+1 it sends new_key{alice -> K_thief}, co-signed by lax-bank's automated signer. Alice's own bank never sees it, and every 'pay alice' goes to the thief until a ⅔ vote. One careless bank anywhere exposes every account in the network, not just its own customers.\n\nFor a free name, the owner's text has 'the requestor's bank' sign. When a sponsor (A7) registers 'bob', the sponsor's bank vouches for a key holder it never met, and nothing says whose bank gates Bob's later rotations.",
+     "recommendation": "Add one account field: the bank, a name, separate from the delegate and never settable by an account update. Registration sets it to the co-signing bank, which must be a current validator at that moment and is the new holder's bank, not the sponsor's. Every later new_key needs that bank's signature. It changes only through the ⅔ name action (give that action an optional bank field). If switches turn out to be routine, a new_key signed by both the old and the new bank can also change it.",
+     "confidence": "high"
+    },
+    {
+     "title": "Bank lifecycle is unspecified: a bank that leaves, is burned, is frozen or refuses either strands its customers or reopens the delegate side door",
+     "severity": "medium",
+     "about": "A5, A8",
+     "scenario": "Leaves: in dynamic mode a bank drops out whenever its stake dips under the threshold (node/validators.go:44-47), for example when one big customer re-delegates. If co-signing needs a current validator, all its customers are blocked meanwhile, including a victim racing a thief. If the rule is instead 'any validator may co-sign when your bank is unseated or burned', a thief holding a customer key waits for the dip or the burn and uses a lax bank.\n\nBurned: the bank's key cannot sign, so its customers cannot rotate until the ⅔ re-keys its name. If the institution is gone for good, each customer needs its own ⅔ action, at one governance action per block (ledger/block.go:174-188).\n\nFrozen: unless a freeze also stops co-signing, a bank under investigation keeps approving rotations.\n\nRefuses: its customer cannot rotate or switch banks, though payments still work.",
+     "recommendation": "State four rules.\n- The bank must be a current validator only when it is recorded.\n- A later co-signature needs the bank's current key, unburned, and the bank not frozen, whether or not it is seated. A departed bank keeps serving existing customers but takes no new ones.\n- A burned bank's customers follow automatically once the ⅔ votes its name to a new key, because the field is a name.\n- A bank that refuses or is gone is replaced through the ⅔ name action with its bank field.\nNo automatic fallback to another bank.",
+     "confidence": "medium"
+    },
+    {
+     "title": "Freeze and ⅔ name vote must bind the name, not the key, and win over a new_key in the same block",
+     "severity": "medium",
+     "about": "proposal + A3, A4",
+     "scenario": "The existing ⅔ action binds the state it amends: a Reassignment is valid only while the account still holds PreviousAmount (ledger/reassignment.go:94), and the pool prunes it once that changes (node/reassignment.go:79-86). Copy that for keys and a thief can dodge it.\n\nA thief holding Alice's key, with a lax bank or a self-banked name, rotates K1->K2 while the banks are still collecting signatures. Their certificate stops matching and is pruned. They re-collect for K2, and the thief rotates again. That is E30's remaining limit, with keys instead of balances.\n\nIf a freeze that has already landed is bound to the key, one rotation moves the balance to an unfrozen key. If a new_key and a name vote for one name can share a block, the proposer decides which one wins.",
+     "recommendation": "Bind the freeze and the name vote to (name, governance sequence) only; new_key does not bump the sequence. While a name is frozen, refuse any new_key in which it is the requestor, the fee payer or the co-signing bank; the ⅔ actions still apply. A ⅔ action on a name drops any new_key for that name from the block (governance wins), reusing E5's filter (ledger/block.go:189-199, 281-285). If A4 survives, a pending change must re-check frozen, burned and current key when it matures.",
+     "confidence": "medium"
+    },
+    {
+     "title": "Bank re-keys and trust anchors: a vote must vouch under the anchor's key, not the key the checkpoint carries",
+     "severity": "medium",
+     "about": "proposal (names as identity)",
+     "scenario": "verifyCheckpoint (node/node.go:457-475) first checks a checkpoint's commit against the signer set derived from the checkpoint itself. It then credits each voter with its power in the node's trusted anchor. That is safe today only because a voter's identity is its key. Once votes name their signer and keys come from state, a straight port credits names.\n\nA dishonest catch-up source (a bootstrap peer or any validator, in scope) can then serve a checkpoint whose state gives the real bank names its own keys, sign the commit with those keys, and pass both checks. A restarting node adopts the forged state (E3-class).\n\nSeparately, every bank re-key moves the anchor. A node needs more than ⅓ of its anchor power still matching, and the wallet pin more than ⅔ (ui/trust.go:102-114). Re-keys done by new_key would not be in the signature record either, because account messages are never kept (review:701).",
+     "recommendation": "A vote counts toward the anchor or the pin only if it verifies under the key the anchor or pin holds for that name. Store (name, key, power) in both. Validator keys change only by ⅔ certificate (first issue). The record keeps that certificate for the chain's life and logs a re-key as a validator-set change. Document that a node or wallet that slept through re-keys re-seeds from its bank, as E3 already says for set turnover.",
+     "confidence": "medium"
+    },
+    {
+     "title": "A2's exact target block does not fit the bank's counter step",
+     "severity": "low",
+     "about": "A2, A4",
+     "scenario": "Payments land only in exactly their BlockID (ledger/block.go:129, 237), within a 64-block window (node/mempool.go:13), and the wallet dates them 3 blocks ahead (ui/main.go:34). At the documented 1000 ms interval (docs/operating-a-network.md:41), a new_key built the same way gives about a minute at most for the customer to sign, the bank officer to check ID and co-sign, and the request to reach the pool. If it misses its block, both must sign again. Under A4's conflict slot, that honest retry differs from the first request and burns the customer's key. In pigeon mode the same window is 64 days.",
+     "recommendation": "For new_key, make BlockID an expiry ('not after'), not an exact block. The replay guard is the bound current key (or the free state), which the change itself consumes. Size the window for the counter step, as its own constant. Pool only complete requests that are valid now, so they land in the next block and a long window costs no pool space. Keep the expiry out of any conflict slot.",
+     "confidence": "medium"
+    }
+   ],
+   "amendments": [
+    {
+     "id": "A1",
+     "verdict": "keep",
+     "reason": "The bank vouches for the person; proof of possession shows that the same person holds the new key, and the ledger enforces it even where a careless bank would skip the check. It prevents a name being bound to a key nobody holds, which otherwise takes a ⅔ vote to fix. If keys are unique per name, it also stops a lax bank, or anyone who saw the gossiped request, from binding your new key to another name first. It costs one extra signature."
+    },
+    {
+     "id": "A2",
+     "verdict": "change",
+     "reason": "Keep the binding to the name's current key, or to 'free' for a new name. A hash of the key is enough, so the message still carries only the new key. That binding is the replay guard, and the change itself consumes it. Make BlockID an expiry sized for the bank's counter step, not an exact block, and keep it out of any conflict slot (see the A2 counter-step issue)."
+    },
+    {
+     "id": "A3",
+     "verdict": "change",
+     "reason": "Narrow it to the outgoing payments of the name whose key changes; incoming payments need not lapse. The narrow form matters on this lens. A victim who still holds a leaked key rotates at the bank: the bank tops up the fee at block h if the account was drained, and the co-signed new_key lands at h+1. The thief's drain for h fails the pre-block balance check (ledger/ledger.go:132-138), and its drain for h+1 is dropped. The victim wins, and the fee stays a pre-block check. Add the rule that matters more: a ⅔ freeze or name action on the same name drops the new_key (see the freeze issue). For a registration, defer the request rather than drop the paying bank's payments."
+    },
+    {
+     "id": "A4",
+     "verdict": "drop",
+     "reason": "It is the heaviest amendment: pending changes in state, a maturity step every block, re-checks at maturity, a new evidence type, and burn-plus-freeze side effects. It guards the name, not the money: a thief holding the key drains the account with one payment (E44).\n\nHonest users would burn themselves. A wallet or bank desk that reboots after signing K1->K2 and then signs K1->K3 forms a conflicting pair, and so does a retry with a new expiry. That is E2's lesson again unless wallets get a sign log. A change that matures after a ⅔ name vote would undo that vote unless re-checked. N blocks is only a lower bound of N x BlockIntervalMs (node/node.go:876-883), so N would have to track the timing profile, from seconds to pigeon-mode days.\n\nWith seated names excluded (first issue) and a recorded bank (second issue), what remains is a thief plus the victim's own careless bank. That is the rare case the ⅔ name vote is for. Sales already go through that vote (review:691-692), and collecting it is the window."
+    },
+    {
+     "id": "A5",
+     "verdict": "change",
+     "reason": "Take only the first option: a recorded bank name, set at registration to the co-signing bank, which must be a current validator at that moment. Not the delegate: delegation is self-signed and must stay free, so a thief would first re-delegate to a lax bank (second issue). Change it through the ⅔ name action, or through a request both banks sign. Lifecycle rules as in the third issue: no seat needed to co-sign later, burned or frozen banks cannot co-sign, and no fallback to another bank."
+    },
+    {
+     "id": "A6",
+     "verdict": "keep",
+     "reason": "Keep both parts; its own domain follows C1. It must not be a burn slot. Otherwise a customer, or a thief with a customer key, sends two racing requests that an automated co-signer signs, and the bank's key, which is also its consensus key (one key per name), is burned and its seat lost. One customer could unseat a bank. A desk tool that reboots and re-signs would burn its own bank, E2's lesson again. A cost to note for Phase 3: with one key per name, the consensus key signs at the customer desk, against the isolated-signer plan. The signer could ask the operator before each co-signature."
+    },
+    {
+     "id": "A7",
+     "verdict": "keep",
+     "reason": "Every Phase 2 signer is a named account, so this mostly restates the base rule. State that for a free name the co-signer is the new holder's bank, which becomes its recorded bank, not the sponsor's bank (second issue); the bank itself is the natural requestor. With every account gated by a bank, whether banks co-sign pseudonymous key-hash names is public policy. The docs list 'every account forced to carry a registered identity' as a misuse smell (docs/managing-the-currency.md:286-287)."
+    },
+    {
+     "id": "A8",
+     "verdict": "keep",
+     "reason": "Keep and extend. A burned key cannot be the requestor, the co-signing bank or the new key. A frozen name cannot be the requestor, the fee payer or the co-signing bank. Check this when the request is included in a block. Recovery for all of these cases is the ⅔ name action."
+    },
+    {
+     "id": "A9",
+     "verdict": "drop",
+     "reason": "Drop it as a migration rule. There are no users, and the ML-DSA genesis replaces every key, so there is no existing key to hash. Instead the genesis lists each account as (name, key, balance, delegate name, bank).\n\nEvery validator, static ones included, needs a named account, because votes will name their signer. Today a static validator needs no account (node/validators.go:14-19). Validators get no bank, so their keys change only by ⅔ vote. Other accounts get a genesis validator as their bank, or none (⅔ only).\n\nExtend E39's genesis checks: canonical unique names, unique keys, and a bank that is a genesis validator and never the account itself. Key-hash names stay a wallet convention."
+    }
+   ]
+  },
+  {
+   "lens": "state-transition",
+   "issues": [
+    {
+     "title": "A seat-holding name can change its own key, which moves the seat to a thief and acts as an un-burn",
+     "severity": "high",
+     "about": "proposal; A5; A8",
+     "scenario": "A thief copies bank B's key K_B. B holds 30% of the power, delegated to the name B (review :114-116, :693). The proposal needs the requestor's signature plus 'the requestor's bank'. For a bank, that bank is B itself (accounts delegate to themselves by default, ledger/ledger.go:237, so A5's 'validator it delegates to' is B) or at most one other bank. The thief signs NewKey{name B, new K_T} with K_B and co-signs with K_B or a careless bank, and it lands. B's seat and every delegator's stake now answer to K_T.\n\nThe operator's own votes are still signed with K_B. They fail the name-to-key lookup and are dropped as votes from a non-validator, so they never pair with the thief's votes as evidence. The only tripwire the burn rule has (consensus votes, review :75-81) can no longer fire. The operator stays locked out until a 2/3 vote, and a thief holding more than 1/3 can block that vote for good.\n\nThe same message also undoes a burn. Evidence is checked against the key the name holds when the evidence is carried (today Evidence.Valid verifies against the vote's signer, consensus/evidence.go:11-22; in Phase 2 the signer is a name looked up in state). A validator that double-signs and changes its key in the same or the next block keeps its seat. The plan rules that out: there is no un-burn, and the seat comes back only through the name vote (review :114-116, :694-696).",
+     "recommendation": "Make a NewKey invalid when its name is in the validator set that governs the block. ApplyBlock already receives that set; treat a missing set as invalid, as ParameterChange.Valid does (ledger/governance.go:69). Seat holders then change keys only through the 2/3 name vote. That certificate is kept, so the record's 'validator set whenever it changes' also covers key changes. This is one condition.",
+     "confidence": "high"
+    },
+    {
+     "title": "The bank's co-signature is no gate if the stolen key alone can change which bank that is",
+     "severity": "high",
+     "about": "proposal; A5",
+     "scenario": "A5 offers 'the validator name it delegates to' as the requestor's bank. Delegation is set by an AccountUpdate signed by the account's key alone (ledger/account_update.go:107-109), and that stays true with delegation to a name.\n\nA thief holding alice's key sends AccountUpdate{alice, Delegated: D} at block h, where D is a careless or dishonest bank. At h+1 the thief sends NewKey{alice -> K_T} co-signed by D. Alice's own bank is never asked. Her name, her balance and every later pay-by-name payment now go to K_T, in two blocks.\n\nAny 'change banks' path that needs only the customer's key has the same hole. Every name is then only as safe as the least careful bank on the network, and a dishonest bank is in the threat model.",
+     "recommendation": "Give each account a separate bank-of-record field, included in the state digest (ledger/digest.go:15-38). Set it at registration to the bank that co-signed. Registration also sets the delegate to that bank by default, which settles E42 for registered accounts. Delegation stays a plain AccountUpdate and has no say in who co-signs.\n\nThe bank of record changes only by the 2/3 name vote, which is the smallest option. If customers turn out to switch banks often, add an optional NewBank field to NewKey, co-signed by the current bank of record. When the bank of record has left the validator set or its key is burned, the 2/3 vote is the path.",
+     "confidence": "high"
+    },
+    {
+     "title": "'Free' must mean that no account has the name, never that the name has no usable key",
+     "severity": "high",
+     "about": "proposal; A8",
+     "scenario": "The proposal lets anyone request a free name. A natural way to build burn and freeze is to clear the name's key until the 2/3 vote sets a new one; the plan's wording points that way ('the seat comes back when the name is voted to a new key', review :694-696).\n\nIf a name with no key counts as free, then the moment bank B's key is burned, a dishonest bank D sends NewKey{name B, requestor D, new K_D2}. D supplies its own co-signature, a proof of possession from a key it generated, and the fee. D now holds B's name, balance, seat and every delegation to B, and may cross 1/3 of the power. A theft victim whose key the banks froze can be taken the same way.",
+     "recommendation": "Define 'free' as 'no account with this canonical name exists'. Accounts are never deleted (ledger/ledger.go:249), so a name that was registered once is never free again.\n\nBurn and freeze never clear the key. The burned key stays as the name's key, so a NewKey for that name still needs the name itself as requestor, and A8 refuses it. Only the 2/3 vote can move such a name.",
+     "confidence": "medium"
+    },
+    {
+     "title": "The proposal does not say how the fee interacts with same-block payments, slashes or duplicate requests",
+     "severity": "medium",
+     "about": "proposal; A3; A7",
+     "scenario": "Today a block carries a payment only if that payment alone fits the payer's pre-block balance (withinBalance, ledger/ledger.go:128-138, used at block.go:144 and :249). The overdraw ban sums payments only (ledger.go:194-203).\n\nRequestor R holds 100. R signs a payment of 100 and a NewKey with a fee of 10, both for block h. Each passes a pre-block check on its own. What happens next depends on unstated choices:\n- If the fee is debited after ProcessPayments, R ends at -10. It burns money it never had, and since deriveValidators sums balances, the negative balance lowers its delegate's power.\n- A slash that zeroes R in the same block (applySlashes, block.go:86-106) has the same effect if it runs before the fee debit.\n- If a NewKey that cannot pay is skipped but still carried, as applyAccountUpdates ignores a taken name (account_update.go:98-105), about 16 KB of block space rides free.\n- If ProposeBlock and ApplyBlock check the fee at different points, every honest proposal for h fails while the pair sits in the pools. Both messages name h, so they never expire and the chain stays stuck.\n\nTwo NewKeys for one name in one block have no rule either. The one-update-per-account limit is proposer policy only (block.go:153-157); ApplyBlock does not check it (:253-258).\n\nCaps are not affected, because a key change moves no money. A sale, though, moves a whole balance together with the name, outside both the per-payment cap and the transaction cost.",
+     "recommendation": "Write one shared validity check and use it at intake, in ProposeBlock and in ApplyBlock, as withinBalance is used today:\n- Every signature in a block verifies against the keys in the pre-block state.\n- NewKeys apply right after payments, before updates, slashes and governance, and the key switches at the end of the block.\n- At most one NewKey per name per block. ApplyBlock rejects a block that breaks any of these rules; it never skips a NewKey silently.\n- A block that carries a NewKey from requestor R carries no payment from R. This is E5's filter applied to debits only, and it leaves ProcessPayments untouched.\n- The sum of R's fees in the block is at most R's pre-block balance.\n- The fee is the pre-block parameter, as TransactionCost is (block.go:116), and the request signs a MaxFee.\n- Pools count pending fees in outgoingFor (node/mempool.go:57-65), refuse a payment and a NewKey from the same requestor for the same block, and drop pool entries from a name whose key changed.\n- Acceptable (ledger/parameters.go:95-103) refuses NewKeyFee <= 0, because names are permanent and each one stores a 1952-byte key.",
+     "confidence": "high"
+    },
+    {
+     "title": "A NewKey sent in the same block as a freeze or name vote can dodge it, unless governance wins and binds only the name",
+     "severity": "medium",
+     "about": "proposal; A4",
+     "scenario": "The banks' 2/3 freeze of alice is ready for block h. The thief holds alice's key and gets an automated co-signature from her careless bank, then submits NewKey{alice -> K_T} for block h. It is valid against the pre-block state.\n\nIf both apply and the freeze is recorded against alice's key (the plan says 'freeze the account, key and name', review :107-110), the freeze lands on a key alice no longer holds, and the thief keeps spending with K_T.\n\nIf the name vote binds the name's current key, as Reassignment binds PreviousAmount (ledger/reassignment.go:94), a thief who can change the key makes any certificate collected at human pace stale. That is E30's remaining limit (review :583-585), moved from balances to keys.\n\nA 2/3 Reassignment of R in the block that debits R's fee is also inexact. applyReassignment sets the balance last (block.go:204-206, reassignment.go:115-125), so the voted balance absorbs the fee.",
+     "recommendation": "Governance wins, as in E5:\n- ProposeBlock drops, and ApplyBlock rejects, any NewKey whose name or requestor is the target of the block's governance action. Extend touchesAccount (reassignment.go:129-132) to cover NewKeys.\n- The freeze and the name vote bind only (name, governance sequence), never the name's key or balance.\n- A name frozen in the pre-block state cannot appear in a NewKey, as name or as requestor. The frozen mark goes under the state digest.",
+     "confidence": "high"
+    },
+    {
+     "title": "A4's delay keeps a leaked key usable for N blocks, and its conflict rule can freeze honest owners",
+     "severity": "medium",
+     "about": "A4",
+     "scenario": "Alice suspects her key has leaked and changes it. Under A4 the old key stays the name's key for N more blocks. The thief drains her with ordinary payments, which still have no conflict slot (E44, review :615). The delay helps the thief in exactly the case key changes exist for.\n\nAs worded ('a second, different request'), the conflict rule also catches honest retries. A proposer leaves out alice's first request until its BlockID passes, or her wallet loses the new key. The retry differs (a new key or a new BlockID), so her key is burned and her name frozen until a 2/3 vote.\n\nThe delay also needs:\n- a pending record under the state digest;\n- an activation step at height+N;\n- cancel rules for a freeze, a vote and a second request;\n- the fee taken at request time;\n- a new evidence type, which can be checked only while the change is pending: once it applies, the old key leaves state, and messages carry no key.\n\nThe rule fires only if a careless bank co-signs the thief's request and the owner notices within N blocks. That is the notify-and-cancel feature the owner leaned against.",
+     "recommendation": "Drop A4: a NewKey takes effect in the block that carries it. Log two NewKeys for one name signed by the same key for operators (as E43 suggests for updates), not as burn evidence.\n\nIf name sales must still take N blocks, either keep sales on the 2/3 name-vote path, as the plan had it (review :111-113, :691-692), or let the bank of record hold back its co-signature for a cooling-off period. That is an off-chain policy and needs no code.",
+     "confidence": "medium"
+    },
+    {
+     "title": "The signature record would discard the bank's co-signature, the only proof of who vouched for a key",
+     "severity": "medium",
+     "about": "proposal; A1; A6",
+     "scenario": "The record keeps commit certificates, proposer signatures, validator-set changes and governance certificates, and 'payments and account updates are never kept' (review :698-702). By default a NewKey would fall with the account updates.\n\nA careless or dishonest bank co-signs a thief's NewKey{alice -> K_T}. Once RetainBlocks has passed, nothing in the protocol shows which bank vouched, or whether a key in state was ever authorized at all, because blocks are not kept, only their certificates. 'The bank vouches for who holds it' (review :742-744) can then not be checked. A key quietly rewritten by a 2/3 coalition looks the same as an authorized one.",
+     "recommendation": "Keep every committed NewKey, with all three of its signatures, for the life of the chain, as governance certificates are kept. It carries no amount, so payment privacy is untouched. Read in order, the kept NewKeys and 2/3 name votes give each name a key history that verifies itself: each request's old key is the previous request's new key.",
+     "confidence": "high"
+    }
+   ],
+   "amendments": [
+    {
+     "id": "A1",
+     "verdict": "keep",
+     "reason": "Without proof of possession, a typo or a hostile requestor binds a name, with its balance and delegations, to a key nobody holds or to someone else's key, and only a 2/3 vote can undo it. The proof is one more signature check, over the same fields, in its own domain.\n\nAdd two checks with it: refuse a new key that is burned, and refuse one that is already some name's key. The ledger's maps are keyed by public key today (ledger.go:120-126 and :149-153, account_update.go:80-87). Two names on one key would merge balances, and one key would hold two seats (E34's lesson).\n\nSize: one 1952-byte key plus three 3309-byte signatures is about 16 KB as base64, far above a MaxMessageBytes sized for payments. The message has a fixed format (names are at most 32 bytes), so bound it by that fixed size, not by the governed cap."
+    },
+    {
+     "id": "A2",
+     "verdict": "change",
+     "reason": "Keep the BlockID, within the intake window. Once height is in state (E1, Phase 2), it makes each request single-use, and the pools evict on it (node/updatepool.go:40-54).\n\nDrop the current-key field. The requestor's signature is already checked against the name's key in the pre-block state, so a request signed by a retired key fails. A request for a free name also fails once someone takes the name, because its requestor is then not the name.\n\nPractical note: 64 blocks is about one minute at one block per second, so the bank should collect the proof of possession and its own co-signature at the end of the counter visit, not the start."
+    },
+    {
+     "id": "A3",
+     "verdict": "change",
+     "reason": "E5's rule exists because a reassignment sets an absolute balance. A key change leaves the balance alone, and checking every signature against the pre-block keys already decides which key verifies a same-block payment. Excluding payments to the name would only make payments that already got receipts lapse.\n\nWhat is needed is narrower: no payment from the requestor in the block that carries its NewKey (for a key change, the requestor is the name itself). That keeps the fee check against the pre-block balance sound; see the fee issue. The E5-style rule that matters runs the other way: a governance action on a name excludes NewKeys for that name."
+    },
+    {
+     "id": "A4",
+     "verdict": "drop",
+     "reason": "See the issue on A4. The delay helps a thief drain the account after an owner changes keys because of a leak. As worded, it burns honest retries. It needs pending state, an activation step, cancel rules and a new evidence type, and that evidence stops being verifiable once the change applies. It still gives payments, the thief's actual tool, no conflict slot."
+    },
+    {
+     "id": "A5",
+     "verdict": "change",
+     "reason": "Record the co-signing bank in a separate field under the state digest, set at registration. It must not be the delegate, which the stolen key alone can change (account_update.go:107-109); see the bank-of-record issue.\n\nThe bank of record changes by 2/3 vote, or with the current bank's co-signature if customers switch banks often. A bank that has left the validator set or been burned is handled by the 2/3 vote. The genesis file lists each name's bank of record."
+    },
+    {
+     "id": "A6",
+     "verdict": "keep",
+     "reason": "Domain separation is needed anyway (audit C1), and endorsing two requests is not an equivocation. If co-signatures were a burn slot, anyone who got two co-signatures out of a bank's automated signer could evict the bank's seat. It costs one new domain constant and no evidence type.\n\nThe co-signature must cover the same fields as the requestor's signature: name, requestor, new key, bank (and NewBank if adopted), MaxFee and BlockID. Otherwise it could be paired with a different request."
+    },
+    {
+     "id": "A7",
+     "verdict": "keep",
+     "reason": "It is already implied. The fee comes from the requestor, so the requestor must be an existing name that holds the fee, and a new key has neither. State it as a validity rule. The co-signing bank becomes the new name's bank of record (A5). Always require both signatures, even when the requestor is the bank itself; a special case would be more code."
+    },
+    {
+     "id": "A8",
+     "verdict": "change",
+     "reason": "Correct, but too narrow. Generalize it: a burned key verifies nothing (no payment, update, vote, co-signature or NewKey), and no NewKey may bind a burned key as the new key. Otherwise a thief whose double-signing got the key burned keeps draining the account with payments.\n\nThe name keeps the burned key in state, so it never counts as free (see the issue on free names). The 2/3 vote is the only way back, as the plan already says."
+    },
+    {
+     "id": "A9",
+     "verdict": "drop",
+     "reason": "There are no users and Phase 2 starts from a new genesis. The genesis file simply lists canonical names with unique keys and their banks of record, checked when it is loaded (E39). Giving key-hash names any protocol meaning would tie a name to a key that its first key change replaces."
+    }
+   ]
+  },
+  {
+   "lens": "privacy-minimality",
+   "issues": [
+    {
+     "title": "A4 as worded burns honest users who retry, crash or restore a backup",
+     "severity": "high",
+     "about": "A4",
+     "scenario": "Bob's wallet signs R1 (bob -> K2, BlockID h+3). Then either the node is down or the block fills with payments first (ledger/block.go:127-166), and R1's block passes without it. The manual treats this as routine for payments: send again (ui/USER_MANUAL.md:102-105). So the wallet signs R2 with a new BlockID. Read literally ('a second, different request for the same name signed by the same old key'), R1 and R2 are a conflicting pair. Anyone who kept R1 can present it: a dishonest validator hoarding signed messages (ui/wallet.go:30-34 already guards payments against exactly this), or a LAN sniffer, since gossip is plain HTTP (E15). Bob's key is burned and 'bob' is frozen. A rule keyed on 'a different new key' still fires in two cases. The wallet crashes after sending R1 but before saving K2, then signs R3 for a fresh K3. Or Bob restores wallet.json from a backup older than the rotation (ui/USER_MANUAL.md:29-34) and rotates again. If the evidence is a pair of signatures, an R1 that expired years ago still burns a later honest rotation. A frozen name comes back only through the 2/3 vote, which means identifying yourself at a bank. For a pseudonymous name nobody vouched for, the user must give up the pseudonym or lose the name.",
+     "recommendation": "Judge the conflict against committed state, not against pairs of signatures. A valid request for a name whose committed pending rotation names a different key burns the old key, drops the pending key and freezes the name. A request naming the pending key is a no-op, whatever its BlockID. A request that never became pending is evidence of nothing. This needs no evidence type, pool or age window. In the wallet: save the new key and the signed request before sending (ui/wallet.go:236 already does this for the payment counter), retry with the same new key, and on start ask the node for the name's current and pending key before offering a rotation.",
+     "confidence": "high"
+    },
+    {
+     "title": "The bank co-signature either lets a thief pick a careless bank or lets a bank hold its clients hostage, and it ties every name to a bank",
+     "severity": "medium",
+     "about": "proposal (the requestor's-bank signature), A5, A6",
+     "scenario": "A thief holds Alice's key, and her bank B is careful. Four cases show what the co-signature does. (1) Alice can change banks without B, or her bank is her delegate (A5's second option), which an AccountUpdate signed by the account key alone can change (ledger/account_update.go:47-50, :107-108). The thief moves Alice to the most careless bank, whose automated signer co-signs the rotation, so the gate is only as strong as the weakest bank. (2) Changing banks needs B's signature. Then a dishonest B, or a B that leaves the set or is burned (E13), freezes every client's key until a 2/3 vote. (3) A bank's own name is its own bank (genesis self-delegation, cmd/demo/main.go:55). On the most valuable key, a validator seat, the co-signature is just the thief signing twice, and only A4's delay protects it. (4) To add anything, a careful bank must identify the person, which unmasks every pseudonymous name that rotates. An automated bank adds nothing. The co-signature does stop a thief while the owner is offline for the whole delay, but only at a careful bank and under the hostage rule of case 2. Its costs: every holder needs a bank to rotate, and a sponsor's bank sees and can veto whom its client onboards. A5 also puts the bank in state, which GET /hdls/accounts serves to anyone (node/httptransport.go:252-254): a permanent list of each bank's clients on a ledger that is otherwise historyless. On top of that come 4.4 KB per request, a state field, a change-bank message, rules for banks that leave or are burned, and A6.",
+     "recommendation": "Keep the owner's onboarding at the bank (the user's key and the bank both sign) by making the bank the requestor of a free-name registration. The bank's signature pays the fee and vouches; the new key's signature (A1) is the second one. Once A7 makes the requestor a funded account, this flow already has the bank as requestor, so the separate bank signature was the same party signing twice. Require no other bank signature, store no bank in state, and drop A5 and A6. A4's delay and conflict rule protect rotations. The bank keeps its identity check off-chain and brings it to the 2/3 vote. An account then needs a bank only if it wants 2/3 recovery; one without a bank works like cash.",
+     "confidence": "high"
+    },
+    {
+     "title": "Charging the fee on every key change lets a thief silence the victim's contest by draining first",
+     "severity": "medium",
+     "about": "proposal (fee rule) + A4",
+     "scenario": "A thief with Alice's key puts two things in one block: a payment of her balance minus the fee to itself, and a rotation of 'alice' to its own key. Payments apply before updates (ledger/block.go:201-202), so the payment leaves exactly the fee and the rotation spends it. Alice's contest under A4 is a request with 'alice' as requestor, so the rule 'refused if the requestor lacks the cash' refuses it. If a friend pays 'alice' during the delay, the thief can usually drain that before her contest lands, because payments apply first in every block. After N blocks the thief holds the name, everything later paid to it and, for a bank, the seat. A4's self-service defence fails in the most ordinary theft pattern, and every case goes to the 2/3 vote.",
+     "recommendation": "Never charge a request that conflicts with a pending rotation. It is evidence: admit it whatever the balance; it can happen at most once per key. The simplest rule is to charge the fee only when a name is created. A4's one pending rotation per name already rate-limits rotations, and a rotation adds no lasting state. If the owner wants a fee on rotations (a levy on name sales), charge it only on the request that opens a pending rotation.",
+     "confidence": "high"
+    },
+    {
+     "title": "The current key (A2) and the bank signature add about 7 KB per request, and the new key's proof should not carry the BlockID",
+     "severity": "low",
+     "about": "proposal, A1, A2",
+     "scenario": "ML-DSA-65 keys and signatures are 2604 and 4412 base64 characters. The proposal with A1 and A2 carries two keys and three signatures, about 18.6 KB of JSON: four times a payment of about 4.6 KB (review :727-728). One governed MaxMessageBytes bounds payments and updates alike (ledger/parameters.go:31-36; ledger/block.go:138, :159; node/updatepool.go:66). Raising it to fit this request lets an update's Description grow by about 14 KB, and Description is permanent state hashed into every digest (ledger/digest.go:37). The 768 KiB block budget (ledger/block.go:30), filled with payments first, holds about 42 such requests. If A1's proof also signs the BlockID, the user and the sponsor must both sign within one 64-block window (node/mempool.go:13). That is about a minute at the documented 1000 ms interval (docs/operating-a-network.md:41, :70). A 7 KB key-plus-proof is too big for a QR code and cannot be typed. So a request prepared at home and countersigned at the bank later fails.",
+     "recommendation": "Drop the name's current key from A2: the requestor's signature is verified against the current key, and the BlockID makes the request single-use. Drop the separate bank signature (see the bank issue). Have the new key sign only (name, new key), and let the requestor's signature carry the BlockID. Replaying that proof is harmless: a free name is registered once, and a bound name changes only through its current key or the 2/3 vote. That leaves one key and two signatures, about 11.6 KB, the same size as the owner's original request. Measure the size bound without the fixed-size key and signature fields, so the cap bounds only free text.",
+     "confidence": "high"
+    },
+    {
+     "title": "Fold it into what already exists instead of adding a third way to bind a name",
+     "severity": "low",
+     "about": "proposal, A3",
+     "scenario": "Today a name is bound by AccountUpdate.Name (ledger/account_update.go:18, :98-105). The Phase 2 plan adds a separate 2/3 name-reassignment action (review :691-692), and new_key adds a third path with its own fee, ordering and exclusion rules. In Phase 2 every account already is a name, so AccountUpdate.Name has nothing left to claim. A separate 2/3 action would duplicate Reassignment's certificate, sequence, pool and exclusion rule.",
+     "recommendation": "Minimal version. (1) Delete AccountUpdate.Name and its claim branch (ledger/account_update.go:81-87, :98-105). (2) Add one NewKey message: Name, Requestor, NewKey, BlockID, the requestor's signature and the new key's signature. For a free name: any funded requestor, effective in its block, fee burned. For an assigned name: the requestor is the name itself, effective N blocks later (A4). NewKey applies after payments, as updates do (ledger/block.go:201-202). If the balance left after payments can't cover the fee, the request lapses, and the fee never counts toward the overdraw ban (ledger/ledger.go:194-203). The new key must be neither burned nor already in use (A8). (3) The 2/3 path is the existing Reassignment plus an optional NewKey and key signature. That reuses its certificate, sequence and complete-certificate pool (node/reassignment.go:28-49), and its account-creating grant (ledger/reassignment.go:113-125), since a newcomer now needs a key. It also reuses E5's exclusion (ledger/block.go:189-199, :281-285), which is all A3 needs once it also drops that name's NewKey requests and clears its pending rotation. The freeze stays a separate action, because Reassignment is bound to the balance (ledger/reassignment.go:94, E30). (4) Leave out a bank or sponsor field, a delegation set by NewKey (delegation stays the holder's own AccountUpdate) and any hash-name rule. Wallet flows. Onboarding: the wallet writes {name, key, key signature} to a file; the bank or any sponsor countersigns and submits it; the wallet confirms through /hdls/resolve. First payment: the payer sponsors the name in one block and pays it by name in a later block, since intake refuses unregistered names (node/node.go:554-560). Replacing a key: save, sign and submit; show 'pending until block h+N' and keep the old key until then. If a rotation appears that the wallet did not make, offer 'contest', warning that it freezes the name until the banks vote.",
+     "confidence": "medium"
+    },
+    {
+     "title": "What becomes public is unspecified, and the documented cash-like account needs a new path",
+     "severity": "low",
+     "about": "proposal",
+     "scenario": "The docs promise that anyone can make an account from a fresh keypair and spend without tying it to their name (docs/managing-the-currency.md:274-280). They call 'every account is forced to carry a registered identity' a sign of a surveillance state (:286-287). Under the proposal every name needs a funded sponsor and, as written, that sponsor's bank. A hash name or random name keeps the holder's identity off the ledger, but anyone watching live sees the sponsor. Gossip is plain HTTP (E15), and /hdls/checkpoint shows the fee leaving the sponsor's balance as the name appears. That is the same exposure a funding payment has today. A pending rotation is public for N blocks. The owner wants that for sales, but it also signals a compromised key. A late observer sees only the current key; a live one sees every change, as with balances. Nothing says whether NewKey requests go into the signature record. If they were kept like governance certificates (review :700-701), they would form a permanent public graph of who onboarded whom and of every name's key history.",
+     "recommendation": "Treat NewKey requests like account updates: never kept (review :701). A4's conflict needs only the committed pending rotation, so nothing more is retained; the 2/3 name vote is kept as a governance certificate. State holds name, key, pending key and its height, balance, delegation, description and address: no bank, no sponsor, no creation height. Hash names need no protocol rule. The wallet defaults to a random or key-hash name and stores it, because after a rotation the name no longer matches the key. Rewrite the prepaid-key paragraph and ui/USER_MANUAL.md:118-123: the cash-like path is now a sponsor that mints names for many people, for example a bank selling them for cash, and only live watchers see who sponsored a name.",
+     "confidence": "medium"
+    }
+   ],
+   "amendments": [
+    {
+     "id": "A1",
+     "verdict": "change",
+     "reason": "Keep the new key's signature. It stops a mixed-up request file, a sponsor's mistake or a 2/3 vote from binding a name to a key nobody holds, or to someone else's key (with one key per name, that would also block the other person's own registration). It costs one signature, exactly what dropping the bank signature saves. Change what it signs: (name, new key), without the BlockID, so a request prepared at home can be countersigned later. Replaying it is harmless. With the bank as requestor, this is the owner's two-signature onboarding."
+    },
+    {
+     "id": "A2",
+     "verdict": "change",
+     "reason": "Keep the BlockID on the requestor's signature: it makes the request single-use and puts it under E21's 64-block intake window. Drop 'the name's current key': the signature is verified against the current key, so a request made under a key that has since changed fails anyway. Carrying the key costs 2.6 KB per request for nothing."
+    },
+    {
+     "id": "A3",
+     "verdict": "drop",
+     "reason": "A self-service key change overwrites no balance, so there is nothing to dodge. E5's harm came from the vote setting a balance after payments (ledger/block.go:201-206). The rule actually needed is that a block's payments verify against the pre-block key, just as recipients already resolve against the pre-block registry (ledger/ledger.go:170-172). Old-key payments still pending after the switch simply lapse. For the 2/3 path, the exclusion comes free if the name vote is a field of the existing Reassignment (ledger/block.go:189-199, :281-285)."
+    },
+    {
+     "id": "A4",
+     "verdict": "change",
+     "reason": "Keep the delay: it is the owner's 'n frames' for name sales, and the only protection that also covers banks' own names. Keep the burn: selling a name twice is two conflicting statements. Change the conflict slot. A conflict is a request for a name whose committed pending rotation names a different key. The same key is a no-op, a request that never became pending proves nothing, and a conflicting request is never charged a fee. The wallet saves before sending. Note that A4 adds a conflict slot only for a takeover: a thief who just drains the balance never signs one, so E44 stays open."
+    },
+    {
+     "id": "A5",
+     "verdict": "drop",
+     "reason": "Without a separate bank signature there is nothing to record. A bank field in state would publish every bank's client list through GET /hdls/accounts. It would also need change-bank rules and rules for banks that leave or are burned, and each such rule either lets a thief bypass the bank or lets the bank hold its clients hostage."
+    },
+    {
+     "id": "A6",
+     "verdict": "drop",
+     "reason": "Moot without a bank co-signature. With the bank as requestor of free-name registrations, its signature is not a burn slot anyway: A4's slot covers only assigned names, and two clients racing for one free name is normal. If the owner keeps a separate bank co-signature, keep A6."
+    },
+    {
+     "id": "A7",
+     "verdict": "keep",
+     "reason": "It needs no extra rule: the fee check already refuses an unfunded requestor, and a key with no name cannot be a requestor at all, since messages name their signer. It keeps peer onboarding and a cash-like path (a sponsor that mints names for many people), with the same exposure a funding payment has today. Restricting requestors to banks would be a one-line check, but it would end the bank-free path that docs/managing-the-currency.md:279-280 calls a civil-liberties bellwether."
+    },
+    {
+     "id": "A8",
+     "verdict": "change",
+     "reason": "Also refuse a burned key as the new key. A burned key can still sign a proof of possession, so any sponsor could give it a fresh name and make it a working credential again. Also refuse a key that is any name's current or pending key. One key per name stops a wallet from publicly linking two pseudonyms through a shared key, and keeps a burn from freezing names the conflict never touched."
+    },
+    {
+     "id": "A9",
+     "verdict": "drop",
+     "reason": "There are no users (review :104-105), so the new genesis lists every account by name. Genesis validation (E39) should refuse a nameless or non-canonical account. A derived-name migration rule would be code for accounts that do not exist."
+    }
+   ]
+  }
+ ],
+ "synthesis": {
+  "verdict": "Yes. One new_key message that both registers a free name and re-keys an assigned one, gated by the holder's key, a bank's co-signature and a burned fee set in the ledger parameters, is the 'register your key at your bank' flow the Phase 2 plan left open. With names as the identity it needs no separate rule for unnamed keys. As written it has three holes: 'the requestor's bank' must be a bank of record fixed in state (never chosen by the request or taken from the self-signed delegation); a name holding a validator seat must never change key this way (the seat would follow a stolen key, and a double-signer could rotate out of its burn); and 'free' must mean never registered. With those closed, the minimal form drops the requestor field (a registration's requestor is its bank), adds the new key's proof of possession, has no delay and no burn slot, and leaves theft, seats and bank changes to the ⅔ name vote.",
+  "must_fix": [
+   {
+    "title": "A name that holds a validator seat must not change key by new_key",
+    "severity": "high",
+    "scenario": "Banks delegate to themselves by default (credit-created accounts at ledger/ledger.go:237, the demo genesis at cmd/demo/main.go:55), so for a bank, 'the requestor's bank' is the bank itself. (1) Capture: a thief who recovers bank V's key signs new_key{V -> K_thief} twice. Stake is delegated to the name, so from the next height V's seat, power and governance votes answer to K_thief. The real bank's votes then fail the name-to-key lookup and are dropped as invalid. They never pair with the thief's votes, so the burn rule never fires. With more than ⅓ of the power, the thief can also block the ⅔ vote that would undo it. (2) Escape: a validator pools new_key{V -> K2} for height h, then double-signs at h with its old key. Honest proposers build h from their pools (node/node.go:588), so the change commits in h. The evidence lands at h+1 at the earliest and either fails to verify against K2 or burns a key the seat no longer uses. Today a node also stops carrying evidence once the offender leaves the set (slashEvidence, node/node.go:507; the prune in commit, :864). So a dynamic-mode validator can also leave the set first and then rotate.",
+    "rule": "A new_key is invalid when its name is in the validator set that governs the block. ApplyBlock already receives that set; treat a missing set as invalid, as ParameterChange.Valid does (ledger/governance.go:69). A seated name changes key only by the ⅔ name action, whose certificate the signature record keeps. Genesis validators get no bank of record, so they can never use new_key. For E13: check evidence against the validator set (name, key, power) recorded for the evidence's height. Then burn the key and freeze the named validator, even if it has since left the set.",
+    "lenses": "attacker, state-transition, banks-lifecycle (privacy-minimality flagged the same case)"
+   },
+   {
+    "title": "'The requestor's bank' must be a bank of record fixed in state",
+    "severity": "high",
+    "scenario": "Mallory steals alice's key, and alice's bank is careful. If the request names its own bank, Mallory picks one whose automated signer co-signs anything. If the bank is alice's delegate (A5's second option), Mallory first sends AccountUpdate{Delegated: lax-bank}, signed by the stolen key alone (ledger/account_update.go:107-109), and moves the name in the next block. Every later 'pay alice' then credits Mallory, and every name is only as safe as the least careful bank. A fallback such as 'any validator may co-sign when your bank is unseated' reopens the door whenever a bank dips below the dynamic threshold (node/validators.go:31). Requiring a seat for every co-signature instead strands a bank's customers whenever one big delegator moves away.",
+    "rule": "Add one account field, Bank (a name), under the state digest and separate from the delegate. Registration sets it to the co-signing bank, which must be in the validator set at that point. No AccountUpdate can change it. Every later new_key for that name needs that bank's co-signature, and the request's Bank field must equal it. A later co-signature needs the bank's key unburned and the bank not frozen, but no seat. There is no fallback to another bank. Only the ⅔ name action changes the bank of record, or sets none, which leaves key changes to ⅔ only. A name is never its own bank (checked at genesis and in the ⅔ action). Docs: a bank co-signs a key change only after checking the holder in person or by a second channel, never on the old key's signature alone.",
+    "lenses": "attacker, state-transition, banks-lifecycle (privacy-minimality raised the same bypass but proposed dropping the bank signature)"
+   },
+   {
+    "title": "'Free' must mean never registered; a burn or freeze never frees a name",
+    "severity": "high",
+    "scenario": "The plan's wording ('the seat comes back when the name is voted to a new key') invites building a burn or a freeze by clearing the name's key. Suppose a keyless name then counts as free. The moment bank B's key is burned, a dishonest bank D sends new_key{B -> a key D generated}, with its own co-signature, its own proof of possession and the fee. D then takes B's balance, its seat and every delegation to B, possibly crossing ⅓ of the power. A theft victim whose name the banks froze can be taken the same way.",
+    "rule": "A name is free only if no account with that name exists. Named accounts are never deleted (ledger/ledger.go:249), so a name is registered once. A burn or freeze never clears the key. A name whose key is burned, or which is frozen, changes key only by the ⅔ name action. A burned key can be neither the holder, the co-signing bank nor the new key. A new key must not be any name's current key, so a burned key maps to exactly one name.",
+    "lenses": "state-transition; attacker, banks-lifecycle and privacy-minimality under A8"
+   },
+   {
+    "title": "The fee needs one rule shared by intake, ProposeBlock and ApplyBlock",
+    "severity": "medium",
+    "scenario": "R holds 100 and signs a payment of 100 and a new_key with a fee of 10, both for block h. Each passes a pre-block check on its own: withinBalance covers payments only (ledger/ledger.go:132-138), and the overdraw ban sums payments only (:194-203). What happens next depends on choices the proposal leaves open. If the fee is debited after ProcessPayments, R ends at -10 and drags down its delegate's power. If a new_key that can't pay is skipped but still carried, as applyAccountUpdates skips a taken name (ledger/account_update.go:98-105), about 16 KB rides in the block for free. If ProposeBlock and ApplyBlock place the check differently, every honest proposal for h fails while the pair sits in the pools. Separately, a fee raised by ⅔ inside the 64-block window changes what an already signed request costs. Nothing signed bounds that debit, whereas a payment's cost comes out of its signed amount (ledger/ledger.go:212-214).",
+    "rule": "The fee payer is the name for a key change and the bank for a registration. A block that carries a new_key carries no payment from its fee payer: the proposer prefers the new_key, and the payer's payments for that block lapse, as under E5. A payer's fees in one block add up to at most its pre-block balance. The fee is a signed field and must equal NewKeyFee in the pre-block parameters, or the request lapses. NewKeyFee goes into LedgerParameters.fields(), so it is in the digest and the vote preimage, and Acceptable requires it to be above 0. One shared check runs at intake, in ProposeBlock and in ApplyBlock, as withinBalance does. ApplyBlock rejects a block whose new_key fails the check and never skips the request. A block carries at most one new_key per name and per new key. ApplyBlock must enforce this itself: today it does not even enforce one update per account (ledger/block.go:253-258).",
+    "lenses": "state-transition, attacker, banks-lifecycle (under A3)"
+   },
+   {
+    "title": "Port key checks to (name, key), not to the name alone",
+    "severity": "medium",
+    "scenario": "verifyCheckpoint (node/node.go:457-475) first checks a checkpoint's commit against the signer set the checkpoint itself carries. It then credits each voter with its power in the node's anchor. The wallet pin works the same way (ui/trust.go:105). That is safe today only because a voter is its key. Once votes name their signer and keys come from state, a straight port credits names. A dishonest catch-up source can then serve a state that gives the real banks' names keys it holds, sign the commit with those keys, and pass both checks. A restarting node or a wallet then adopts the forged state (E3's class). Key changes by new_key or by the ⅔ vote make this case routine.",
+    "rule": "The node's anchor and the wallet's pin store (name, key, power). A vote counts toward them only if it verifies under the key they hold for that name. Document that a node or wallet that slept through bank re-keys re-seeds from its bank, as E3 already says for validator-set turnover.",
+    "lenses": "banks-lifecycle"
+   },
+   {
+    "title": "The freeze and the ⅔ name vote must bind the name, and win over new_key",
+    "severity": "medium",
+    "scenario": "The banks are collecting a ⅔ freeze of alice. The thief holds alice's key and gets an automated co-signature from her careless bank, then lands new_key{alice -> K_thief} in the same block. If the freeze is recorded against alice's key, it lands on a key she no longer holds, and the thief spends freely. If the name vote binds the name's current key, as Reassignment binds PreviousAmount (ledger/reassignment.go:94) and the pool prunes it once that changes (node/reassignment.go:79-86), each rotation makes the certificate stale. That is E30's remaining limit, moved from balances to keys.",
+    "rule": "The freeze and the ⅔ name action bind only (name, governance sequence), and new_key does not bump the sequence. Build the name action as Reassignment with two optional fields: NewKey (with the new key's proof of possession) and Bank. Leave PreviousAmount empty when the action does not set the balance. It then reuses Reassignment's certificate, sequence, complete-certificate pool and account-creating grant. Governance and evidence win over new_key. A block carries no new_key when its ⅔ action targets that name or its bank, or when its evidence burns a key that signed the request. This extends touchesAccount and E5's filter (ledger/block.go:189-199, :281-285). A name or bank frozen in the pre-block state cannot appear in a new_key, and the frozen mark is under the state digest.",
+    "lenses": "state-transition, banks-lifecycle"
+   },
+   {
+    "title": "Intake must bound new_key requests by their fee and verify them off the event loop",
+    "severity": "medium",
+    "scenario": "A request is about 16 KB as base64: one 1952-byte key and three 3309-byte signatures. About 48 fit the 768 KiB block budget (ledger/block.go:30). Suppose intake copies today's update intake (window, account exists, size, dedup: node/updatepool.go:63-67) and checks the fee per request. Then a payer holding one fee, with a bank that co-signs automatically, can pool thousands of requests for different names or new keys. The update pool shares the 10,000-slot MaxMempool default (cmd/server/config.go:177, node/node.go:152). That is about 160 MB per node, and honest registrations are refused or silently dropped (E21's pattern). Also, a message that carries no key can't be verified in the HTTP handler, which is where updates are verified today (node/httptransport.go:171-183). Each junk request that names a real holder and bank then costs signature checks on the single event loop (E6, E12).",
+    "rule": "Count a pooled request's fee in its payer's pending outgoing (mempool.outgoingFor, and dropOverdrawn after each commit). Refuse a payment and a new_key from the same payer for the same block. Pool at most one request per name per BlockID. Run the cheap checks first: exact key and signature sizes, window, name and bank exist, not seated, frozen or burned, fee covered. Then verify off the loop against the published committed accounts (publishAnchor, node/node.go:404). After each commit, purge pooled requests, payments and updates signed by a key that no longer belongs to its name. The message has no free text, so bound it by its fixed field sizes, not by MaxMessageBytes.",
+    "lenses": "attacker, state-transition"
+   }
+  ],
+  "message_fields": [
+   "Name: the name to bind, in the canonical character set, at most 32 bytes. If no account has ever had it, the request is a registration; otherwise it is a key change.",
+   "NewKey: the ML-DSA-65 public key to bind (1952 bytes, canonical base64). It must not be burned, and it must not be any name's current key. It is the only key the message carries.",
+   "Bank: the vouching bank, by name. For a registration the bank is also the requestor: it must be in the validator set that governs the block, it pays the fee, and it becomes the name's bank of record. For a key change it must equal the bank of record in state.",
+   "Fee: the fee to burn. It must equal NewKeyFee in the pre-block parameters. The name pays it for a key change, and the bank pays it for a registration.",
+   "BlockID: the exact block the request lands in, within the 64-block intake window. It makes the request single-use and lets the pools evict it.",
+   "HolderSignature: present only for a key change, empty for a registration. Signed by the name's current key in state, in a new domain 'new-key', over (Name, NewKey, Bank, Fee, BlockID).",
+   "BankSignature: signed by the bank's current key in state, in its own domain 'new-key-bank', over the same (Name, NewKey, Bank, Fee, BlockID). For a registration it is also the requestor's signature. It is not a burn slot.",
+   "KeySignature: the proof of possession, signed by NewKey in its own domain 'new-key-possession', over the same (Name, NewKey, Bank, Fee, BlockID). It is not a burn slot.",
+   "Left out: there is no requestor field (a key change's requestor is the name, a registration's is the bank), no current-key field (the holder's signature is checked against the key in state), and no sponsor. A key change is about 16 KB with its three signatures, and a registration about 11 KB. signing.Preimage adds the protocol tag, the network id and the domain to every signature."
+  ],
+  "validity_rules": [
+   "A name is free only if no account with that name exists. Named accounts are never deleted, and a burn or freeze never clears a key, so a name is registered once.",
+   "Every signature in a block verifies against the keys in the pre-block state. The name's key switches at the end of the block that carries the request; there is no delay.",
+   "A request is invalid if any of these holds: BlockID is not the block's height; the name is in the validator set that governs the block (a missing set counts as invalid); a key change's name has no bank of record, or Bank differs from it; a registration's Bank is not in that validator set; the name or the bank is frozen; the name's key or the bank's key is burned; NewKey is burned or is any name's current key; Fee differs from the pre-block NewKeyFee; the name is not canonical; a key or signature is not its exact size. ApplyBlock rejects a block that carries such a request, and ProposeBlock and intake leave it out.",
+   "Per block: at most one request per name and per NewKey. A block that carries a request carries no payment from its fee payer: the proposer prefers the request, and those payments lapse, as under E5. A payer's fees in one block add up to at most its pre-block balance.",
+   "Governance and burns win: a block whose ⅔ action targets the name or the bank, or whose evidence burns a key that signed the request, does not carry that request.",
+   "Order inside ApplyBlock: payments first. Then requests: burn the fee and set the key, and for a registration create the account at zero balance with its bank of record. Then account updates, then slashes and burns, then the governance action.",
+   "After each commit, the pools drop requests, payments and updates signed by a key that no longer belongs to its name, and dropOverdrawn counts pending fees as outgoing.",
+   "There is no conflict slot. Two different requests for one name, whether from the holder or from the bank, are logged for operators and burn nothing.",
+   "The ⅔ name action is Reassignment with two optional fields, NewKey (carrying the new key's proof of possession) and Bank, with PreviousAmount left empty when the balance is not set. It binds only (name, governance sequence). It is the only way to re-key a seated, burned, frozen or bankless name, and the only way to change a bank of record. It never makes a name its own bank.",
+   "E13: evidence is checked against the validator set (name, key, power) recorded for its height. It burns the key and freezes the named validator, even if the validator has since left the set.",
+   "Delete AccountUpdate.Name and its claim branch (ledger/account_update.go:98-105). Delegation stays a key-signed AccountUpdate and has no say in who co-signs.",
+   "LedgerParameters gains NewKeyFee, inside fields(), so it is in the digest and the vote preimage. Acceptable requires it to be above 0. The genesis lists every account as (name, key, balance, delegate, bank). Every static validator holds a named account with no bank. Genesis validation rejects duplicate or non-canonical names, duplicate keys, a bank that is not a genesis validator, and a name that is its own bank."
+  ],
+  "amendments": [
+   {
+    "id": "A1",
+    "verdict": "keep",
+    "reason": "All four reviewers keep it; one would sign less. Without it, a bank's typo or a hostile requestor binds a name, with its balance, delegations and incoming payments, to a key nobody holds or to a stranger's key. With one key per name, that would also block the stranger's own registration, and only a ⅔ vote could undo it. It is also your 'double signature setup': the user's key and the bank's both sign. It costs one signature and one check. It must cover the whole request, name included, in its own domain, or it could be lifted onto another request. One option: if requests prepared at home must outlive the 64-block window, the possession signature alone can leave out BlockID and Fee. Replaying it can then only bind the same key to the same name at the same bank."
+   },
+   {
+    "id": "A2",
+    "verdict": "change",
+    "reason": "All four reviewers change it. Keep the exact BlockID within the 64-block window. It makes each request single-use, lets the pools evict it (E21), and stops a proposer from holding a co-signed request back for a block of its choosing. Drop the current-key field. The holder's signature is already checked against the key in state, so a request made under a retired key fails anyway, and the field costs 2.6 KB. Don't turn BlockID into an expiry, as banks-lifecycle suggests: an expiry lets a request replay if a name returns to an earlier key inside the window. Once A4 is dropped, a request that misses its block is simply signed again. The bank collects all the signatures at the end of the counter visit, and the wallet names a block further ahead for new_key than its 3-block payment lookahead."
+   },
+   {
+    "id": "A3",
+    "verdict": "change",
+    "reason": "The reviewers split between dropping it and narrowing it; both agree its reason doesn't apply. E5 exists because a reassignment sets an absolute balance after the block's payments (ledger/block.go:189-206). A key change moves no balance. Payments in the block where the key switches verify against the pre-block key, and pooled payments signed by the old key fail afterwards. Excluding incoming payments would only make payments that already have receipts lapse. Keep two narrower rules instead. First, the fee payer sends no payment in the block that carries its request, which keeps the pre-block fee check sound. Second, E5 in reverse: a ⅔ action or a burn on the name drops the request."
+   },
+   {
+    "id": "A4",
+    "verdict": "drop",
+    "reason": "Two reviewers drop it, and two keep the delay with a redefined conflict. As worded, it burns honest users. A request that misses its block is signed again with a new BlockID or a new key, and a dishonest validator or a LAN sniffer that kept the first copy now holds a 'conflicting pair'. That is E2's lesson again, and user wallets have no sign log. The repaired version judges the conflict against a committed pending change and accepts a contest without fee or bank. That is the notify-and-cancel feature you leaned against: pending state under the digest, a maturity step every block, cancel and re-check rules, and a contest path. The delay also keeps a leaked key valid for N more blocks after its owner reacts, while payments, the thief's real tool, still have no conflict slot (E44). With seats excluded and a bank of record in place, what remains is a thief plus the victim's own careless bank. That is the rare case the ⅔ freeze and name vote are for. If sales should still take 'n frames', the bank of record can hold back its co-signature for a cooling-off period: that is policy, with no code. Log two different requests for one name for operators."
+   },
+   {
+    "id": "A5",
+    "verdict": "change",
+    "reason": "Three reviewers change it; privacy-minimality drops it along with the bank signature. Keep only the first option: record the bank by name at registration, in its own field under the digest. Never derive it from the delegation, which the stolen key alone can change (must-fix 2), and never let the request choose it. Change it only by the ⅔ name action. A later co-signature needs the bank's key unburned and the bank not frozen, but no seat; otherwise a stake dip in dynamic mode strands the bank's customers. There is no fallback to another bank. When a burned bank's name is voted to a new key, its customers follow automatically, because the field is a name. Cost: each name's bank is public through GET /hdls/accounts, much as the delegate is today."
+   },
+   {
+    "id": "A6",
+    "verdict": "keep",
+    "reason": "Every reviewer who keeps a bank signature keeps A6. Privacy-minimality drops it only because it drops that signature. The co-signature needs its own domain (signing/domain.go asks for one per payload type). It must not be a conflict slot. Otherwise any customer, or a thief with a customer's key, could get an automated desk signer to co-sign two different requests and burn the bank's key. With one key per name, that key is also the bank's consensus key and its seat. Endorsing two requests is not equivocation. Because all signatures cover one preimage, a co-signature can't be reused on another request."
+   },
+   {
+    "id": "A7",
+    "verdict": "change",
+    "reason": "Attacker changes it; the other three keep it, banks-lifecycle noting that the bank is the natural requestor. With names as identity, an unnamed key can neither sign nor pay, so 'the requestor is a funded named account' already holds. Go one step further and make a registration's requestor the bank itself. It pays the fee, signs once and becomes the bank of record, and the new key's proof of possession is the second signature. That removes the requestor field and one 3.3 KB signature. It also stops a sponsor's bank from vouching for a stranger it never met and then gating that stranger's key changes. A sponsor pays the bank with an ordinary payment. This narrows your 'anyone if it was free' (see the open questions)."
+   },
+   {
+    "id": "A8",
+    "verdict": "change",
+    "reason": "All four keep it, and three extend it. A burned key can be neither the holder, the co-signing bank nor the new key; otherwise any bank could give a burned key a fresh name and make it a working credential again. A new key must not be any name's current key, so a burn maps to exactly one name and no shared key links two pseudonyms. A frozen name can be neither the name nor the bank in a request. A name whose key is burned, or which is frozen, changes key only by the ⅔ name action, and such a name never counts as free (must-fix 3)."
+   },
+   {
+    "id": "A9",
+    "verdict": "drop",
+    "reason": "All four drop it. Nothing needs migrating: there are no users, and the ML-DSA genesis replaces every key anyway. The new genesis lists every account by name, and its validation rejects unnamed, non-canonical or duplicate names and duplicate keys. With names as identity there are no unnamed accounts, so your 'a key with no name refuses payments' needs no rule of its own. AccountUpdate's name claim becomes dead code and goes."
+   }
+  ],
+  "open_questions": [
+   "Who may register a free name? I recommend only a bank: it pays, signs once and becomes the bank of record, and a sponsor pays the bank by ordinary payment. Your text says anyone, which adds a requestor field, a third signature, and a bank vouching for someone it never met.",
+   "Should a key change wait N blocks ('n frames') so it can be stopped? I recommend no protocol delay. A delay needs pending state, a maturity step and cancel rules, and it keeps a leaked key valid for N more blocks. A bank of record can impose a cooling-off for sales as policy.",
+   "Should new_key be a burn slot under your rule (two different requests signed by one key)? I recommend no. Wallets have no sign log, so retries and restored backups would burn honest keys and freeze names, and payments, the thief's real tool, still have no slot (E44).",
+   "How does a customer change banks? Only by the ⅔ name action (the smallest option), or also by a request that both the old and the new bank co-sign (one more signature and one more rule)?",
+   "Charge the fee on every key change, as you wrote, or only on registration? With a fee on every change, a theft victim whose balance was drained needs a top-up from the bank before re-keying, or the ⅔ path.",
+   "Every account now needs a bank to exist, and its bank of record is public. Will banks register pseudonymous names, for example sold for cash? docs/managing-the-currency.md:274-287 promises a prepaid-key cash path and calls 'every account forced to carry a registered identity' a surveillance smell. Those passages need rewriting either way.",
+   "Hash-of-key names: a wallet convention only, or a reserved self-certifying form? For example, 'k-' plus 26 base32 characters of the key's SHA-256, valid at registration only for the key it hashes. That is about 3 lines, and it stops anyone registering your hash name first from gossip.",
+   "Signature record: keep committed new_key requests, including the bank co-signature that shows who vouched for a key? The choices are for RetainBlocks heights, for the chain's life like governance certificates, or never, like account updates.",
+   "Phase 3: with one key per name, a bank co-signs with its consensus key, so the desk software must reach the bank's signer. Accept a signer that exposes only the new-key-bank domain to the desk, or plan a separate co-signing key per bank?"
+  ],
+  "rejected": [
+   {
+    "title": "Free names, hash names included, can be sniped from gossip (attacker)",
+    "reason": "Not kept as a must-fix. First-come is inherent to readable names. A snipe needs a dishonest bank, or one that co-signs automatically, and costs a fee and that bank's signature. It is traceable to the recorded bank and correctable by the ⅔ name vote. Intake already refuses payments to unregistered names (node/node.go:554), so nobody can pay a name before it lands, and the wallet should show a name only after /hdls/resolve confirms it. The self-certifying hash-name form is an open question."
+   },
+   {
+    "title": "The bank co-signature can be bypassed or can hold clients hostage, so drop it, the bank field, A5 and A6 (privacy-minimality)",
+    "reason": "You asked for the bank's signature. The bypass that report describes, a thief picking or re-delegating to a lax bank, is closed by a bank of record. A bank that refuses or disappears blocks only key changes, not payments, and the ⅔ name action covers that case. The privacy cost is real and is listed as an open question."
+   },
+   {
+    "title": "Charging the fee lets a thief silence the victim's contest by draining first (privacy-minimality)",
+    "reason": "Moot once A4's contest path is dropped. The trade-off that remains, a drained victim needing a top-up or the ⅔ path, is an open question."
+   },
+   {
+    "title": "Make BlockID an expiry sized for the bank's counter step (banks-lifecycle)",
+    "reason": "An exact BlockID matches payments and updates and keeps the pool bound and the replay guard simple. An expiry lets a request replay if a name returns to an earlier key inside the window. Once A4 is dropped, a request that misses its block is signed again at no risk, and collecting all the signatures at the end of the visit fits easily in a 64-block window."
+   },
+   {
+    "title": "Keep A4's delay and judge the conflict against committed pending state (attacker, privacy-minimality)",
+    "reason": "It works, but it is heavy: pending state under the digest, a maturity step, cancel and re-check rules, and a contest path. That is the notify-and-cancel feature the owner leaned against. It still leaves payments without a conflict slot and keeps a leaked key valid for N more blocks. Replaced by no delay plus the ⅔ freeze and name vote."
+   },
+   {
+    "title": "Count the fee in the overdraw sum, since a proposer could time a request to trip the ban (attacker)",
+    "reason": "Not needed under the recommended rule. A request's fee payer sends no payment in that block, so the fee never enters the overdraw sum and there is nothing to time."
+   },
+   {
+    "title": "Keep every committed new_key for the life of the chain (state-transition), or never keep it (privacy-minimality)",
+    "reason": "This is a retention policy, not a defect. The bank of record in state already shows who vouches for each name today. Listed as an open question."
+   },
+   {
+    "title": "Registration sets the delegate to the bank by default (state-transition)",
+    "reason": "The design doesn't need it, and E42 warns against auto-delegation. Delegation stays the holder's own AccountUpdate, set through the wallet's delegate field."
+   },
+   {
+    "title": "A validator's self-re-key leaves its old-key vote in pooled certificates and spoils them (banks-lifecycle)",
+    "reason": "Moot with the seat rule. A seated name changes key only by a ⅔ action, which bumps the governance sequence and retires every in-flight certificate anyway (pruneReassignments and pruneParameterProposals)."
+   }
+  ]
+ }
+}

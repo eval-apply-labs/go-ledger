@@ -1,0 +1,57 @@
+--- a/node/node.go
++++ b/node/node.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"errors"
+ 	"math/big"
++	"sync/atomic"
+ 	"time"
+ 
+ 	"github.com/eval-apply-labs/go-ledger/consensus"
+@@ -107,6 +108,7 @@
+ 	relaySeen          map[string]bool           // relay dedup, so a message floods a multi-hop topology once
+ 	heightVotes        map[string]consensus.Vote // votes seen at the current height, re-gossiped periodically (see reGossipLoop)
+ 	heightProposals    map[int32]ProposalMsg     // authentic proposals seen at the current height, by round (first wins, like the driver)
++	anchor             atomic.Pointer[[]ledger.Account] // last committed accounts, for the catch-up goroutine
+ 
+ 	heightVals     *consensus.ValidatorSet // the set governing the height in progress
+ 	lastCommitVals *consensus.ValidatorSet // the set that signed lastCommit (served in checkpoints)
+@@ -145,6 +147,7 @@
+ 		reassignmentProposals: map[string]*ledger.Reassignment{},
+ 	}
+ 	n.loadSnapshot()
++	n.publishAnchor()
+ 	return n
+ }
+ 
+@@ -349,7 +352,10 @@
+ 	n.heightVotes = map[string]consensus.Vote{} // votes from the abandoned height no longer apply
+ 	n.heightProposals = map[int32]ProposalMsg{} // likewise its proposals
+ 	n.resolvePeersFromState()                   // adopt the peer addresses published in the synced state
+-}
++	n.publishAnchor()
++}
++
++func (n *Node) publishAnchor() { accts := n.accounts; n.anchor.Store(&accts) }
+ 
+ // catchUp lets a RUNNING node that fell behind (missed a commit window) fast-forward to a peer's
+ // later verified checkpoint and resume consensus at the new height, instead of staying stuck. Stale
+@@ -653,6 +659,7 @@
+ 		}
+ 	}
+ 	n.saveSnapshot()
++	n.publishAnchor()
+ 	n.height++
+ 	n.mem.dropBelow(n.height) // stale payments (their block has passed) can never replay
+ 	// Re-establish the intake invariant against the NEW balances: a commit can shrink a payer's
+--- a/node/sync.go
++++ b/node/sync.go
+@@ -95,7 +95,7 @@
+ 		}
+ 		// Anchor trust on genesis here (immutable → race-free in this goroutine); adopt re-verifies
+ 		// against the live state in the loop before it takes effect.
+-		if !n.verifyCheckpoint(cp, n.cfg.Genesis) {
++		if !n.verifyCheckpoint(cp, *n.anchor.Load()) {
+ 			continue // invalid quorum, digest mismatch, or no trusted validator vouches for the set
+ 		}
+ 		if !found || cp.Commit.Height > best.Commit.Height {

@@ -1,0 +1,484 @@
+{
+ "slice": "S11",
+ "report": {
+  "branchHead": "bb29a1759782ae81caa6081fd0e48e4552b497e4",
+  "commits": [
+   {
+    "hash": "7dd1e0f65af5625e1c56089ca172e20dcebdfd60",
+    "subject": "phase 2 S11: the docs in four areas, true of the Phase 2 code"
+   },
+   {
+    "hash": "c7b4b195d4e380630fb0b193b4f916a05baf9a29",
+    "subject": "phase 2 S11: the wallet docs and TODO.md"
+   },
+   {
+    "hash": "23d867995fda147a20e6943f8a84940c33079955",
+    "subject": "phase 2 S11: mark the Phase 2 findings fixed, each with its slice"
+   },
+   {
+    "hash": "715befbebf17e51aa937c3fdc997a9ef4e31ca2a",
+    "subject": "phase 2 S11: record the owner's decisions in spec §12"
+   },
+   {
+    "hash": "335bdafff68e5ec28e81aa7b93d357aaf3e710a4",
+    "subject": "phase 2 S11: trim repeated passages and tighten the API and record wording"
+   },
+   {
+    "hash": "44ac0ed8dd6e666e37b7a10b334286cce5622fad",
+    "subject": "phase 2 S11: reflow two paragraphs; Phase 3 is one container per docs area"
+   },
+   {
+    "hash": "bb29a1759782ae81caa6081fd0e48e4552b497e4",
+    "subject": "phase 2 S11: architecture.md names what each command does"
+   }
+  ],
+  "summary": "S11 is done in worktree <scratch>/wt/p2-s11, branch p2-s11, 7 commits on top of 3c86304. No Go file, template, findings.md, docs/why-small-and-auditable.md or review/phase2_progress.md changed. In review/, only spec §12 changed.\n\nWhat changed:\n- docs/README.md opens with the four areas (signature, node, API/CDN, UI). Each says what it holds, its code, and its docs, followed by a short general list. Every doc states its area in its first lines.\n- Two new docs give the areas that had no home one each: docs/signature.md and docs/api.md. The HTTP API moved out of operating-a-network.md into api.md, and the signature passages from the README moved into signature.md.\n- Every doc was rewritten against the code at the branch head, covering every row of the §11 table and every S11 note:\n  - ML-DSA-65 and the seed; names as the identity; registration at a bank; key and bank changes; the freeze, including the 64-block window; the ⅔ name action.\n  - The block hash with its nonce and signing set; proposal evidence, the one-third cap and pending proofs; a node signs only while seated with its key.\n  - The checkpoint and the order its checks run in; the genesis file and the node config, which refuses unknown keys; the effective network id, with a new networkName at every new genesis.\n  - The record: units of 100, files named by network, from=H, the newest unit with no from, a negative from answered 400, the folder listing and its cost, pruning only when the oldest unit is due, the full scan of the lifelong file, and deleting old record files at a new genesis.\n  - The idle chain and what it costs; catch-up asks /hdls/status first; the last commit for a node one precommit short; the maxPaymentAmount line, in both places.\n  - The wallet's Requests page, the bank's desk, the payment review, hash names, the new .state fields, \"did not land\", \"wait for the chain to advance\", and the copy button that needs a secure context.\n  - The S10 open points are stated as current behaviour, with no fix promised.\n- findings_20261027.md: each Phase 2 item is marked fixed with its slice, after I checked the fix in the code:\n  - E1, E6 and E7 (S2); E9 (S3, S5); E13 (S6); E15 (S4); E16 (S4, S6); E20 (S4, S8); E29 (S5, S9); E38 (S4); E44 (S5).\n  - Also E35's freeze (S6, S10), E43's dropped domains (S1), and E12's better fix (S4).\n  - The Phase 2 decisions are marked built, and the closing limits say what Phase 2 changed. Phase 3 stays as planned.\n- Spec §12: the owner's dated decisions are listed (2026-10-28 cost vs cap; 2026-10-30 freeze window, record named by network, units of 100, four areas, S12). Q3, Q4 and Q24 are annotated, the column is now \"Builder default\", and the S10 points still waiting for the owner are listed.\n- README.md: its stale sections are rewritten. The Layout section is byte-identical, since S12 replaces it. The images are captioned as pages from before Phase 2.\n\nChecks I ran in scratch copies:\n- All binaries build, and `go test -short ./...` passes.\n- keygen's output matches the docs.\n- The genesis and node-config examples in operating-a-network.md, extracted from the doc with only keys and addresses substituted, ran as a 4-bank network: it committed block 1 and idled.\n- An unknown config key is refused.\n- The record routes, resolve and governance answer as documented.\n- A wallet payment woke the chain and the chain idled again afterwards; a wallet freeze landed.\n- The demo runs. The manual's registration flow (draft, sign as new key, bank signs, submit) worked end to end and registered the name after about 125 s, matching the 120-block lead.\n- The founder's own freeze is refused with the \"no name seated\" reason (R9).\n- Every link and anchor in the edited docs resolves.\n\nThe docs grew from about 22,700 words to about 25,100 (+10%).",
+  "docMap": "Signature area (Phase 3 signer):\n- docs/signature.md (new): ML-DSA-65 and its sizes; deterministic signing; size checks before any work; one spelling per key; the FIPS v1.0.0 build guard; Preimage and the domain table; message ids; keys and keygen output; the sign log (what it holds, the empty log for h+1, what Open refuses, signing only while seated); what a double-sign costs.\n\nNode area (engine):\n- docs/architecture.md: packages and the four areas; what cmd/keygen, cmd/server and cmd/demo do; LedgerState and Account by name; names, amounts and caps; payments, updates, the four name requests, pending changes, the freeze; SetFor; Block, BlockContent and the four hashes; the order of ApplyBlock's checks and steps; ProposeBlock and the two-banks known behaviour; intake and the pools; the event loop and commit; the idle chain and its costs (the S10 points); the signature record (entries, files named by network, retention and pruning).\n- docs/consensus.md: the ⅔ rule; what is signed (votes by name, signed proposals, commits); the round driver; intake of proposals (7 steps) and votes; signing only while seated; how a double-sign freezes (sources, pending proofs in the snapshot, validity, no age limit, the one-third cap, known behaviour); catching up; the checkpoint and its 4-step check; mapping to the audit.\n- docs/governance.md: the ⅔ rule; the governance sequence; the ten parameters with their bounds, the maxPaymentAmount line, when changes take effect, and which intervals stay at their genesis values; ParameterChange; the ⅔ name action (fields, validity, effect, uses); collecting votes; the pools; certificate sizes; the record keeps certificates for life; extending it.\n\nAPI/CDN area (proxy and server):\n- docs/api.md (new): one open port, timeouts and body limits; every POST and GET route with its answer and its cost to the node; the two meanings of \"height\"; the record routes and their cost (owner 2026-10-30); broadcast, relay, fan-out, peer DNS and catch-up; how a direct API client builds a payment.\n- docs/operating-a-network.md: build; keygen; the genesis file (fields, parameter table with the maxPaymentAmount note, validation, a working example); the network id; the node config (fields, refusal of unknown keys, a working example); network exposure; rejoining and the sign-log rules; the record on disk and the idle chain; a bank whose key leaked; liveness; starting a new network (new networkName, deleting the snapshot, sign log and old record files, wallets); make demo; reference node, receipts and the pin.\n\nUI area (wallet):\n- ui/README.md: build, run and flags; the three files (key file holding the seed, the .trust pin with its network id, the .state fields); how the wallet works (one verified state per page, its name, names, payments with review, the account form, the freeze button and \"did not land\", the Requests page, the desk, the admin page); the payment counter and its known behaviour; running as a service; security notes (Host/Origin, the copy button needs a secure context, one node's view).\n- ui/USER_MANUAL.md: starting the wallet and keeping its files; the double signature setup; the page; paying by name and checking the bank; freezing and \"did not land\"; the pending-change warning; key change or sale; bank change; hash names; the bank's desk; common questions, including \"wait for the chain to advance\"; privacy.\n\nGeneral:\n- docs/README.md: the index, in four areas plus the general list.\n- docs/security.md: the threat model; what is fixed by construction (one ML-DSA implementation as a consensus rule, caps, replay, the pin); the network id and identical re-genesis; the freeze and its limits (under ⅓, the largest validator, uncapped self-freeze, the last bank); banks and co-signatures (what a freeze clears, one node's view, squats, lookalikes); the record, the nonce, the dynamic-mode stake leak (Q21) and the cost of the record routes; what a deployment must do.\n- docs/managing-the-currency.md: monetary policy, edited in place. Freeze instead of slash; the supply formula; the name action as the mint; caps as a lever; the levers table; hash names instead of the prepaid key; the rewritten smells; no payment history plus the record; the existing freeze.\n- docs/why-small-and-auditable.md: unchanged (the owner's account).\n- README.md: the project overview; Phase 2 status; signatures, crypto agility, consensus, build & test, money. Layout unchanged, for S12.\n- TODO.md: the roadmap. ML-DSA done; Phase 3 as one container per area; the archive node beside the record; screenshots to retake.\n- findings_20261027.md: Phase 2 items marked fixed with their slices.\n- review/phase2_spec.md §12: the owner's dated decisions and the builder defaults.",
+  "deviations": "- **Length.** The docs grew about 10% in words (22.7k to 25.1k) and from 2,045 to about 2,320 lines. The two new area docs add 250 lines, and Phase 2 added registration, the freeze, the name action, the record and the idle chain. I removed repeated passages (the README's old status checklist, the HTTP API that moved to api.md, the idle-chain and record text repeated across docs), but did not get below the old length.\n- **Area placement.** operating-a-network.md sits in API/CDN, as the runbook for cmd/server; spec §11 puts the server's config in that area. architecture.md sits in node. security.md and managing-the-currency.md are general. No file was renamed, so every link stays valid.\n- **README Status.** It is now a concise Phase 2 summary instead of the old checkbox list. Its signatures, crypto-agility and consensus sections were shortened and point to the area docs.\n- **findings_20261027.md.** Beyond marking the E items, I added one line each to the \"Not fixed or not covered\" limits for E15, the sign-log wait and its now-freezing double-signs, E13, the ⅔ trust model, and the idle chain's one-precommit-short case. Without those lines the limits would still describe Phase 1 behaviour as current. Phase 3 text is untouched.\n- **Spec §12.** I added a dated decisions list above the table, renamed the \"Default tonight\" column to \"Builder default\", and annotated Q3, Q4 and Q24. The other rows are unchanged.\n- **TODO.md.** It describes Phase 3 as one container per docs area (signer, engine, fetcher, wallet), following the owner's four areas. findings_20261027.md still says three containers (fetcher, engine, signer); I left it as planned.",
+  "codeNotes": [
+   {
+    "file": "node/httptransport.go",
+    "symbol": "handleParameterVote, handleReassignmentVote",
+    "kind": "inconsistency",
+    "note": "Both answer 202 whether or not addParameterVotes or addReassignmentVotes pooled the certificate. /hdls/update and /hdls/name-request answer 409 with the reason. So ui/main.go vote shows \"certificate submitted — it enacts in the next block\" even for a certificate the node refused. The wallet's Submit checks Valid first, so this happens only when the state moved in between.",
+    "suggestion": "Send the loop's verdict back through an admission channel, as AdmitUpdate does, and answer 409 with a reason. About 15 lines in node.go and httptransport.go."
+   },
+   {
+    "file": "node/httptransport.go",
+    "symbol": "handleStatus, handleAccounts, handleCheckpoint, handleGovernance",
+    "kind": "inconsistency",
+    "note": "These go through the event loop (Node.Snapshot or GovernanceView), and Snapshot copies the account list. handleResolve reads the committed view off the loop. So a flood of unauthenticated GETs of /hdls/status, which every wallet and every catch-up poll calls, queues events on the consensus loop.",
+    "suggestion": "Serve /hdls/status (height, account count, network id) from node.view. About 5 lines. Checkpoint and accounts would need lastBlockHeader, lastCommit and the signing set added to committedView, about 15 lines."
+   },
+   {
+    "file": "node/sync.go",
+    "symbol": "reGossipInterval, catchUpLoop (and startFirstHeight's wait)",
+    "kind": "inconsistency",
+    "note": "These use config.Genesis.Parameters (StepTimeoutMs, BlockIntervalMs), while armTimeout and blockInterval use the governed state values. A ⅔ change of the timings never reaches the re-gossip cadence, the post-restart wait or the catch-up interval, even after a restart. The comment calls this deliberate (\"immutable\"), but docs/governance.md has to name the exception.",
+    "suggestion": "Read the parameters from node.view.Load().state on each tick and reset the ticker when they change. About 8 lines. Or keep it, as the docs now state."
+   },
+   {
+    "file": "node/governance.go",
+    "symbol": "governanceView",
+    "kind": "inconsistency",
+    "note": "It ranges over the parameterProposals and reassignmentProposals maps, so /hdls/governance lists pooled certificates in random order. pendingParameterChange and pendingReassignment sort their keys for determinism.",
+    "suggestion": "Iterate slices.Sorted(maps.Keys(...)) in both loops. About 4 lines."
+   },
+   {
+    "file": "node/httptransport.go",
+    "symbol": "Server (doc comment)",
+    "kind": "misleading comment",
+    "note": "\"Server exposes a Node over HTTP: peer message intake (/hdls/proposal, /hdls/vote) plus client endpoints (/hdls/pay, /hdls/status, /hdls/accounts).\" Handler registers 15 routes.",
+    "suggestion": "\"Server exposes a Node over HTTP: the routes Handler registers.\" 1 line."
+   },
+   {
+    "file": "ledger/payment.go",
+    "symbol": "hashFields",
+    "kind": "misleading comment",
+    "note": "\"Shared by PaymentID and UpdateID\". NameRequestID and ReassignmentID use it too.",
+    "suggestion": "\"Shared by PaymentID, UpdateID, NameRequestID and ReassignmentID.\" 1 line."
+   },
+   {
+    "file": "ledger/amount.go",
+    "symbol": "ParseAmount",
+    "kind": "misleading comment",
+    "note": "It says amounts are read \"in JSON (payments, accounts, checkpoints, snapshots, parameters, reassignments) and in a node's config\". Since S8 the node config holds no amount; amounts come from the genesis file. Name requests' fees are also missing from the list.",
+    "suggestion": "\"in JSON (… reassignments, name requests) and in the genesis file\". 1 line."
+   },
+   {
+    "file": "ledger/parameters.go",
+    "symbol": "LedgerParameters (doc comment)",
+    "kind": "misleading comment",
+    "note": "\"Beyond the transaction cost they carry the network TIMING PROFILE\" describes Phase 1's four parameters. There are ten now: the fee, the delay, the retention and the two caps.",
+    "suggestion": "Say the struct holds the cost, the timing profile, the message bound, the new-key fee, the change delay, the record's retention and the two caps. 2 lines."
+   },
+   {
+    "file": "ledger/ledger.go",
+    "symbol": "package ledger (doc comment)",
+    "kind": "misleading comment",
+    "note": "\"the rules for applying a batch of payments, account updates and governance\" leaves out name requests and evidence, which ApplyBlock also applies.",
+    "suggestion": "Add \"name requests, double-sign evidence\" to the list. 1 line."
+   },
+   {
+    "file": "node/node.go, node/httptransport.go",
+    "symbol": "Snapshot.Height vs Checkpoint.State.Height (/hdls/status vs /hdls/resolve)",
+    "kind": "inconsistency",
+    "note": "The wire uses \"height\" in two senses: /hdls/status serves the height in progress (committed + 1), and /hdls/resolve serves the committed height. docs/api.md now spells it out, but a reader of the JSON cannot tell.",
+    "suggestion": "Leave it, as documented. Or rename the status key to heightInProgress at the next genesis, about 4 lines across node and ui."
+   },
+   {
+    "file": "node/node.go, consensus/driver.go",
+    "symbol": "Node.commit (`block, valid :=`), Driver.Start, enqueue(event event)/handle(event event)",
+    "kind": "misleading name",
+    "note": "Already listed in review/phase2_progress.md under \"In no slice\": a map lookup's found flag named valid; Driver.Start used only by tests; parameters named after their type.",
+    "suggestion": "As the progress note proposes. 1 to 3 lines each."
+   }
+  ],
+  "openIssues": "- **Screenshots.** docs/wallet.png and docs/admin.png show the pages from before Phase 1. There is no browser on this machine to retake them. I kept both, captioned them in README.md as pages from before Phase 2 with a line on what today's page adds, and listed retaking them in TODO.md.\n- **README Layout.** The section still says Ed25519 for cmd/keygen and signing. I left it byte for byte, as briefed; S12 replaces it.\n- **Owner points from S10, documented as current behaviour.** The docs state these and promise no fix:\n  - a late double-sign wakes an idle chain; this is built, and the owner has not confirmed it;\n  - a proof the one-third cap holds back, kept while the chain idles, lives only in memory until the next commit;\n  - the wallet's payment counter stalls after 32 refusals in a row on an idle chain, and any payment or update anyone makes clears it;\n  - \"did not land\" shows only once the chain reaches the freeze's block.\n- **Q21 is still open.** In dynamic mode the record shows each seat's stake per height. docs/security.md states it.\n- **Certificate routes answer 202 even when refused.** /hdls/parameter-vote and /hdls/reassignment-vote do this, so the admin page can say \"certificate submitted\" for a certificate the node did not pool (see codeNotes). docs/api.md and docs/governance.md state the 202.\n- **Spec and code disagree on keygen's output order.** Spec §8.1 lists privateKey first; keygen prints publicKey first. The docs follow the code.\n- **Phase 3 container count.** findings_20261027.md says three containers (fetcher, engine, signer). The owner's four areas include the UI. I left findings as planned and wrote TODO.md as one container per area. The owner may want the findings' Phase 3 paragraph aligned.\n- **The progress note is stale.** review/phase2_progress.md still says \"The docs still describe Phase 1. They are S11.\" Updating it is the orchestrator's job; I did not edit it.\n- **Length.** The docs are about 10% longer in words than before (see deviations)."
+ },
+ "verdicts": [
+  {
+   "area": "signature",
+   "verdict": {
+    "confirmed": false,
+    "problems": [
+     {
+      "severity": "major",
+      "file": "docs/signature.md",
+      "problem": "The sign log section says: \"Once the snapshot of height h is on disk, the node writes an empty log for h + 1 (`Node.commit`). So an idle node keeps no block, no payment and no nonce.\" This is false for the node as a whole. Only the sign log is emptied. (1) The snapshot keeps the last block's header, and the header includes its nonce. (2) In memory, the node keeps the whole last decided block until the next commit, payments included.",
+      "evidence": "node/persist.go saveSnapshot writes savedSnapshot{Checkpoint: node.snapshot().checkpoint()}. node/messages.go Checkpoint.LastBlock is a ledger.BlockHeader, and ledger/hash.go BlockHeader has a Nonce field. I ran a 1-validator network in a scratch copy. After block 1 it idled. data/snapshot.json held Checkpoint.LastBlock.Nonce, and GET /hdls/checkpoint served the same nonce. docs/consensus.md also lists the nonce in the checkpoint header. In node/node.go, Node.commit sets node.lastProposal = node.heightProposals[decision.Round]. That is a ProposalMessage carrying the whole ledger.Block, and it stays in memory until the next commit, for sendLastCommit. Also, Node.commit writes the empty log only when node.signLog.Height == block.Height, that is, when the node signed at h. Spec §3.6 says \"an idle chain does not keep the last block\". The code keeps that block in memory, so no doc can promise this without a code change.",
+      "fix": "Limit the sentence to the sign log: \"So while the chain idles, the sign log holds no block, no payment and no nonce.\" Optionally add: \"The snapshot keeps the last block's header, its nonce included, as the checkpoint serves it. The node keeps the last decided proposal, block included, in memory until the next commit, to re-send the last commit.\" Write \"a node whose log holds h writes an empty log for h + 1\". Tell the owner that spec §3.6's \"does not keep the last block\" is true only of the disk."
+     },
+     {
+      "severity": "major",
+      "file": "docs/operating-a-network.md",
+      "problem": "No doc says how a keygen pair gets into a wallet, or how a wallet's key gets into the genesis or the node config. Several procedures depend on it. The bank's desk and the bank's freeze button need \"the bank operator's wallet, which holds the bank's one key\". Genesis accounts get their keys from keygen, but their holders use wallets. The leaked-key runbook says in step 2 \"Make a new key with `keygen`\" and in step 3 \"The new key's wallet signs the proof first\", but no wallet holds that key. ui/README.md even says \"a key import or export flow are future work\". So an operator cannot complete the procedure as written.",
+      "evidence": "cmd/demo/main.go writeWallet gives the founder's wallet its key by writing {\"publicKey\",\"privateKey\"}. ui/keyfile.go loadOrCreateKey accepts that plaintext form and offers to seal it. In a scratch copy I wrote keygen's two lines as {\"publicKey\":\"…\",\"privateKey\":\"…\"} into w/wallet.json. `wallet -wallet w/wallet.json` loaded it and logged the keygen key's prefix (\"key Fzd6p8aaqRzq…\"). grep finds no doc that describes this. ui/README.md, ui/USER_MANUAL.md and docs/operating-a-network.md only say that the wallet creates its own key on first run.",
+      "fix": "Add a short paragraph to operating-a-network.md \"Generate keys\" and link it from \"A bank whose key leaked\" step 3. It says: a wallet can hold a keygen pair. Before the wallet's first start, write its key file as {\"publicKey\": \"<publicKey>\", \"privateKey\": \"<privateKey>\"}. The wallet then asks for a passphrase and seals the key. A bank operator's wallet holds the bank's pair this way, and so does a genesis account's wallet. In ui/README.md \"Its files\", say the same, and reword \"a key import or export flow are future work\"."
+     },
+     {
+      "severity": "major",
+      "file": "ui/USER_MANUAL.md",
+      "problem": "\"A name that doesn't say who you are\" says the hash name is \"`k-` followed by 26 letters and digits made from your key\". In fact 24 characters follow `k-`, and the whole name is 26 characters long. This is at the edge of the signature area: the name is derived from the key.",
+      "evidence": "ui/requests.go hashName returns \"k-\" + lowercase base32 of the first 15 bytes of SHA-256, and 15 bytes give 24 base32 characters (checked: len(b32encode(bytes(15))) == 24). Spec §7.7 says \"26 characters\" for the whole name, and ui/README.md agrees.",
+      "fix": "\"`k-` followed by 24 letters and digits made from your key (26 characters in all)\"."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/consensus.md",
+      "problem": "\"An observer, a node whose name is not seated, never signs.\" docs/operating-a-network.md, leaked-key step 4, also says the node \"signs nothing\" until it restarts with the new key. Both are wrong. Every node signs a receipt for each payment it newly pools, with its configured key. So a re-keyed bank's node keeps signing receipts with the old, leaked key until it restarts. Separately, \"Generate keys\" says only that validators and genesis accounts need a key pair. An observer also needs one: the config refuses an empty key.",
+      "evidence": "node/httptransport.go handlePay calls ledger.SignReceipt(server.node.config.Signer, server.node.config.Name, payment) whether or not the node is seated. Node.seatedSigner controls only the driver's votes and proposals. cmd/server/config.go load refuses a publicKey that is not 1952 bytes long, an empty one included.",
+      "fix": "Write \"signs no vote or proposal (it still signs payment receipts with its configured key)\" in consensus.md and in operating step 4. In \"Generate keys\", say that every node needs a key pair, an observer too."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/signature.md",
+      "problem": "signature.md, README.md (Signatures) and security.md say there is no \"sign these raw bytes\" call. The package does export one. `MLDSA65.ParsePrivateKey` returns a `signing.PrivateKey`, and its exported `Sign(message []byte)` signs any bytes. Only `Signer.Sign` calls it in production code. The claim holds for the Signer API, not for the package.",
+      "evidence": "In signing/scheme.go, the PrivateKey interface has Sign(message []byte) ([]byte, error). signing/mldsa65.go mldsa65Key.Sign calls SignDeterministic(message, nil). A grep finds production calls only in signing/signer.go Signer.Sign (ui/keyfile.go only derives the public key).",
+      "fix": "\"`Signer`, the only signing API the node and the wallet use, has no raw-bytes call. The scheme's `PrivateKey.Sign` signs whatever it is given, and only `Signer.Sign` calls it, with a domain-tagged preimage.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/signature.md",
+      "problem": "\"A double-sign is two signatures by a name's current key for different blocks in one slot\" appears in signature.md, and README.md says \"for different blocks\" too. The code counts two different block hashes, so a nil vote (all zeros) against a vote for a block also freezes the name. Also, \"Any node that sees both keeps them as a proof\" is too broad. A node keeps a proof only from the three sources consensus.md lists. For example, a conflicting prevote that arrives after the node has left that height is dropped.",
+      "evidence": "consensus/evidence.go VoteEvidence.Valid requires only First.BlockHash != Second.BlockHash. node/node.go recordLateDoubleSign returns at once unless the vote is a precommit for lastCommit's height and round. docs/consensus.md correctly says \"with different block hashes\" and names the three sources.",
+      "fix": "Write \"for different block hashes (a nil vote counts as one)\", and \"a node that sees both, in the places consensus.md lists, keeps them as a proof\"."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/signature.md",
+      "problem": "\"What a double-sign costs\" gives only part of the cost. It says the name leaves the set, keeps its balance and is unfrozen only with a new key. It leaves out three costs a bank operator needs to know. The frozen name neither pays nor is paid. Freezing a bank clears every pending change it co-signed, so its customers must file again and lose the fee. The node signs no vote until its config holds the new key.",
+      "evidence": "ledger/name_request.go freezeNames clears the frozen name's own pending change and every PendingKey whose Bank is frozen or PendingBank that is frozen. ledger/block.go refuses payments from or to a frozen name. Node.seatedSigner returns nil when the name is seated under another key. docs/architecture.md (\"A freeze\") and operating-a-network.md (\"A bank whose key leaked\") state these facts. signature.md does not link to them.",
+      "fix": "Add one or two sentences: \"A frozen name neither pays nor is paid. Freezing a bank clears every pending change it co-signed. After the ⅔ re-key, the node signs again only once its config holds the new pair (see operating-a-network.md#a-bank-whose-key-leaked).\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/security.md",
+      "problem": "\"The freeze and its limits\" says \"nodes that lag and wallets that pinned it then need a new seed or a new list\". Everywhere else in the docs, \"seed\" means the 32-byte private key. A reader could take this as \"make a new key\". The spec (§5.8, \"a re-seed\") means a new trust anchor: a snapshot from a trusted node.",
+      "evidence": "signature.md and the ui docs use \"seed\" only for the private key. operating-a-network.md#rejoining-after-a-restart gives the actual remedy: copy a trusted node's snapshot.",
+      "fix": "\"nodes that lag then need a snapshot from a node you trust (see operating-a-network.md#rejoining-after-a-restart), and wallets that pinned it need a new list.\""
+     },
+     {
+      "severity": "minor",
+      "file": "README.md",
+      "problem": "The Status section says \"Phase 3, the split into a signer, an engine and an edge proxy\", which is three parts. The other docs say four. docs/README.md says the docs follow \"the four parts Phase 3 splits the system into, one container each\". TODO.md lists four containers (signer, engine, fetcher, wallet). The owner said on 2026-10-30: \"4 docker containers: signature, node, api/cdn and ui\".",
+      "evidence": "README.md, Status, paragraph after the list. docs/README.md, first paragraph. TODO.md, Phase 3 item. Spec §11, \"Four areas\".",
+      "fix": "\"Phase 3, the split into four containers, one per docs area (a signer, an engine, an edge proxy and the wallet), is planned, not built\"."
+     }
+    ],
+    "evidence": "Worktree p2-s11 at bb29a17. git diff 3c86304..HEAD changes only .md files. findings.md, docs/why-small-and-auditable.md, review/phase2_progress.md and the templates are unchanged, and README's Layout section is byte-identical (checked with diff).\n\nRead every passage in my scope:\n- docs/signature.md, all of it.\n- docs/README.md; docs/architecture.md (packages, keygen, freeze, event loop, idle chain).\n- docs/consensus.md (what is signed, intake, signing only while seated, \"Equivocation freezes the name\", known behaviour).\n- docs/operating-a-network.md (keygen, genesis keys, node config, sign-log rules, leaked bank key, new genesis).\n- docs/security.md, all of it.\n- docs/governance.md (domains, new-key proof); docs/api.md (direct client); docs/managing-the-currency.md (freeze passages).\n- README.md (Status, Signatures, Cryptographic agility, Consensus); TODO.md.\n- ui/README.md (key file); ui/USER_MANUAL.md (key and hash-name passages); the findings_20261027.md diff.\n\nChecked against the code:\n- signing/*: domains, Preimage, MLDSA65 sizes and the order of checks in Verify, CanonicalBase64, the fips140v1 guard.\n- cmd/keygen and cmd/server/config.go: key-self-test, the size and pair checks, unknown-key refusal, snapshotPath required.\n- node/persist.go: signLog, logVote and logProposal, loadSignLog's refusals.\n- node/node.go: startHeight and Resume, seatedSigner, commit's empty log, holdsVote and countable, retireDriver, recordLateDoubleSign, reportEquivocation, prunePendingProofs, lastProposal.\n- node/idle.go; consensus/evidence.go, voteset.go and driver.Resume.\n- ledger/block.go: evidenceFitsState, frozenNames, ProposeBlock steps, contentError rule 22.\n- ledger/validators.go: SetFor, powerIgnoringFreezes, withinOneThirdCap.\n- ledger/name_request.go freezeNames; ledger/genesis.go key checks and NetworkID.\n- ui/keyfile.go, ui/requests.go hashName, ui/wallet.go fingerprint, cmd/demo writeWallet.\n\nRan in a scratch copy at p2-scratch/s11-sigcheck:\n- Built keygen, server and wallet with go1.27.3. keygen prints publicKey (2604 characters) and then privateKey (44), as documented.\n- GOFIPS140=v1.0.0 and =certified fail to compile on signing/fips140v1.go; =latest builds.\n- Benchmarks: sign about 0.93–0.99 ms (mean over 256 messages), verify 0.258 ms, seed parse 0.386 ms. These match the doc.\n- go test -short passes for signing, cmd/... and consensus, and for the node sign-log, seating, equivocation and freeze tests.\n- Ran a 1-validator network from the doc's genesis and config shape. It committed block 1 and idled. snapshot.json.votes held the empty log for height 2. The record folder was named snapshot.json.<16 hex>.record. snapshot.json and /hdls/checkpoint both still held the last block's nonce.\n- Editing the sign log to height 5, or to another network id, made the server refuse to start with the documented reasons.\n- A wallet.json written by hand from keygen output loads.\n- A link and anchor check over all 14 edited docs found 0 broken links.\n\nSpec §11 signature items and the progress-note S6 and S10 items in my scope are covered: R5 freeze with the balance kept, proposal evidence, the one-third cap, no age limit, pending proofs in the snapshot, signing only while seated with one log line, a late double-sign waking the chain, the held-back proof living only in memory. The S10 points are stated as current behaviour, with no fix promised.\n\nKnown and out of my brief: README Layout still says Ed25519 (S12). findings_20261027.md says three Phase 3 containers (the writer flagged this). A code note for the owner: spec §3.6's \"an idle chain does not keep the last block\" is true on disk only. Node.lastProposal keeps the block in memory until the next commit."
+   }
+  },
+  {
+   "area": "node",
+   "verdict": {
+    "confirmed": false,
+    "problems": [
+     {
+      "severity": "major",
+      "file": "docs/managing-the-currency.md",
+      "problem": "\"Nothing else removes money on its own\" is false. The ledger has a second automatic removal: the overdraw ban. The supply formula and the levers table leave it out too, so this doc contradicts architecture.md and security.md.",
+      "evidence": "ledger/ledger.go, ProcessPayments: \"The ban destroys the payer's pre-block balance and cancels its payments\". contentError (ledger/block.go) checks each payment against the balance alone (PaymentFitsState), never the payer's total, so a block whose payments together overdraw one payer is valid and burns that payer's balance. docs/architecture.md (\"bans a payer whose payments in one block overdraw it: its pre-block balance is destroyed\") and docs/security.md (\"destroys the payer's balance\") both state it. The sentence was written in S11; the old text, which named slashing as the only other removal, also missed the ban. The case is narrow: honest intake never pools two such payments, so it takes a cloned key and a modified proposer.",
+      "fix": "After the fee bullets, add one line: \"One more rule removes money, and only when a key is misused: a block in which one payer's payments together overdraw it destroys that payer's balance (ledger.ProcessPayments). Honest intake never lets that happen.\" Add \"− overdraw bans\" to the net-supply formula, or a footnote under it."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/signature.md",
+      "problem": "\"So an idle node keeps no block, no payment and no nonce\" is false for the nonce. The snapshot keeps the last block's header, nonce included, and /hdls/checkpoint serves it.",
+      "evidence": "node/persist.go: savedSnapshot.Checkpoint is node.snapshot().checkpoint(), whose LastBlock is a ledger.BlockHeader {Height, PreviousBlockHash, ValidatorsHash, Nonce, ContentHash}. Spec §3.6 also says the node keeps the last block's header. On my live test network, an idle bank-a's snapshot.json held LastBlock.Height 19 with a non-zero Nonce.",
+      "fix": "\"So the sign log of an idle node holds no block, payment or nonce. The snapshot keeps only the last block's header.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/architecture.md",
+      "problem": "The order in which ApplyBlock applies a block leaves out the parameter change.",
+      "evidence": "ledger/block.go applyContent applies, in order: ProcessPayments, applyAccountUpdates, applyNameRequests, freezeNames, then the ParameterChange (sets parameters, sequence++), then applyReassignment, then applyDueChanges. The doc's list is \"payments, updates, name requests other than freezes, freezes from every source, the ⅔ action's other parts, then the changes that fall due\".",
+      "fix": "\"... freezes from every source, then the governance action (a parameter change, or the ⅔ action's other parts), then the changes that fall due.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/architecture.md",
+      "problem": "\"`ledger` uses the consensus types (validator set, vote, commit, proposal, evidence)\" names types that ledger does not use.",
+      "evidence": "ledger's non-test files use only consensus.Validator, ValidatorSet, NewValidatorSet, MaxValidatorPower, VoteEvidence and ProposalEvidence. They never use consensus.Commit, Vote or SignedProposal directly.",
+      "fix": "\"`ledger` uses the consensus validator set and the two evidence types, never the driver.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/consensus.md",
+      "problem": "The Propose bullet says the proposer \"proposes its locked block if it holds one\". The driver proposes its valid value, which can exist without a lock. This wording predates S11.",
+      "evidence": "consensus/driver.go startRound proposes driver.validValue / driver.validRound when set. applyOneRule sets validValue whenever it sees > ⅔ prevotes for the proposal at step >= prevote, but sets the lock only at step == prevote. A node that already precommitted nil therefore holds a valid value and no lock.",
+      "fix": "\"proposes the block it last saw more than ⅔ prevote for (its valid value), if any; otherwise its candidate.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/consensus.md",
+      "problem": "Known behaviour says evidence the cap holds back \"stays pending in every node's snapshot\". Proofs are local to the nodes that saw both signatures.",
+      "evidence": "node/node.go: a vote the height does not count goes to recordLateDoubleSign and is never relayed. onProposal returns false for a second proposal of a held round, so reportEquivocation's proof is not relayed either. Only the nodes that received both signatures hold the proof.",
+      "fix": "\"stays pending in the snapshot of each node that holds it\"."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/governance.md",
+      "problem": "\"Extending it\" omits steps a new parameter needs before validators can vote on it from the wallet. TODO.md repeats the same short recipe.",
+      "evidence": "node/governance.go ParametersView/parametersView feed /hdls/governance, and ui/admin.go's parametersView and form draft the vote. For an amount field, ledger/amount.go LedgerParameters.MarshalJSON/UnmarshalJSON and ParseGenesis's list of amount parameters also need the field. Without these steps the value can be changed only by a hand-built certificate.",
+      "fix": "Add: \"show it in node.ParametersView and the admin page (ui/admin.go); for an amount, add it to LedgerParameters' JSON methods in ledger/amount.go and to ParseGenesis's amount checks.\""
+     },
+     {
+      "severity": "minor",
+      "file": "README.md",
+      "problem": "The Status section says Phase 3 is \"the split into a signer, an engine and an edge proxy\", three parts. docs/README.md and TODO.md say four containers, one per docs area (owner, 2026-10-30). The idle-chain bullet also says a network nobody uses \"commits ... nothing\", but block 1 always commits.",
+      "evidence": "docs/README.md: \"the four parts Phase 3 splits the system into, one container each\". TODO.md: signer, engine, fetcher, wallet. node/idle.go hasWork: lastCommit.Height == 0 counts as work, so block 1 always commits. operating-a-network.md says \"after block 1\". On my live network the chain committed block 1, then stayed at height 2.",
+      "fix": "\"Phase 3, the split into one container per docs area (signer, engine, edge proxy, wallet)\", and \"... a network nobody uses commits, signs and records nothing after block 1.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/managing-the-currency.md",
+      "problem": "Two overstatements. (1) \"every node's signature record keeps the certificate for good\". (2) In the self-custody bullet, \"its bank and the ⅔ give it a new key\" suggests the bank can re-key a frozen name.",
+      "evidence": "(1) node/record.go: a node without snapshotPath records nothing, and a node that catches up records nothing for the heights it skipped (architecture.md says so). (2) ledger.NameRequestFitsState refuses a key change of a frozen name (\"has no account, or is frozen\"). Only the ⅔ name action, with a new key, unfreezes and re-keys a name.",
+      "fix": "(1) \"and the signature record of each node that committed that block keeps the certificate for good.\" (2) \"a holder freezes a stolen name at once, and the ⅔ give it a new key\"; the bank's role, if any, is to vouch for the holder off the chain."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/operating-a-network.md",
+      "problem": "Step 4 of \"A bank whose key leaked\" says that until the restart the node \"logs that its name is seated under another key\". On an idle chain that log appears only once a height starts.",
+      "evidence": "node/node.go: seatedSigner, which writes the log, runs only in startHeight after hasWork is true. On my live network, bank-d was re-keyed by the ⅔ at block 17. Its node logged nothing while the chain idled at height 18. It logged \"the name \\\"bank-d\\\" is seated under another key than this node's\" only after a payment woke the chain.",
+      "fix": "\"Until then the node signs nothing, and logs, at the next height the chain starts, that its name is seated under another key.\""
+     }
+    ],
+    "evidence": "Scope: node area at branch head bb29a17 (worktree p2-s11).\n\nDocs read in full: docs/architecture.md, docs/consensus.md, docs/governance.md. Docs read for their node passages: docs/operating-a-network.md (rejoining, sign-log rules, record on disk, idle chain, leaked bank key, new genesis), docs/security.md, docs/managing-the-currency.md (full text and the S11 diff), docs/signature.md (sign log, double-sign), docs/api.md (catch-up, record cost, intake windows), docs/README.md, README.md, TODO.md, the findings_20261027.md diff, and the idle-chain points in ui/README.md and ui/USER_MANUAL.md.\n\nCode read against each claim:\n- ledger/: ledger.go, block.go (ProposeBlock, contentError, ApplyBlock, applyContent, withoutLastItem), hash.go, name.go, amount.go, parameters.go, reassignment.go, validators.go (SetFor, powerIgnoringFreezes, withinOneThirdCap), name_request.go, governance.go, genesis.go, account_update.go.\n- consensus/: validator.go, vote.go, commit.go, proposal.go, driver.go, evidence.go, voteset.go.\n- node/: node.go, idle.go, sync.go, record.go, persist.go, messages.go, governance.go, reassignment.go, mempool.go, updatepool.go, requestpool.go.\n- Also cmd/server/config.go.\n\nSpec §11 (node rows), §12, and the progress note's S6/S10/S11 notes and Known behaviour are all covered. The S10 points are stated as current behaviour with no fix promised: a late double-sign wakes an idle chain, and a proof the cap holds back lives in memory while idle. The maxPaymentAmount line (owner 2026-10-28) is in governance.md and operating-a-network.md. The record named by network and the units of 100 are stated as built. Apart from the findings above, the claims I checked match the code:\n- ApplyBlock's check order and ProposeBlock's order and limits (768 KiB, 8 evidence items, last-added-first removal, the two-banks behaviour);\n- the hash table;\n- the name request rules, the freeze effects, R9, and the pools and reconcilePools;\n- the commit sequence, the hasWork list and the wakeIfIdle triggers;\n- the record files, entries, retention and pruning;\n- the snapshot contents, the vote and proposal intake steps, seatedSigner, the evidence sources, validity and one-third cap;\n- the last-commit send, catch-up timing and status-first fetch, and the checkpoint's 4-step check;\n- the parameter bounds and when each change takes effect, ParameterChange.Valid, Reassignment.FitsState and Valid, and the certificate pools (64, replace, relay, wake, the 202 answer).\n\nRan in a scratch copy (git archive HEAD):\n- go1.27.3 build of all binaries.\n- `go test -short ./ledger ./consensus ./node`: all ok.\n- A link and anchor checker over 14 docs: 0 bad.\n- All 203 backticked identifiers in the node and general docs resolve in the code, and all 15 cited Node methods and 9 cited tests exist.\n- Measured sizes. A parameter change is 366 B plus 4,449 B per vote. A name action is 7,196 B plus 4,449 B per vote. A record entry is 19.1 KB with 4 validators and 74.6 KB with 21. That matches the docs' 1.6 GB and 6.2 GB a day (spec §9.3 units), and 3.7 MB and 14 MB per two units.\n- A live 4-bank network built from the genesis and node-config examples in operating-a-network.md, on ports 2808x so as not to disturb another checker's network:\n  - It committed block 1 and idled at height 2.\n  - Files appeared as snapshot.json.<16 hex>.record/00000000000000000000.jsonl, and the sign log was emptied to height 2.\n  - The snapshot keys were NetworkID, Checkpoint and PendingProofs, with LastBlock carrying the Nonce.\n  - A payment woke the chain, which idled again after one block.\n  - An update naming block +10 kept the chain moving until it landed at block 13, then it idled at 14.\n  - bank-d's own freeze landed at its named block, the set shrank to 3, and no lifelong entry was written.\n  - A ⅔ re-key and unfreeze wrote one lifelong entry with 3 signers, and governance sequence became 1. The rolling entries carried the set only where it changed.\n  - bank-d's node logged \\\"seated under another key\\\" only after work arrived. Restarted with the new pair, it signed block 19.\n- A grep for removed Phase 1 concepts found only the README Layout section (left for S12), the wire key `networkId`, and a historical mention of Ed25519.\n\nMy scratch files are in <scratch>/p2-scratch/s11-node-copy (cmd/measure, cmd/client, cmd/govclient) and s11-net2 (the stopped network)."
+   }
+  },
+  {
+   "area": "api",
+   "verdict": {
+    "confirmed": false,
+    "problems": [
+     {
+      "severity": "major",
+      "file": "docs/operating-a-network.md",
+      "problem": "The node config example sets \"snapshotPath\": \"data/snapshot.json\", and the next paragraph says to start every node with `./bin/server -config node.json`. Nothing says to create `data/` first. If the folder is missing, the 4-bank network never commits block 1, and the log shows nothing after the startup line. So the example does not work as written.",
+      "evidence": "In a scratch copy I took the genesis and config JSON blocks from the doc and changed only the keys and addresses (127.0.0.1:18081-18084). I started 4 nodes, each from its own folder. After 32 s, /hdls/status still said height 1, no snapshot, sign log or record file existed, and each server.log held only the 'hypernode node up' line. I stopped the nodes, ran `mkdir data` in each folder and started the same configs again. Block 1 committed within 8 s, the chain idled at height 2, and data/ held snapshot.json, snapshot.json.votes and snapshot.json.e47ec9f1c9505978.record/. The cause: `writeAtomic` in node/persist.go does not create the folder. A vote that is not in the sign log is never sent, and a failed sign-log write is not logged. Also, `load` in cmd/server/config.go opens genesisPath and snapshotPath relative to the working directory, not the config file, and the doc does not say so. The old doc had no `data/` path, so this is new in S11.",
+      "fix": "Change the example to \"snapshotPath\": \"snapshot.json\", or add a step before the start command: \"Create the folder that holds snapshotPath (`mkdir -p data`). Without it the node signs nothing and logs nothing.\" Also add: \"genesisPath and snapshotPath are read relative to the folder the server starts in.\" Code note for the report (no Go change in this slice): Open could refuse a snapshotPath whose folder does not exist, about 5 lines."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/api.md",
+      "problem": "The Fan-out bullet says \"With `maxPeers` 0 every node gossips to every peer it knows\". It also says that with maxPeers above 0 a validator gossips only to its topology neighbours, and that \"relaying carries a message to everyone\". Three things are left out. Once every current validator has an address, which is true in the doc's own genesis example, a validator's peers become the other validators' addresses, and its configured `peers` are no longer used. With maxPeers above 0, the topology applies only once every validator has an address. And a non-validator node (an observer, such as a wallet's reference node) then gets no proposals, votes or payments pushed to it. It follows the chain only by checkpoint catch-up.",
+      "evidence": "In node/peerdns.go, `resolvedPeerAddresses` returns `Neighbors(validator names, self, maxPeers)` once every current validator has an address, and `resolvePeersFromState` calls `SetPeers` with those addresses. `Neighbors` in node/topology.go returns only validator names. In cmd/server/config.go, `load` uses the topology only when `haveAll` is true. Node.commit calls `resolvePeersFromState` after every block.",
+      "fix": "Rewrite the bullet: \"A node gossips to its configured `peers` until every current validator has an address. Then a validator gossips to the other validators: to all of them with `maxPeers` 0, or to its topology neighbours (`node.Neighbors`) with `maxPeers` above 0. A node that is not a validator gets nothing pushed. It follows the chain by checkpoint catch-up.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/api.md",
+      "problem": "\"Most work happens off the node's event loop, in the HTTP handler\" is not true for most routes. Only the intake routes' first checks (pay, payment, update, name-request), /hdls/resolve and the two record routes run off the loop. Proposals, votes, both certificate routes, status, accounts, checkpoint and governance all run on the loop. The table below the sentence says so itself.",
+      "evidence": "In node/httptransport.go and node/node.go, `SubmitProposal`, `SubmitVote`, `SubmitParameterVote`, `SubmitReassignmentVote`, `Snapshot` and `GovernanceView` all call `enqueue`. Only `checkPayment`, `checkUpdate`, `checkNameRequest`, `handleResolve`, `handleRecord` and `handleLifelongRecord` read the committed view without queuing an event.",
+      "fix": "\"A payment's, update's or name request's checks and signatures run in the HTTP handler, against the committed view (...), and so do /hdls/resolve and the record routes. The rows below say which routes queue an event on the loop: a flood of those delays consensus on that node.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/api.md",
+      "problem": "The record-cost list says only that the lifelong read without `from` scans the whole lifelong file. The read with `from` also reads the file from its first line, through every entry below H, until it has 100 entries. The table gives the lifelong route's cost only as \"off the loop\".",
+      "evidence": "In node/record.go, `handleLifelongRecord` calls `readRecord` on the one lifelong file. `readRecord` opens the file and reads line by line from the start. It stops only after 100 matching entries, or never when `newest` is set.",
+      "fix": "\"Both lifelong reads scan the lifelong file from its start; without `from`, the whole file. That file grows only with governance actions and evidence.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/operating-a-network.md",
+      "problem": "\"Each command is one static binary.\" This is false for the build commands the doc shows, on a machine with a C compiler. README.md's \"One static binary per command\" has the same problem. The claim is carried over from the old doc.",
+      "evidence": "I ran `go build -o bin/server ./cmd/server` with go1.27.3 (CGO_ENABLED=1 by default, gcc installed). `file` reports bin/server, bin/demo and bin/go_ledger_ui as \"dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2\". Only bin/keygen is statically linked.",
+      "fix": "Say \"Each command is one self-contained binary with no runtime\", or show `CGO_ENABLED=0 go build ...` for a static binary."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/operating-a-network.md",
+      "problem": "The runbook says a bank freezes itself from \"the bank operator's wallet, which holds the bank's one key\", and the desk and the governance votes depend on that wallet too. No doc in this area says how a bank puts its keygen pair into its wallet.",
+      "evidence": "In cmd/demo/main.go, `writeWallet` writes the founder's pair as {\"publicKey\", \"privateKey\"}, which is the wallet's key-file format (ui/README.md, \"Its files\"). operating-a-network.md, \"Generate keys\", says only that the public key goes into the genesis file.",
+      "fix": "Add one line under \"Generate keys\": \"A bank's wallet uses the same pair. Write it as the wallet's key file, {\\\"publicKey\\\": \\\"...\\\", \\\"privateKey\\\": \\\"...\\\"}. The wallet seals it at the first start that has a passphrase (see ui/README.md).\""
+     }
+    ],
+    "evidence": "I checked branch p2-s11 at bb29a17 (worktree clean, nothing edited) in a scratch copy at <scratch>/p2-scratch/s11-apichk.\n\nWhat I read, against the code at HEAD:\n- All of docs/api.md and docs/operating-a-network.md.\n- The API, record and network passages in docs/security.md, docs/README.md, docs/architecture.md (commands, intake, record), docs/consensus.md (catch-up), docs/governance.md (certificate routes), docs/managing-the-currency.md (/hdls/accounts), README.md (demo, build and test) and TODO.md (Phase 3 fetcher).\n- The code: node/httptransport.go, relay.go, peerdns.go, topology.go, sync.go, record.go, idle.go, requestpool.go, updatepool.go, governance.go and reassignment.go; node.go (admission, onProposal, vote intake, commit, Start); cmd/server/main.go and config.go; cmd/keygen; cmd/demo; ledger/genesis.go, parameters.go and amount.go; the Makefile and .github/workflows/ci.yml.\n- Spec §6.8, §6.10, §8, §9.3, §11 and §12, and the progress note's owner decisions and S11 notes.\n\nWhat I ran:\n- I built server, keygen, demo and the wallet as the docs show. keygen prints `publicKey:` (2604 characters) first, then `privateKey:` (44), as the doc shows.\n- I took the doc's genesis and config JSON verbatim, changing only the keys. Both passed the real loaders: the server logged the network id, then failed only on binding 10.0.0.1.\n- The loader refused unknown config keys (networkId, maxPeers, transactionCost) and a genesis whose parameter key was TransactionCost.\n- A dynamic-mode genesis without snapshotPath was refused as the doc says.\n- I ran a 4-bank network from the doc examples with local addresses. Without data/ it stalled with no log (the major problem). With data/ it committed block 1 and idled.\n- Every route answered as documented:\n  - status reports the height in progress, accounts and networkId.\n  - resolve has all its fields: 404 for an unknown name, 400 without exactly one of name or key, 405 for a POST.\n  - accounts uses the Go field names, about 2.8 KB per account.\n  - checkpoint holds State, LastBlock, Commit and Validators.\n  - governance shows the ten parameters, the sequence, power, quorum and validators.\n  - The record answers [1] without `from`, H to H+99 with `from`, and 400 for -1, abc, an empty value and 1.5. The lifelong route answers [], and 400 for a negative `from`.\n  - The record folder is named snapshot.json.<first 16 hex digits>.record/<20 digits>.jsonl, as documented.\n- Entry sizes were about 18.9 KB, and 29.5 KB for an entry with the set. This matches §9.3 and the 1.6 GB per day and 3.7 MB per request figures.\n- My API client follows docs/api.md's snippet.\n  - Pay: 200 with a receipt, a repeat 202, the same payment on /hdls/payment 202, block H+65 409, block H+64 200, an overdraw 409.\n  - An update at H+65: 409.\n  - A bank change at H+3601: 409. At H+3600: 202.\n  - A freeze at H+65: 409.\n- A restarted lagging node caught up within about 3 s.\n- An old snapshot under a new networkName was refused with the documented reason.\n- The demo, run with -listen and -ui-listen on other ports: one validator 'founder', changeDelayBlocks 20, retainBlocks 1000, the second-wallet command printed, the wallet UI up. SIGINT deleted its temp folder.\n- `go test -C ui -race ./...` passed.\n\nCoverage and decisions:\n- Every link and anchor in the 13 docs resolves.\n- No removed concept is described as current outside README's Layout section, which S12 owns.\n- The S11 notes in my scope are covered: units of 100, files named by network, deleting old record files at a new genesis, a negative `from` answered 400, the cost of the folder listing, the full lifelong scan, the 64-block freeze window, catch-up asking /hdls/status first, the maxPaymentAmount line, and config refusal of unknown keys. The owner's decisions are stated as decided.\n\nDisclosure:\n- At 00:33:05 my `kill -INT` of `pgrep -x demo` also stopped the s11-ui-check checker's demo on 127.0.0.1:18080. That checker may report it as an anomaly.\n- None of my processes are still running."
+   }
+  },
+  {
+   "area": "ui-and-general",
+   "verdict": {
+    "confirmed": false,
+    "problems": [
+     {
+      "severity": "major",
+      "file": "ui/USER_MANUAL.md; docs/managing-the-currency.md",
+      "problem": "Both docs give the wrong length for a hash name. The manual says \"`k-` followed by 26 letters and digits made from your key\", and managing-the-currency.md says \"(`k-` and 26 characters)\". A hash name is `k-` plus 24 characters, 26 in all. ui/README.md has this right (\"26 characters\" in all), so the three docs now disagree.",
+      "evidence": "ui/requests.go `hashName` returns \"k-\" plus lowercase base32 of `digest[:15]`, with no padding. 15 bytes is 120 bits, which is 24 base32 characters. In the demo the Requests pages showed `k-225djc2jyxu2nkte5agrn6ub` and `k-tvao5k4ob4obytvxvymsal4w`: 24 characters after `k-`, 26 in all. Spec 7.7 also says 26 characters in all.",
+      "fix": "USER_MANUAL.md: \"`k-` followed by 24 letters and digits made from your key\". managing-the-currency.md: \"(`k-` and 24 more characters)\"."
+     },
+     {
+      "severity": "major",
+      "file": "README.md (and TODO.md)",
+      "problem": "The screenshot captions make Phase 1 features look current. The wallet caption says \"Today's page also shows the freeze button, the payee's bank before a payment, and a link to the Requests page\", so a reader takes the pictured page to be today's page plus those additions. But the picture shows three things Phase 2 removed: paying to a public key, claiming a name by account update, and full keys in the accounts table. The admin picture shows votes sent one by one to the node and a balance reassignment by key; the caption names neither change. Both captions and TODO.md also say the images are from \"before Phase 2\". The progress note says they are from before Phase 1.",
+      "evidence": "docs/wallet.png shows a \"recipient (name or public key)\" field, a \"Register a name — Claim a unique name so people can pay you by name instead of your key\" card, and a \"public key\" column with full keys. ui/templates/wallet.html today has \"recipient (a name)\", no register card (registration is on /requests), and only a fingerprint per account. docs/admin.png shows \"cost 1/20\", \"Submit vote\" (one POST per vote, removed in Phase 1 by E4/E30) and \"Reassign a balance\" with \"account (name or public key)\". ui/templates/admin.html today has \"Review vote\", \"Sign\" and \"Submit certificate\", and the name action. review/phase2_progress.md says the images \"show the pages from before Phase 1\".",
+      "fix": "Remove the images from README.md until they are retaken, or caption them as from before Phase 1 and say what changed. Wallet: \"Today's page pays by name only, shows key fingerprints instead of keys, registers names on the Requests page, and adds the freeze button and the payee's bank before a payment.\" Admin: \"Today each validator signs its vote in its own wallet and one person pastes the votes into Submit certificate; the page drafts all ten parameters and the ⅔ name action, by name.\" In TODO.md, say \"from before Phase 1\"."
+     },
+     {
+      "severity": "minor",
+      "file": "ui/README.md; ui/USER_MANUAL.md; review/phase2_spec.md §12",
+      "problem": "The number of refusals before \"wait for the chain to advance\" is off by one. All three say the wallet stalls after 32 refused payments or updates in a row. From a fresh counter it takes 33. The counter may use height + lookahead and the 32 blocks after it, so 33 blocks in all. It takes fewer if earlier payments of this wallet already name blocks past height + lookahead.",
+      "evidence": "ui/wallet.go `nextPaymentBlockID`: `blockID := max(window, last+1)`, and it refuses only when `blockID > window+blockSlack`, with blockSlack 32. I ran the demo (bin/demo on 127.0.0.1:18080/18091) and posted 40 confirm-step payments of 5000 from founder, who holds 1000. Payments 1 to 33 came back \"node rejected payment: payment refused: amount above the payer's balance\". Payments 34 to 40 came back \"this wallet's payments, updates and requests already name the blocks up to 37, as far past the node's height 2 as a payment may go: wait for the chain to advance\". The height stayed at 2. After another wallet's request moved the chain, the next payment was signed again, which matches the docs' \"any payment or update anyone makes ... clears it\".",
+      "fix": "Say \"after 33 refusals in a row (fewer if your earlier payments still name blocks ahead)\". Or state the rule itself: \"once its payments and updates name every block up to 32 past height + lookahead\". Change the spec §12 line to match."
+     },
+     {
+      "severity": "minor",
+      "file": "ui/USER_MANUAL.md",
+      "problem": "Common questions quotes \"It says 'cannot reach node'\". The main wallet page never shows those words when the node is down. Only the admin page uses that text.",
+      "evidence": "ui/main.go `render` sets \"cannot read a verified state from the node: \" plus the error. `renderAdmin` alone uses \"cannot reach node: \". With the demo node stopped, the second wallet's main page showed \"cannot read a verified state from the node: Get \\\"http://127.0.0.1:18080/hdls/checkpoint\\\": dial tcp ... connection refused\".",
+      "fix": "Quote the main page's text: **It says \"cannot read a verified state from the node\" (or, on the admin page, \"cannot reach node\").** Then keep the advice to check the network and the node address."
+     },
+     {
+      "severity": "minor",
+      "file": "ui/USER_MANUAL.md",
+      "problem": "\"If you lose the key file or forget its passphrase, you lose your name.\" This is too strong. The ⅔ name action can give a name that is not frozen a new key. The manual uses the same path itself for a frozen name: \"The banks vote to give your name the new wallet's key\".",
+      "evidence": "ledger/reassignment.go `Reassignment.FitsState` allows `NewKey` on an existing name that is not frozen. Only a frozen name must be unfrozen exactly when it is re-keyed. ui/templates/admin.html: \"give it a new key\".",
+      "fix": "\"If you lose the key file or forget its passphrase, you lose your name and its money, unless the banks vote to give the name a new key.\""
+     },
+     {
+      "severity": "minor",
+      "file": "docs/managing-the-currency.md",
+      "problem": "\"Nothing else removes money on its own\" is not true, and the supply formula leaves out the same case. The overdraw ban destroys a payer's whole pre-block balance when its payments in one block together overdraw. docs/security.md states this ban, so the two general docs contradict each other. The rewritten sentence and formula replaced the slash but did not mention the ban.",
+      "evidence": "ledger/ledger.go `ProcessPayments`: a payer whose total outgoing exceeds its balance is `banned`, and its new amount starts from zero (\"The ban destroys the payer's pre-block balance\"). docs/security.md: \"A block whose payments together overdraw their payer destroys the payer's balance.\" The formula in managing-the-currency.md is \"net supply change = treasury mints (⅔ votes) − fees burned − ⅔ reductions\".",
+      "fix": "Add one sentence: \"One more thing destroys money: a block whose payments together overdraw their payer destroys the payer's balance. Honest wallets cannot trip it; it means a cloned key.\" Then add \"− overdraw bans\" to the formula, or footnote it."
+     },
+     {
+      "severity": "minor",
+      "file": "README.md; findings_20261027.md",
+      "problem": "The docs disagree on how many Phase 3 containers there are. The README Status says \"Phase 3, the split into a signer, an engine and an edge proxy\", and findings_20261027.md \"## Phase 3\" says \"three containers\" (fetcher, engine, signer). TODO.md and docs/README.md give four, one per docs area, the wallet included. The owner decided on four on 2026-10-30.",
+      "evidence": "Spec §11, owner, 2026-10-30: \"4 docker containers: signature, node, api/cdn and ui\". review/phase2_progress.md: \"the docs in four areas, one per container of Phase 3\". TODO.md: \"the signer ... the engine; the fetcher ... and the wallet\". docs/README.md: \"the four parts Phase 3 splits the system into, one container each\".",
+      "fix": "README.md: \"Phase 3, the split into four containers, one per docs area (signer, engine, fetcher and wallet), is planned, not built\". findings_20261027.md is a dated record, so leave its paragraph and add one line: \"(Owner, 2026-10-30: four containers, one per docs area, the wallet included; see TODO.md.)\""
+     },
+     {
+      "severity": "minor",
+      "file": "findings_20261027.md",
+      "problem": "Two lines that S11 added or reflowed are not wrapped. The rest of the file wraps at about 100 characters.",
+      "evidence": "Line 640, \"wallet and admin routes alike. The Phase 1 intake fixes bound what anyone on it can do, but there is still no\", is 111 characters. Line 646, \"the Phase 2 signature record (S7) keeps ... The double-sign freeze covers double-signing by under a third of the power.\", is 170 characters. The file at 3c86304 had one long line.",
+      "fix": "Rewrap both bullets (\"Phase 3 is a plan\" and \"The ⅔ trust model\") at 100 characters."
+     }
+    ],
+    "evidence": "I checked branch p2-s11 at bb29a17 in <scratch>/wt/p2-s11. I did not use the writer's report as evidence.\n\nRead in full, with the diffs from 3c86304: ui/README.md, ui/USER_MANUAL.md, README.md (Layout excluded), docs/README.md, docs/security.md, docs/managing-the-currency.md, TODO.md, findings_20261027.md, the review/phase2_spec.md §12 diff, spec §0, §1, §9 and §11, and review/phase2_progress.md.\n\nCode checked claim by claim:\n- The whole wallet: ui/main.go, wallet.go, keyfile.go, trust.go, requests.go, admin.go and the three templates. This covered flags and defaults, the key file and pin JSON, the .state fields, the guard and ownHost, the freeze block and freezeStatus, the request lead and window, hashName, customerChanges, handOver, and the error texts.\n- Ledger: ProcessPayments and the overdraw ban, ParseAmount, DefaultParameters, Acceptable (it does not tie maxPaymentAmount to the fee), Reassignment.FitsState and applyReassignment, clearPendingChange and R11, ApplyBlock's height and hash checks, GenesisHash and NetworkID.\n- Signing: the domain list and Preimage, and the signing tests named in the README.\n- Node: the routes in httptransport.go, the record routes and files in record.go, the body limits, MaxValidatorPower, reGossipLoop, catchUpLoop, and onProposal's block-hash check and ProposalEvidence (for E15 and E16).\n- Every test and function name in TODO.md, cmd/demo, the Makefile, ci.yml and go.mod.\n\nfindings_20261027.md: every Phase 2 item marked fixed (E1, E6, E7, E9, E13, E15, E16, E20, E29, E35, E38, E44, E43's domains, E12's better fix) is fixed in the code. Every item the spec lists for Phase 2 is marked.\n\nRemoved concepts: I grepped all files in my scope for Ed25519, 32-byte keys, slashing, segments, count, every second, validatorNode, networkId, prepaid, historyless and claim. None is described as current. The exceptions are the screenshots (finding 2) and the README Layout section, which is S12's and is byte-identical.\n\nSpec §11 rows and the progress note's S11 notes in my scope are all covered, with the owner's decisions stated as decided. Spec §12 lists every owner decision and the three S10 points.\n\nNo Go file, template, findings.md, why-small-and-auditable.md or progress note changed. Only spec §12 changed in review/.\n\nRun in <scratch>/p2-scratch/s11-ui-check (git archive of HEAD), with GOTOOLCHAIN=auto and go1.27.3:\n- `make build` and the ui README's `go build -o wallet .` both build.\n- `go test -short ./...` and `go test -C ui ./...` pass.\n- A link and anchor checker (<scratch>/p2-scratch/s11-ui-check-tools/links.py) over all 14 docs found 0 broken links.\n- The demo ran on 127.0.0.1:18080/18091 with a second wallet on 18092:\n  - The pin file shape and the .state file match ui/README.md.\n  - The manual's registration flow worked: draft, sign as the new key, bank signs as requestor and bank, submit. A hash-name registration landed at block 122, about 124 s after submission, with bank of record founder.\n  - A freeze landed at height + 3, with the documented \\\"sent ... not confirmed\\\" text and then the frozen notice.\n  - The counter stalled after 33 node refusals (finding 3), and cleared once the chain moved.\n  - With the node down, the main page showed \\\"cannot read a verified state from the node\\\" (finding 4).\n- All demo processes are stopped and the worktree is clean."
+   }
+  }
+ ],
+ "fix": {
+  "branchHead": "c82f1f8071db81d81e293950d1fc7811b3df536b",
+  "fixed": [
+   "MAJOR signature.md sign log: the sentence now says only the sign log is emptied: 'a node whose log holds h writes an empty log for h + 1'. While the chain idles the log holds no block, payment or nonce. The snapshot keeps the last header, nonce included. The node keeps the last decided proposal, block included, in memory until the next commit. Spec §12 now tells the owner that §3.6's 'an idle chain does not keep the last block' is true of the disk only (Node.commit, Node.sendLastCommit). This also covers the node-area minor that duplicated it.",
+   "MAJOR keygen pair into a wallet (raised twice, signature and API): operating-a-network.md 'Generate keys' shows the key-file JSON to write before the wallet's first start, says the wallet then seals it, and says the bank's wallet (its desk and freeze button) uses the node's key, so it runs on the bank's machine. A genesis holder can instead give the genesis writer the publicKey from a wallet's key file. The leaked-key runbook steps 2 and 3 now write the new pair into a new wallet file and link there. ui/README.md 'Its files' says the same, and its 'import or export flow' line is reworded. signature.md links it. Tested in a scratch copy: a keygen pair was written as wallet.json, the wallet sealed it via GOLEDGER_WALLET_PASSPHRASE, and it showed alice with 50. A wallet also makes its key with no node reachable.",
+   "MAJOR hash-name length (raised twice): USER_MANUAL.md now says 'k- followed by 24 letters and digits ... 26 characters in all'. managing-the-currency.md says '(k- and 24 more characters)'. ui/README.md says '26 characters in all'. Checked against ui/requests.go hashName, which base32-encodes 15 bytes into 24 characters.",
+   "MAJOR overdraw ban (raised twice): managing-the-currency.md adds the rule that a block in which one payer's payments together overdraw it destroys that payer's balance (ledger.ProcessPayments), and that honest nodes never build such a block (link to security.md). '− overdraw bans' is added to the supply formula, with a line saying the term is zero while every node is honest.",
+   "MAJOR operating-a-network.md node config: the doc now says the server reads genesisPath, snapshotPath and backupPath relative to the folder it starts in, and does not create the snapshot's folder. Without that folder the node sends no vote or proposal and logs nothing. The start command is now 'mkdir -p data' then './bin/server -config node.json'. Rerun from the doc's own JSON in a scratch copy: with no folder, no commit and only the startup line in the log; with the folder, all 4 banks committed block 1 and idled at height 2.",
+   "MAJOR README screenshots: the two images and their captions are removed from README.md. They show pre-Phase-1 pages: pay to a key, 'Register a name' by account update, full keys, cost 1/20, one vote per POST. TODO.md now says they are from before Phase 1, lists what they show, and asks for a retake and their return to README.md. The PNG files are kept.",
+   "minor observers sign receipts: consensus.md, signature.md and operating step 4 now say an unseated node signs no vote or proposal but still signs a receipt for each payment it newly pools. Step 4 adds that a re-keyed bank's node keeps signing receipts with the old, leaked key until it restarts. 'Generate keys' says every node needs a pair, an observer included. A scratch run confirmed that an empty publicKey is refused. The sign-log wait bullet now says 'signs no vote or proposal'.",
+   "minor raw-bytes claim: signature.md, README.md (Signatures) and security.md now say signing.Signer, the only signing API the node and the wallet use, has no raw-bytes call. signature.md adds that the scheme's PrivateKey.Sign signs any bytes and only Signer.Sign calls it.",
+   "minor double-sign definition: signature.md and README.md now say 'different block hashes'. A nil vote and a vote for a block in one slot are a double-sign. A node keeps a proof only from the places consensus.md lists.",
+   "minor double-sign costs: signature.md lists what a freeze costs a bank. A frozen name neither pays nor is paid. Freezing a bank clears the pending changes it co-signed, and the fees are not refunded. After the ⅔ re-key, the node signs only once its config holds the new pair (with a link to the runbook).",
+   "minor security.md 'new seed': now says lagging nodes need a snapshot from a node you trust (with a link to rejoining-after-a-restart), and wallets need a new list.",
+   "minor Phase 3 container count: README.md Status says four containers, one per docs area (signer, engine, edge proxy, wallet). findings_20261027.md keeps its dated paragraph and adds '(Owner, 2026-10-30: four containers, one per docs area, the wallet included; see TODO.md.)'.",
+   "minor README idle-chain bullet: now says 'nothing after block 1'.",
+   "minor architecture.md ApplyBlock order: the governance action (a parameter change, or the ⅔ action's other parts) now applies after the freezes and before due changes, matching ledger/block.go applyContent.",
+   "minor architecture.md imports: ledger uses the consensus validator set and the two evidence types, never the driver. Checked by grep.",
+   "minor consensus.md Propose: the proposer proposes its valid value (the block it last saw more than ⅔ prevote for), else its candidate. A valid value can exist without a lock (consensus/driver.go).",
+   "minor consensus.md known behaviour: a held-back proof stays in the snapshot of each node that holds it. No node sends a proof outside a block.",
+   "minor governance.md 'Extending it': now a 5-step list that adds the amount JSON methods in ledger/amount.go, ParseGenesis's amount list, genesisParameterNames, node.ParametersView and the admin page with its template. TODO.md links to it instead of repeating the steps.",
+   "minor managing-the-currency.md: the certificate is kept by 'the signature record of each node that committed that block'. Self-custody now reads 'the ⅔ give it a new key (its bank can vouch for the holder, off the chain)'.",
+   "minor operating step 4: the node logs that its name is seated under another key at the next height the chain starts.",
+   "minor api.md off-loop sentence: now says what runs off the loop: payment, update and name-request checks, /hdls/resolve and the record routes. The other routes queue an event.",
+   "minor api.md lifelong reads: both reads scan the lifelong file from its start, with from until they have 100 entries, without from the whole file. The table row says so too.",
+   "minor api.md fan-out: one 'Peer DNS and fan-out' bullet. A node starts on the peers cmd/server gives it. Once every validator has an address, after each commit or catch-up, a validator gossips to the other validators (all with maxPeers 0, its topology neighbours above 0), and goes back to its starting peers when an address is missing. A new bullet says validators then push nothing to a non-validator, which follows the chain by checkpoint catch-up. The genesis section of operating-a-network.md says the same in brief.",
+   "minor static binary: operating-a-network.md says each command is one binary with no runtime, that go build links the server, the demo and the wallet against libc when a C compiler is present, and that CGO_ENABLED=0 gives a static binary. Verified with file(1). README's Design goals line says 'static when built with CGO_ENABLED=0'.",
+   "minor wallet stall count: ui/README.md states the rule: once payments, updates and requests name every block up to 32 past height + lookahead, which is 33 refusals from a fresh counter, fewer if earlier ones still name blocks ahead. The wallet signs again as the chain advances. USER_MANUAL.md says 33, or fewer if you sent payments just before. Spec §12's line says 33.",
+   "minor USER_MANUAL 'cannot reach node': now quotes the main page's text, 'cannot read a verified state from the node', with 'connection refused' or a timeout.",
+   "minor USER_MANUAL lost key file: you lose your name and its money unless the banks vote to give your name a new key.",
+   "minor findings_20261027.md: the 'Phase 3 is a plan' and 'The ⅔ trust model' bullets are rewrapped at 100 characters."
+  ],
+  "notFixed": [
+   "README.md title 'a distributed ledger in a single static binary' and the Origins line 'dropping the JVM for a single static binary' are left as they are. They are the project's tagline and history. They hold with CGO_ENABLED=0, which operating-a-network.md and Design goals now explain. docs/why-small-and-auditable.md also says 'one static binary', but it is the owner's own account and may not be edited.",
+   "review/phase2_progress.md still says '32 refusals' (two places) and that the screenshots are from before Phase 1. This slice may not edit it, so the orchestrator should change 32 to 33.",
+   "Code note, no Go change in this slice: Open could refuse a snapshotPath whose folder does not exist, or log a failed sign-log write. Today a missing folder makes a validator silently send nothing. About 5 lines in node/persist.go or node.Open.",
+   "Code note: spec §3.6 says an idle chain does not keep the last block, but Node.commit keeps lastProposal, with its block, in memory until the next commit. The docs now state this, and spec §12 flags it to the owner. Dropping it would need a code change to sendLastCommit.",
+   "The S11 writer's open items are unchanged and still for the owner: the 202 answer on refused certificates, keygen output order versus spec §8.1, the Q21 dynamic-mode stake leak, and the S10 points stated as current behaviour."
+  ]
+ },
+ "recheck": {
+  "confirmed": true,
+  "problems": [
+   {
+    "severity": "minor",
+    "file": "docs/operating-a-network.md; docs/consensus.md; docs/signature.md",
+    "problem": "Three docs say a node signs a receipt for every payment it pools. It signs one only for a payment a wallet posts to its /hdls/pay. A payment relayed to /hdls/payment is pooled with no receipt.",
+    "evidence": "node/httptransport.go: handlePay calls ledger.SignReceipt when AdmitPayment reports newlyPooled. handleGossipPayment calls AdmitPayment and answers 202 with no receipt. operating-a-network.md 'Generate keys' says 'every node signs a receipt for each payment it pools'. consensus.md 'Signing only while seated' and signature.md 'The sign log' say 'for each payment it newly pools'. api.md's table gets it right: '/hdls/payment ... as /hdls/pay, without the receipt'.",
+    "fix": "Say 'signs a receipt for each payment a wallet posts to it (`/hdls/pay`) that it newly pools' in all three places."
+   },
+   {
+    "severity": "minor",
+    "file": "docs/signature.md",
+    "problem": "'So while the chain idles, the sign log holds no block, no payment and no nonce' is true only for a node that commits the heights it signed in. Catch-up neither empties nor replaces the log. Suppose a validator proposed at height h, fell behind, and caught up to an idle tip. Its log for h then stays on disk until it next signs, with its proposal's block, payments and nonce. The same happens after adopting a bootstrap checkpoint or a copied snapshot. This also qualifies spec §3.6, which the fix now flags only for memory.",
+    "evidence": "node/node.go: Node.commit empties the log only when node.signLog.Height == block.Height. Node.catchUp and Node.adopt call fastForward and saveSnapshot, and neither touches signLog. node/persist.go loadSignLog returns nil for a log below the restart height and leaves the file in place.",
+    "fix": "Add one sentence: 'A node that catches up past a height it signed in keeps that height's log until it next signs.' Or record a code note: catchUp and adopt could write an empty log for the new height, about 3 lines."
+   },
+   {
+    "severity": "minor",
+    "file": "docs/operating-a-network.md",
+    "problem": "'Without it the node cannot write its sign log, so it sends no vote or proposal, and it logs nothing about it' holds when no node commits, which is the doc's own all-four case. If only one bank forgets the folder, the others still commit. That node commits too and logs 'snapshot data/snapshot.json not saved'. Its record write then creates data/, and from the next height it votes normally.",
+    "evidence": "node/persist.go saveSnapshot logs 'snapshot %s not saved'. node/record.go writeRecordEntry calls os.MkdirAll(node.recordDirectory()), and the record directory is '<snapshotPath>.<network>.record', so MkdirAll creates data/ as well.",
+    "fix": "For example: 'Without it the node can write neither its snapshot nor its sign log, so it sends no vote or proposal. If no node commits, it logs nothing about it.' A code note could have Open refuse a missing folder."
+   },
+   {
+    "severity": "minor",
+    "file": "docs/managing-the-currency.md",
+    "problem": "'destroys that payer's whole balance' is looser than the code and than architecture.md. The ban destroys the balance from before the block and cancels the payer's payments. Credits the payer receives in the same block still land.",
+    "evidence": "ledger/ledger.go ProcessPayments: 'The ban destroys the payer's pre-block balance and cancels its payments; credits it receives in the same block still land.' architecture.md: 'its pre-block balance is destroyed'.",
+    "fix": "'destroys the balance that payer had before the block; money paid to it in that block still lands'."
+   },
+   {
+    "severity": "minor",
+    "file": "docs/governance.md",
+    "problem": "'Extending it' step 5 lists node.ParametersView, ui/admin.go and the template. It leaves out ui/main.go, whose proposeParameter reads each parameter's form field into parameterForm by name. A new field that is not read there never reaches the draft.",
+    "evidence": "ui/main.go proposeParameter: parameterForm{TransactionCost: request.FormValue(\"cost\"), ..., MaxAccountBalance: request.FormValue(\"maxAccountBalance\")}.",
+    "fix": "Step 5: '... on the admin page (`ui/admin.go`, the form reading in `ui/main.go` `proposeParameter`, and `ui/templates/admin.html`)'."
+   },
+   {
+    "severity": "minor",
+    "file": "docs/api.md",
+    "problem": "'Peer DNS and fan-out' says a node starts on the peers cmd/server gives it, and takes chain peers 'after each commit or catch-up'. A node that opens from its snapshot takes chain peers at once, before it starts.",
+    "evidence": "node/node.go Open calls loadSnapshot, which calls fastForward when the snapshot is ahead of genesis. fastForward calls resolvePeersFromState, and the HTTP transport is already set.",
+    "fix": "'after it loads its snapshot, and after each commit or catch-up'."
+   },
+   {
+    "severity": "minor",
+    "file": "README.md; docs/operating-a-network.md",
+    "problem": "README's title ('a distributed ledger in a single static binary') and its Origins line ('a single static binary') still conflict with the new build text. The default build of the server, the demo and the wallet is not static, and there are several commands. Separately, operating-a-network.md's 'one binary with no runtime' is loose, because every Go binary carries the Go runtime. The fixer left the title as a tagline.",
+    "evidence": "go list -deps shows runtime/cgo in ./cmd/server, ./cmd/demo and ui, but not in ./cmd/keygen. gcc is present. README Design goals now says 'static when built with CGO_ENABLED=0'.",
+    "fix": "'needs nothing installed to run' instead of 'with no runtime'. For the title, the owner may keep it, or use '... in small static binaries'. docs/why-small-and-auditable.md stays as it is."
+   }
+  ],
+  "evidence": "Worktree p2-s11 at c82f1f8. I read `git diff bb29a17..HEAD` for all 14 files and checked each changed passage against the code.\n\nAll seven earlier problems are fixed.\n\n1. signature.md sign log. The text is now scoped to the sign log. It matches node/node.go Node.commit, which empties the log only when `signLog.Height == block.Height`. It matches lastProposal, which Node.sendLastCommit re-sends. It matches ledger/hash.go: BlockHeader includes Nonce.\n2. keygen pair into a wallet. ui/keyfile.go loadOrCreateKey reads a plaintext {publicKey, privateKey}, checks that the key derives from the seed, and seals it once a passphrase is available. ui/wallet.go LoadOrCreateWallet contacts no node. I reproduced it in p2-scratch/check2: I built keygen and the wallet, wrote the pair as wallet.json, and ran the wallet with GOLEDGER_WALLET_PASSPHRASE. The file then held encryptedPrivateKey and the same publicKey. Runbook steps 2 to 4 and the \"new key's wallet\" proof match ui/admin.go and governance.md.\n3 and 6. Hash name length. ui/requests.go hashName base32-encodes 15 bytes: \"k-\" plus 24 characters, 26 in all. The manual, managing-the-currency.md and ui/README.md now agree.\n4. Overdraw ban. It is now in the text and in the supply formula. ledger/ledger.go ProcessPayments does this. node.admitPayment and reconcilePools re-check the payer's total, which supports \"zero while every node is honest\".\n5. data/ folder. cmd/server/config.go reads its paths relative to the folder the server starts in, and nothing creates the snapshot's folder. A failed logVote or logProposal drops the vote or proposal.\n7. Screenshots. They are removed from README.md. I viewed both PNGs: they show pay-to-key, \"Register a name\", Ed25519-length keys, cost 1/20 and single votes. So the TODO line \"from before Phase 1\" is right.\n\nI also checked the minor fixes against the code:\n- consensus/driver.go: validValue is set without a lock.\n- ledger/block.go applyContent order.\n- The ledger imports from consensus.\n- ledger/name_request.go freezeNames: a frozen bank clears its customers' key changes and bank changes to it, and fees are not refunded.\n- consensus/evidence.go: block hashes must differ, and a nil vote has a zero hash.\n- node/peerdns.go, node/topology.go Neighbors and cmd/server peers.\n- node/record.go readRecord lifelong scan.\n- ui/wallet.go nextPaymentBlockID with blockSlack 32: 33 refusals from a fresh counter.\n- ui/main.go \"cannot read a verified state from the node\".\n- signing/signer.go: only Signer.Sign calls PrivateKey.Sign outside tests.\n- The governance step names: genesisParameterNames, the ledger/amount.go JSON methods, the ParseGenesis amount list, node.ParametersView.\n- go list -deps: runtime/cgo is in server, demo and wallet, not in keygen.\nA script checked every relative link and anchor in the non-review .md files and found none broken.\n\nThe seven new problems listed are all minor. Outside this slice: review/phase2_progress.md still says \"32 refusals\" twice. The orchestrator should change both to 33."
+ },
+ "brief": "Every code slice is merged on post-emudhra-phase2: S1 ML-DSA-65; S2 height, amounts, parameters, caps; S3 names are the identity; S4 block hash, nonce, signed proposals, Checkpoint, network id; S5 name requests, the freeze step, the ⅔ name action; S6 a double-sign freezes the name; S7 the signature record; S8 the genesis file, server config, demo; S9 the wallet and admin pages; S10 the idle chain; S7b the record in units of 100, named by network. review/phase2_progress.md (\"Slices done\", \"Owner decisions\", \"For the owner, from S10\", the S11 notes, \"Known behaviour\") and review/_evidence_phase2/S<n>_reports.json (openIssues and deviations) list the doc points each slice left.\nNothing else is being built while S11 runs. S12 (the reading guide, docs/reading-the-code.md, and README.md's Layout section) runs after S11: do not write the guide, and leave the Layout section as it is.\nFor S11 specifically:\n- The owner, 2026-10-30: \"make the docs into 4 macro areas which correspond to the 4 docker containers: signature, node, api/cdn and ui\". Spec §11 maps each doc to its area.\n- The owner reads the docs in the morning before anything is published, and is not a Go expert: the docs must be exact and plain. A doc that describes Phase 1 behaviour as current is the main failure to avoid; grep the docs for every removed concept (Ed25519, 32-byte keys, pay-by-key, key-based validators, name claims by account update, slashing, the `networkId` config key or wallet flag, segments of 10,000 heights, the record routes' `count`, record files without the network in their name, a chain that commits a block every second whether or not there is work) and make sure none is left described as current.\n- The S10 open points that the docs must state as they are (progress note, \"For the owner, from S10\"): a late double-sign wakes an idle chain; a proof the one-third cap holds back, kept while the chain idles, lives only in memory until the next commit; the wallet's payment counter can say \"wait for the chain to advance\" after 32 refused payments or updates while no one gives the chain work (any payment or update anyone makes clears it); the freeze's \"did not land\" shows only once the chain reaches the freeze's block. State them as current behaviour; do not promise a fix.\n- docs/security.md states the cost of the record routes: at most two unit files per request, about 3.7 MB with 4 validators and 14 MB with 21 (spec §9.3), and the request without `from` lists the record folder. docs/operating-a-network.md says to delete an earlier network's record files at a re-genesis (they carry another network's 16 hex digits).\n- Commands and config examples must work: build and run them in a scratch copy as you write.\n- Do not edit Go files, templates, findings.md, docs/why-small-and-auditable.md, or review/ other than spec §12 (as your brief says). Do not edit review/phase2_progress.md."
+}

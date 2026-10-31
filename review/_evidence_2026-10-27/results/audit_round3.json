@@ -1,0 +1,368 @@
+{
+  "summary": "Independently verify the 19 new findings from the second pass (fork, replay, liveness, DoS, ops) in 5 adversarial groups",
+  "agentCount": 5,
+  "logs": [
+    "verdicts: {\"CONFIRMED\":17,\"DUPLICATE\":2}"
+  ],
+  "result": [
+    {
+      "group": "R3-history-safety",
+      "verdicts": [
+        {
+          "finding": "VBS-N2",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "high",
+          "reasoning": "Root cause confirmed. Lock, round and own votes live only in the Driver. New() reloads the H-1 snapshot and startHeight runs NewDriver().Start() at round 0, unlocked, with an empty mempool. A restart is therefore an amnesia (Byzantine-equivalent) fault. No guard stops the second commit:\n- Commit.Verify checks each certificate alone (both verify).\n- ApplyBlock accepts D2.\n- A decider at H+1 has reset heightVotes, so it never re-gossips H's votes.\n- Bootstrap sync helps only if a decider is reachable at boot. The first catch-up poll comes 3 s or more later, while the decision at H takes one round.\n- f+1 skip is liveness only.\n- Afterwards catch-up silently moves the decider onto the other branch and reverts its finalized payment.\n- No Evidence is recorded (the decider's driver for H is gone), so X is not slashed.\nThe finding understates two things. The docs' own advice (always-on machines that alone hold quorum) forks on a shared power outage with no partition. It also forks when no validator holds ≥1/3 (S3, three at 30%), so 'no single validator ≥1/3' is not a sufficient interim mitigation. One claim is wrong: an HRS-only signer guard does NOT block the fork. Severity is high: silent finality reversal with no attacker, within the documented threat model. The timing window is narrow.",
+          "reproduction": "Own harness, written from scratch: <scratch>/verify3-R3-history-safety/node/zz_v3_harness_test.go plus zz_v3_amnesia_test.go and zz_v3_total_test.go. Real Nodes, real snapshot files, reboot = New(sameConfig). Bootstrap and catch-up run over real HTTP /hdls/checkpoint, behind the same partition gate. Crash = the node is isolated right after its own non-nil precommit leaves (earlier messages are still delivered), then Stop().\n\nUnfixed, GOLEDGER_CHAOS_SLACK=4, 5 runs each (log rates2.log in the same scratch dir):\n- S1, the finding's X:2 A:1 B:1 schedule: 5/5 FORK.\n- S1 with D1 proposed by A: 5/5.\n- S1 cross-round (reboot after B's round-0 timeouts; D2 committed at round 1-2): 5/5.\n- S1 proposer-A cross-round: 4/5 (1 setup miss).\n- S2 shared outage, desktops 2+2: the laptop (1) decided D1 on battery; the desktops reboot before its Wi-Fi returns: 5/5 FORK.\n- S3, desktops 3+3+3 plus laptop 1: 5/5.\n- Control (decider reachable at reboot): 0/5.\nBoth certificates pass Commit.Verify against the static set. When the decider rejoins, catch-up sets merchant 4.9 → 0. X keeps 100 (not slashed).\n\nFix copy (<scratch>/verify3-R3-history-safety-fix; patch at <scratch>/verify3-R3-fix.patch):\n- 0 forks in every variant.\n- S2/S3 decide D1 by themselves.\n- S1 halts until A returns, then converges on D1.\n- Existing consensus, ledger, cmd and 38 node tests pass; clean under -race; block rate unchanged.\n- HRS-only emulation: S1 (3 variants) and S2 still FORK.\n- Lock-digest-only restore: S4 (total outage after a unanimous precommit) HALTS permanently.",
+          "realistic_preconditions": "All of the following must hold:\n(a) A set R of validators precommitted D1 at H, then lost power before H's snapshot was fsynced. The window is ms to tens of ms per block on a LAN, or up to one re-gossip period if a precommit was lost. R's power must be ≥ 2q−N, which is strictly more than 1/3 (2 of 4, 34 of 100).\n(b) A node outside R decided D1, for example a laptop on battery, and its clients saw D1.\n(c) After reboot, R plus validators that never locked D1 reach quorum before any D1-decider is reachable. The only rescue paths are bootstrap at boot or a catch-up poll 3 s or more later.\n(d) D1 carried a payment or update. Mempools are not persisted, and empty blocks are identical across proposers, so an idle chain cannot fork.\nA single heavy validator also needs a partition flip (the finding's S1). A correlated outage of the always-on machines that the docs say should hold quorum needs nothing more.",
+          "minimal_fix": "Add a write-ahead sign log at <snapshotPath>.votes, keyed by height.\n- Before releasing each own vote, append it and fsync. For a non-nil precommit, also store that round's ProposalMsg.\n- If the write fails, do not release the vote.\n- On restart, if the log's height equals the height being entered, call a new Driver.Resume(ownVotes). It re-counts the votes and marks them sent, so no second vote is ever signed for the same round and type. It restores locked/valid value from the highest-round non-nil own precommit and resumes at the highest voted round with the step set.\n- startRound must not re-propose a round it has already voted in.\n- The node re-feeds the locked proposal through onProposal and re-gossips the restored votes.\nAbout 140 added lines. No state-digest or signing-preimage change. Require snapshotPath for validators. This also fixes H1 (self-slashing).",
+          "fix_pitfalls": "- An HRS guard without lock restore is NOT enough. The node's own pre-crash votes come back through heightVotes re-gossip or peer relay, round 0 times out, and the node votes unlocked later. This forked in tests.\n- Restoring the lock digest without the proposal body permanently halts after a total outage that follows a unanimous precommit. Unfixed code is live in that case.\n- The write must be fsynced, write-ahead and fail-closed. saveSnapshot is best-effort; don't copy that pattern.\n- The node must resume at the last round. Otherwise it re-enters round 0, where the guard stalls it or it signs again.\n- If the H-1 snapshot write fails but the sign log reaches H, a restart at H-1 is amnesiac again. Refuse to start when the log is ahead of snapshot+1.\n- Without persisting all of the height's votes, S1 halts until the decider returns, though catch-up then heals it.\n- 'No validator ≥1/3' is not a valid interim mitigation (S3 forks)."
+        },
+        {
+          "finding": "VSTR-NEW-1",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "high",
+          "reasoning": "loadSnapshot (persist.go:31) runs verifyCheckpoint(cp, genesis) on the node's OWN file. In dynamic mode that requires more than 1/3 of genesis power among the last commit's signers. Commits carry only the first quorum that arrived, so drift is enough; full rotation is not needed. On failure New() silently starts at height 1, and the docs' simultaneous-outage recovery becomes a re-genesis.\n\nThis overlaps C19/SYNC-3's clause 'cannot reload its own state, falls back to genesis' (same line). It is not an exact duplicate:\n- SYNC-3 rated it a medium liveness brick that needs full rotation.\n- Here, partial drift fails 50% of own snapshots.\n- The impact is lost committed history: a simultaneous restart rolls the ledger back.\n- Even a lone reboot of a dominant genesis validator starts a parallel chain from genesis, and genesis-anchored joiners prefer that chain.\nThe fix is independent of C19's pin. Merge it with C19 in the report but rank it as a safety issue. Static mode is unaffected. Requires dynamic mode (a documented feature) plus routine stake movement plus a restart, with no attacker. High.",
+          "reproduction": "Own PoC: <scratch>/verify3-R3-history-safety/node/zz_v3_rotation_test.go. Dynamic mode, threshold 100. Founder A, the only genesis validator, pays X 990 at h1, so X becomes the only live validator.\n- X's own snapshot at h7 verifies against the live set but not against genesis.\n- After New(), A and X both come up at height 1, silently.\n- Simultaneous restart: A re-commits from genesis. X's node ends at X=0, A=1000 (ROLLBACK of h1..h7).\n- Founder-only reboot: the founder runs a parallel chain (h93: X=0, A=1000) while X continues (h103: X=989.9). A new genesis-anchored joiner adopts the founder's chain.\n- Breadth: all founders still validators, newcomer at about 58% of live power: 80/160 own-snapshot samples fail the genesis anchor.\nFix copy (self-consistency plus fail-loud): own snapshots reload (h3/h8), no rollback, no parallel chain. TestNodePersistsAndReloads, TestVerifyCheckpointSkippingTrust and the 38 node tests pass.",
+          "realistic_preconditions": "Requires dynamic validators (validatorThreshold) and a node whose last commit's signers hold no more than 1/3 of genesis power. That is always true after full rotation, and about half the time with founders still active when a newcomer holds most of a quorum. Any restart then silently re-genesises that node. Its wallets see genesis balances, and it is bricked if catch-up also fails (C19).\nRollback or a fork needs the re-genesised genesis validators to hold more than 2/3 of genesis power. That happens with a single-founder genesis, or after a simultaneous outage, which the docs explicitly promise is recovered from snapshots.",
+          "minimal_fix": "In loadSnapshot, trust the node's own file on self-consistency instead of the genesis anchor: require Commit.Verify against checkpointSigners(cp) and that the commit binds the state digest. Factor this out as selfConsistent and reuse it in verifyCheckpoint. If snapshotPath is set and the file exists but cannot be read, parsed or verified, refuse to start: panic, or better, return an error from New (breaking change allowed). Never fall back silently to genesis. About 15 lines; no digest or signing-preimage change. The self-consistency half of c19-minimal-fix.patch matches this but lacks the fail-loud half.",
+          "fix_pitfalls": "- Without fail-loud, a corrupt file still silently re-genesises.\n- Self-consistency trusts the carried signing set. That is fine for the node's own disk, but never use it for peer checkpoints (bestCheckpoint, adopt, catchUp), and never load a shared or NAS BackupPath as snapshotPath.\n- Not fixed here, and these belong to C19's pin or live-anchor work:\n  - genesis-anchored bootstrap and catch-up after drift, so a node that reloads correctly can still be unable to catch up;\n  - a dominant genesis validator restarting with no snapshot at all (disk loss) still re-runs genesis.\n- Prefer an error return over panic in library code."
+        }
+      ],
+      "notes": "I wrote all PoCs from scratch through the production paths: New/Start/Stop, real snapshot files, reboot = New(sameConfig), and bootstrap plus catch-up over real HTTP checkpoint servers gated by the partition model. I fixed one harness artifact of my own: votes sent before the crash had been dropped at delivery time.\n\n- Tests: <scratch>/verify3-R3-history-safety/node/zz_v3_*_test.go\n- Fix copy: <scratch>/verify3-R3-history-safety-fix. Its amnesia test differs only in non-fatal waits and diagnostics.\n- Combined patch: <scratch>/verify3-R3-fix.patch (140 lines added, 21 removed, non-test only).\n\nVBS-N2 shares its root cause and fix with H1 (crash-restart self-equivocation); report them under one fix. The fix also invalidates TODO.md's 'Consensus-state WAL ... not a safety issue' and docs/security.md's no-fork claim, which hold only until a restart.\n\nThe finding's claim that an HRS-only guard blocks the fork is refuted: my emulation still forks.\n\nSetup misses seen on both pristine and fix copies (e.g. 'network did not reach H-1') are a pre-existing liveness flake. They are not caused by the fix: fsync p50 is 0.5 ms and block rates are equal."
+    },
+    {
+      "group": "R3-integrity",
+      "verdicts": [
+        {
+          "finding": "NEW-1-block-height-unbound-replay",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "high",
+          "reasoning": "No production code compares p.Block.Height with n.height. onProposal checks only ProposalMsg.Height, the driver works on digests, commit re-applies n.blocks[digest], and the HTTP intake (handleProposal) adds no check. LedgerState.Digest omits height. So every height-scoped guard in ApplyBlock (payment and update BlockID, evidence window) keys on a value the proposer picks. Variants that pass ApplyBlock on pristine code: old-payment replay; a future-dated payment applied early and then again at its real height (wallet default lookahead=3 means every wallet payment is future-dated while pending); replay that trips the overdraw ban and removes the victim's balance and name; replay of a reversed AccountUpdate (delegation, name, address); stale evidence beyond maxEvidenceAge. Governance certs are NOT affected (bound by GovernanceSequence). One validator below 1/3 who is the scheduled proposer suffices, which is the documented 'single dishonest validator' threat. Block bodies are not persisted, so little forensic trail. findings.md #7's 'node guards this' is wrong.",
+          "reproduction": "Ran the second-pass tests (only the *_test.go files copied) in <scratch>/verify3-R3-integrity. Ledger: 4/4 variants FAIL on pristine code. Node: TestPoCCriticByzantineProposerReplaysOldPaymentViaBlockHeight FAILs 3/3 (alice 70->40, all 3 honest nodes agree). Harness check: the proposal enters via SubmitProposal (identical to POST /hdls/proposal), the payment via the admitPayment intake, and the signature is at the correct (height, round), so there is no impossible ordering. With the interim guard the same test passes 3/3 (alice stays 70; round 1 decides, liveness kept). Future-payment double-apply is ledger-proven only; its node path is the same mislabel step plus an ordinary honest block.",
+          "realistic_preconditions": "Holds one validator key (any stake below 1/3) and is the scheduled proposer for a round that decides (about 1/N of heights). Needs the old or pending signed payments and updates, which every validator receives by gossip.",
+          "minimal_fix": "Smallest correct fix (node only, no digest change): in onProposal, if p.Block.Height != n.height set valid=false and do NOT store the block in n.blocks; in commit, return if blk.Height != n.height. Trialled in <scratch>/verify3-R3-bothfix/node/node.go; the full suite is green except a pre-existing flake (TestChaosDynamicAdmissionConverges fails 2/5 on pristine code). Structural fix, which also covers pure-ledger callers: add Height to LedgerState and its Digest, have ApplyBlock require block.Height == prev.Height+1, and have ProposeBlock derive Height from prev. This CHANGES THE STATE DIGEST, needs node call sites to pass Height=n.height-1, and verifyCheckpoint to use Height=cp.Commit.Height; it touches about 57 test sites.",
+          "fix_pitfalls": "Do not store a mislabelled block in n.blocks. StateDigest is proposer-chosen, so an empty mislabelled block shares the digest of an honest empty candidate and would overwrite it; with the commit guard that node would then refuse the decided digest and stall. Prefer marking it invalid (prevote nil) over dropping it, consistent with the existing relay policy. For the ledger fix, forgetting the checkpoint and digest height makes every checkpoint fail verification. Correct findings.md #7."
+        },
+        {
+          "finding": "NEW-2-catchup-skips-dropoverdrawn",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "medium",
+          "reasoning": "fastForward and catchUp replace balances but never run mem.dropOverdrawn (nor dropBelow or updates.dropBelow). Then startHeight builds a candidate from the stale pool, and ProposeBlock does not filter overdraws, so the ledger ban fires. This breaks the invariant that commit() and security.md state ('an honest node can neither hold nor propose an overdrawing payment set'). Likelihood is limited: the payer must have two payments whose sum exceeds the balance, accepted by different reference nodes while one was partitioned; that node must catch up to exactly its held payment's BlockID and be the proposer for the deciding round. Impact is loss of the payer's whole remaining balance and name. A node dropping off is in scope, so medium stands, though likelihood is low.",
+          "reproduction": "Wrote <scratch>/verify3-R3-integrity/node/r3_catchup_overdraw_test.go, which uses production paths only: AdmitPayment intake, real consensus among 3 connected nodes, and the partitioned node's own catchUpLoop polling a peer's /hdls/checkpoint over HTTP (bestCheckpoint -> evCatchUp -> catchUp -> startHeight). Two connected nodes are stopped after height 2 only to pin the catch-up height. On the pristine copy (<scratch>/verify3-R3-baseline) it FAILs 2/2: the height-3 proposal carries X1, ApplyBlock on the peers' committed state is valid, and the payer goes to 0 and is removed. With the fix it passes (0 payments, payer keeps 40).",
+          "realistic_preconditions": "No attacker is needed. Required: a payer's overspend across two reference nodes, one node partitioned or asleep during intake, then catch-up landing at the held payment's BlockID with that node proposing the deciding round. It is a narrow timing window.",
+          "minimal_fix": "At the end of fastForward (covers both adopt and catchUp), re-run what commit does: n.mem.dropBelow(n.height); n.mem.dropOverdrawn(func(p string) *big.Rat { return ledger.AccountAmount(n.accounts, p) }); n.updates.dropBelow(n.height). Better: factor commit's post-state pool reconciliation into one helper used by both. No digest or preimage change. Trialled; the full suite is green apart from the pre-existing chaos flake.",
+          "fix_pitfalls": "Put it in fastForward, not only catchUp, so adopt is covered too. Keep it before resolvePeersFromState and startHeight. Do not reset relaySeen there unless intended."
+        }
+      ],
+      "notes": "The pristine checkout was never modified (checked). The fix trials are in <scratch>/verify3-R3-bothfix. TestChaosDynamicAdmissionConverges is a pre-existing flake: 2/5 failures on pristine code, 0/5 with the guard, so suite failures on it say nothing about these fixes. Logs are in <scratch>/verify3-logs/. The two findings are independent; neither duplicates the other."
+    },
+    {
+      "group": "R3-liveness",
+      "verdicts": [
+        {
+          "finding": "NEW-3-partial-peerdns-halt",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "high",
+          "reasoning": "Mechanism verified in code and on real processes. A publisher resolves Neighbors over the publishers only and sends only to them. A non-publisher gets nil from resolution (self is not in the key list), so it keeps its static peers and still sends to everyone. Publishers therefore hear all validators; non-publishers hear only non-publishers. A block commits only if publisher power P>2/3 or non-publisher power Q>2/3, so with at least two publishers holding power in [1/3, 2/3] nothing ever commits.\n\nThere is no way out short of a re-genesis or a code change:\n- An address cannot be withdrawn (an empty Address means unchanged).\n- Restart and catch-up re-apply the cut (loadSnapshot and catchUp both go through fastForward, which calls resolvePeersFromState).\n- Publishing the missing addresses needs a block to commit.\n\nWith equal powers and n=3..6, an incremental rollout halts at the second publication. One correction to the claim: a lone first publisher does nothing (Neighbors over one key is nil). An attacker can only complete the condition as the second publisher.",
+          "reproduction": "Real multi-process network running the production cmd/server binary. Harness: <scratch>/verify3-R3-liveness/cmd/pocnet/main.go. Each publisher's signed AccountUpdate is POSTed to its own /hdls/update.\n\nResults (30 s windows), outputs in <scratch>/verify3-R3-liveness/runs/*.out:\n- Control, all-to-all: reaches height 82.\n- Publishers {0,2}, all-to-all: frozen at height 6, with the addresses committed on every node.\n- maxPeers=2 (2x2 Hypernode), control: reaches 100. Publishers {0,1}, {0,2} or {0,3}: all frozen at 6.\n- Genesis carrying addresses for 2 of 4 validators: frozen at height 2, both all-to-all and maxPeers=2.\n- n=3 with 2 publishers: frozen at 6.\n- 1 of 4, 3 of 4, or 4 of 4 publishers: keeps advancing (47, 47 and 85).",
+          "realistic_preconditions": "No attacker. Operators use the documented optional per-validator on-chain address (in genesis, or via an update) for a proper subset of validators holding 1/3 to 2/3 of power, which is what any one-bank-at-a-time rollout passes through. A Byzantine validator can push the network into the halt once one honest validator has published.",
+          "minimal_fix": "All or nothing:\n- In resolvedPeerAddresses, return nil unless every current validator has an address (len(keysWithAddress) < len(currentValidators.Validators()) means nil).\n- In resolvePeersFromState, save the transport's peers the first time a resolution is applied, and restore them whenever resolution becomes incomplete.\n\nAbout 15 lines in node/peerdns.go plus two Node fields. No change to the state digest or any signing preimage. Trialled in <scratch>/verify3-R3-liveness/fixtrial-peerdns on the real network: partial publication, staged 2-then-4 rollout, maxPeers, partial genesis and the NB-1 drain all keep committing. The node and cmd/server suites pass. The docs should say resolution starts only once every validator has published.",
+          "fix_pitfalls": "- Save the configured peers at the first resolution, not in New: tests (and callers) call SetPeers after New, and a copy taken in New would wipe their peers.\n- Returning nil alone is not enough: it leaves a stale resolved list in place (the NB-1 case).\n- In dynamic mode, a newly admitted validator with no address sends everyone back to the configured peers. That is acceptable.\n- No change to Neighbors is needed.\n- The fix cannot rely on validators unpublishing, because an update cannot clear an Address."
+        },
+        {
+          "finding": "VSTR-NEW-2",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "high",
+          "reasoning": "catchUpLoop calls bestCheckpoint, which verifies every candidate against cfg.Genesis. In dynamic mode, once the first-quorum signers of served commits hold ≤1/3 of genesis-derived power, every honest checkpoint is discarded before catchUp's live-state check ever runs. The documented single-founder genesis reaches that state as soon as the founder pays out. Static mode is unaffected.\n\nThis is not an exact duplicate of C19/SYNC-3. That finding states running nodes are fine ('their catch-up anchor tracks the live set'); this one shows they are not. The root cause is the same genesis anchor.\n\nRaised to high:\n- On pristine code, stragglers appear on their own within seconds (missed commit windows), with no induced sleep.\n- Each straggler is permanent, so the chain halts once more than 1/3 of power has straggled.\n- Restarting a stuck node does not help (SYNC-3/VSTR-NEW-1).\n- Dynamic mode is the 'banks'/delegation model, and laptop sleep is in the threat model.",
+          "reproduction": "Harness: <scratch>/verify3-R3-liveness/cmd/pocdyn/main.go. Five production cmd/server processes in dynamic mode (validatorThreshold 100), genesis = founder F with 1000. F pays each of four banks 240 and keeps 40, so it leaves the set. Served commit signers are [B2 B4 B1], genesisVouched = 0/1000. Laptop sleep is SIGSTOP/SIGCONT, so only the real catchUpLoop/bestCheckpoint can bring a node back.\n\nPristine runs:\n- runs/dyn-full.out: F and B3 stuck at 23 and 22 for good. The chain stalled for the whole time B4 slept, because B3 was already lost.\n- runs/dyn-full-nat.out (no sleeps at all): F stuck at 23 and B1 stuck at 32 for more than 60 s while B2–B4 reached 76.\n\nControl (F pays only 150, so it co-signs every commit): sleeping B4 and B3 both catch up within one tick.\n\nFix trial with bestCheckpoint anchored on the last committed accounts (<scratch>/verify3-R3-liveness/fixtrial): the same no-sleep full rotation keeps all 5 nodes in step up to height 127. The node suite passes with -race and GOLEDGER_CHAOS_SLACK=4.",
+          "realistic_preconditions": "Dynamic validator mode, with served commits whose signers hold ≤1/3 of genesis power. This happens naturally once the genesis founder(s) hand out stake or retire, and partially under partial rotation. Any node then only has to miss one commit window: sleep, a network blip, or the natural lag seen here.",
+          "minimal_fix": "Anchor bestCheckpoint on the node's last committed accounts instead of cfg.Genesis:\n- Add an atomic.Pointer[[]ledger.Account] field.\n- Store into it in New (after loadSnapshot), in fastForward and in commit.\n- bestCheckpoint uses it as the anchor.\n\nAbout 10 lines (the sync.go part of c19-minimal-fix.patch). No change to the state digest or any signing preimage.",
+          "fix_pitfalls": "- Do not read n.accounts from the goroutine; that is a data race.\n- Do not drop the anchor filter altogether: a forged checkpoint at a higher height would win the max-height pick and the loop would never see the honest one.\n- Remaining limit: a node that falls behind across the block that rotates more than 2/3 of the set still cannot catch up. In the fix trial B3 stayed stuck at 13, just before the rotation block. Solving that needs historical checkpoints or a chain walk, which is the documented limit.\n- Restarts still need the separate VSTR-NEW-1 snapshot fix."
+        },
+        {
+          "finding": "NEW-7-nonvalidator-maxpeers-isolated",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "low",
+          "reasoning": "In load(), when maxPeers>0 and every validator has a URL, peers are replaced by Neighbors(keys, self). For a key that is not in the validators list, Neighbors returns nil, so the node starts with zero peers and gives no warning beyond 'peers=0' in the startup log.\n\nObserver nodes are documented, and an observer must use the network's maxPeers because MaxPeers is a genesis parameter inside the state digest. So setting maxPeers=0 on the observer is not a clean workaround.\n\nThe damage stays on that node: it follows only through bootstrap polling, and it accepts payments and signs receipts that are never relayed. Merchants are told to trust receipts only from known validators, and consensus is unaffected, so the severity is low.",
+          "reproduction": "Harness: <scratch>/verify3-R3-liveness/cmd/pocmisc/main.go (mode observer). Real processes: 4 validators plus a non-validator observer with bootstrap configured.\n- maxPeers=2: observer logs 'peers=0'. A payment for block 24 sent through the observer gets HTTP 200 and a signed receipt, but never lands (the payee still has 100 at height 55). The control payment through a validator lands (109.9).\n- maxPeers=0: observer logs 'peers=4', and the same payment through it lands (109.9).\n\nOutputs: runs/obs2-mp2.out and runs/obs2-a2a.out.",
+          "realistic_preconditions": "A non-validator node (observer, history node, merchant node) on a maxPeers>0 network, or a typo in the node's own publicKey.",
+          "minimal_fix": "In load(), replace peers only when Neighbors returns non-nil, i.e. this node is in validators; otherwise keep fc.Peers, and optionally log a warning. About two lines in cmd/server/config.go. No change to the state digest or any signing preimage.",
+          "fix_pitfalls": "- Do not make load() reject non-validator keys; that would forbid observers on Hypernode networks.\n- Do not tell observers to set maxPeers=0: it changes their genesis parameters digest."
+        },
+        {
+          "finding": "NB-1",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "medium",
+          "reasoning": "A zero balance (ProcessPayments), a ban, or a slash (applySlashes) deletes the whole account, including its Address. The other validators then re-resolve over the remaining publishers and stop sending to that validator. Its own resolution returns nil, so it keeps its old peers and still sends to them. This is the same asymmetric-subset mechanism as NEW-3, but reached by losing an address.\n\nIn static mode the validator still counts toward quorum. One such validator silently drops out of consensus and uses up the fault budget. Two of four halt the chain for good, because re-funding and re-publishing need a commit.\n\nNot an exact duplicate of NEW-3 (different trigger), but NEW-3's fix covers it completely. Raised from low because the halt is shown on a real network.",
+          "reproduction": "Harness: <scratch>/verify3-R3-liveness/cmd/pocmisc/main.go (mode drain). Four static validators, all with addresses in genesis.\n- node1 pays out its whole 100: its account is gone, and the chain continues on 3 validators (node1 trails via catch-up).\n- node2 does the same at block 40: all nodes stay frozen at 41 for 30 s (runs/drain-a2a.out).\n- With the NEW-3 fix binary, both drains happen and the chain keeps committing to 144 (runs/fx-drain-a2a.out).",
+          "realistic_preconditions": "Peer DNS in use for all validators, and validator node accounts lost through operator payout, a ban, or a slash (for example after the crash-restart self-equivocation case, H1). One lost account silently removes that validator from consensus; at least 1/3 of power lost halts the chain.",
+          "minimal_fix": "No separate change is needed: NEW-3's fix (restore the configured peers whenever any current validator lacks an address) neutralises it, as verified above. The suggested ledger change (keep accounts that carry an Address at zero balance) changes the state transition and still misses slashes and bans.",
+          "fix_pitfalls": "- The NEW-3 fix must actually restore the configured peers. Just returning nil leaves the stale resolved list, which excludes the deleted validator.\n- The fallback only helps if the configured peers list is complete."
+        }
+      ],
+      "notes": "All four findings are confirmed through real cmd/server processes. Nothing modified the pristine tree, and no harness processes are left running.\n\n- **NEW-3 (high):** confirmed in every configuration tried — all-to-all, maxPeers=2, partial genesis, and n=3. One correction: a lone publisher does nothing, so an attacker needs to be the second publisher.\n- **NB-1 (medium, raised from low):** the same mechanism as NEW-3, reached when a validator's address is lost. NEW-3's fix covers it.\n- **VSTR-NEW-2 (high, raised from medium):** in dynamic mode, nodes fall behind on their own after a founder payout and stay stuck. Not an exact duplicate of C19/SYNC-3; it disproves that finding's claim that running nodes are fine.\n- **NEW-7 (low):** confirmed end to end: the observer signs receipts for payments it never relays.\n\nFix trials are in verify3-R3-liveness/fixtrial-peerdns and verify3-R3-liveness/fixtrial. Both pass the node and cmd/server suites. All harnesses and outputs are under <scratch>/verify3-R3-liveness: cmd/pocnet, cmd/pocdyn, cmd/pocmisc and runs/."
+    },
+    {
+      "group": "R3-dos",
+      "notes": "Threat model: single Byzantine validator (<1/3), anonymous LAN party, and sleeping/rebooting laptops are all explicitly in scope (docs/security.md). Scratch copies under <scratch>/: verify3-R3-dos (pristine + my PoCs), verify3-R3-dos-fix (combined NF1+VBS+NEW6 fix, full suite+race green), verify3-c10 (round-1 C10 fix applied), ratcheck2 (bounded-vs-coprime arithmetic). Machine: 56 cores, load ~2; ran with GOLEDGER_CHAOS_SLACK=4. The TestChaosDynamicAdmissionConverges flake (3/12) is PRE-EXISTING: identical rate on pristine and on the NF1-fixed copy under the same seed, so it is the documented starved-runner chaos flake, not a regression from the proposal bound. Bounded-decimal amounts (owner's decision) empirically close BE-NEW-1's arithmetic amplification; they do not by themselves bound mempool residency (that is C16's BlockID window). NF-C10 is a property of a PROPOSED fix, not pristine code; in the pristine tree the live issue is its parent C10.",
+      "verdicts": [
+        {
+          "finding": "NF1-proposal-flood-unbounded",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "high",
+          "reasoning": "onProposal has no round bound (unlike ReceiveVote's maxRoundLookahead=256) and its held-proposal fast path only short-circuits on a MATCHING digest, so the scheduled proposer of any round can (a) send many distinct-digest proposals for one round and (b) send proposals for ~2^31/N far-future rounds, each ApplyBlock'd, stored in n.blocks, remembered in heightProposals, and relayed. I reproduced all facets through handle() after a JSON round-trip and through the live HTTP handler. A validator key is required: an outsider key and a validator on an unscheduled round are both dropped at the Proposer check in ~3µs with no ApplyBlock/relay; only the scheduled proposer's key reaches ApplyBlock. Honest nodes relay the authentic junk, giving network amplification, and the single event loop cannot commit the governance vote that would remove the attacker while it churns.",
+          "reproduction": "verify3-R3-dos/node/zz_r3_nf1_test.go. KeyRequirement: outsider 3µs/not-relayed, validator wrong-round 3µs/not-relayed, validator scheduled-round 384ms/relayed. FloodCost: 1,020,553-byte proposal → mean 319ms (max 410ms) event-loop time/proposal, +1.32 MiB retained/proposal, all 39 relayed+retained (10 same-round digests + 29 far rounds up to 100119, driver still round 0). SameRoundInWindow: 10 distinct 1MiB round-1 proposals → 10 relayed, 10 retained. ThroughHTTP: 5×1MiB proposals POST→202 and processed. Residual under a +256 bound: 63 scheduled rounds in [2,256] = 18.5s loop time for 1 of 4 validators.",
+          "realistic_preconditions": "Attacker holds (or stole) one validator key — a 'bank' in the model, which is in scope. No special state; works at any time during any height, from any LAN host that can POST /hdls/proposal.",
+          "minimal_fix": "In onProposal, before ApplyBlock/store/relay: return false if a proposal for p.Round is already held (first authentic one wins per round, any digest — matches the driver), and if p.Round<0 or p.Round>n.driver.Round()+1. Node-local; no state-digest or signing-preimage change. I applied exactly this (8 lines in node.go): flood cost dropped to 0 relayed/0 retained beyond the first, same-round 10→1, and `go test ./... -race` plus the chaos suite stayed green (the DynamicAdmission flake rate was unchanged from pristine).",
+          "fix_pitfalls": "Use n.driver.Round()+1, not a constant, so legitimate higher rounds reached via timeouts still pass. Do not relay a second same-round proposal even on digest mismatch (a copied signature can carry a swapped body). C15's per-block size/count cap still needed to bound the one allowed proposal."
+        },
+        {
+          "finding": "NEW-4-unbounded-proposal-rounds",
+          "verdict": "DUPLICATE",
+          "duplicate_of": "NF1-proposal-flood-unbounded",
+          "final_severity": "high",
+          "reasoning": "Same root cause as NF1 (no maxRoundLookahead bound on onProposal/ReceiveProposal, versus ReceiveVote which bounds to d.round+256) and the same fix. NEW-4 emphasises one additional symptom — each accepted proposal's ReceiveProposal calls ensureRound, allocating a per-round VoteSet pair, so every later evaluate() pays an O(rounds) sortedPrecommitRounds + skip scan — which I measured and confirmed. But it is the identical defect and the identical remedy (bound the proposal round; cap per-height entries), so it is an exact duplicate of the more complete NF1.",
+          "reproduction": "verify3-R3-dos/node/zz_r3_nf1_test.go::TestR3NF1RoundCountAmplification: rounds held 0→1000→5000→20000, one honest peer vote 574µs→404µs→1.96ms→7.66ms; per far-round proposal 309µs→1.3ms→4.86ms; heap +25.7 MiB at 20000 rounds. Confirms the O(rounds) evaluate and per-round VoteSet allocation.",
+          "realistic_preconditions": "Same as NF1: one validator key, scheduled proposer for the targeted far-future rounds within a single height.",
+          "minimal_fix": "Same as NF1: bound onProposal to [0, driver.Round()+1] and keep first-per-round. That also stops ensureRound allocating VoteSets for far rounds, so the O(rounds) evaluate cannot build up. No digest/preimage change.",
+          "fix_pitfalls": "Same as NF1."
+        },
+        {
+          "finding": "BE-NEW-2",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "medium",
+          "reasoning": "evUpdate checks only WithinMessageBound; updatePool.add caps at MaxMempool with content-dedup only — no account existence check, no fee, no BlockID ceiling. dropBelow evicts only BlockID<height, so a far-future BlockID (2^40) is never pruned. handleAccountUpdate returns 202 before admission, so the client gets no refusal. A key with no account on the ledger signs MaxMempool updates for a far-future block; they fill every node's pool via gossip and survive every commit. applyAccountUpdates would drop them (non-existent account, wrong block) but they never get proposed (BlockID!=height), so they just squat. From then on every honest update (name registration, re-delegation, peer-DNS address) is refused at the full pool and silently 202'd. I confirmed this at the production default cap (10000), not just a small stand-in.",
+          "reproduction": "verify3-R3-dos/node/zz_r3_updpool_test.go on a live 4-node HTTP network, pool=10000: ghost key (no account) got 10000/10000 updates 202'd at node0 in 10s; owner's name registration then returned 202 at all 4 nodes but registered on 0/4 across many commits. Control (0 fill): same registration committed on 4/4.",
+          "realistic_preconditions": "Anyone who can reach any node's /hdls/update (the open LAN port the docs acknowledge). No account, no validator key, no fee. Permanent until every node restarts; attacker refills. No governance remedy (no balance to zero).",
+          "minimal_fix": "At update intake require From to be an existing committed account and require BlockID in [height, height+window]; evict pooled updates whose account no longer exists or whose block window passed. Requiring From to exist rejects nothing that would have applied — applyAccountUpdates already drops updates for non-existent accounts. Node-local; no digest/preimage change. Shared with the C15/C16 intake fixes. Ideally give update intake a real verdict instead of an unconditional 202.",
+          "fix_pitfalls": "First-time name registration is fine (an account must already be funded to register a name — matches the existing apply rule). Keep the window generous enough for the register→wait→use flow. Dynamic-validator address publication must still be allowed from existing accounts."
+        },
+        {
+          "finding": "NEW-5-updatepool-squat-accountless",
+          "verdict": "DUPLICATE",
+          "duplicate_of": "BE-NEW-2",
+          "final_severity": "medium",
+          "reasoning": "Identical defect and fix to BE-NEW-2: the account-update pool admits fee-free, far-future, accountless updates and evicts only past blocks, so a stranger key fills it permanently and blocks honest registrations/re-delegations/peer-DNS. NEW-5 drives it hand-rolled with a 50-slot stand-in; BE-NEW-2 drives the same through the live HTTP network at the real default cap. Same root cause, same suggested fix (require existing account + bound BlockID at intake). Exact duplicate.",
+          "reproduction": "Covered by my BE-NEW-2 reproduction at the default cap (verify3-R3-dos/node/zz_r3_updpool_test.go). The original NEW-5 PoC (verify-critic/node/poc_critic_updatepool_test.go) uses a 50-slot pool and a single node; the mechanism matches.",
+          "realistic_preconditions": "Same as BE-NEW-2.",
+          "minimal_fix": "Same as BE-NEW-2.",
+          "fix_pitfalls": "Same as BE-NEW-2."
+        },
+        {
+          "finding": "VBS-N1",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "medium",
+          "reasoning": "When SignVote fails, castVote returns nil without setting sentPrevote/sentPrecommit, yet the step1 branches that call it (proposer's own prevote via startRound→evaluate, the prevote-on-proposal branch, and the precommit-nil branch) return progressed=true. evaluate() loops while progressed, so the same branch fires forever on the node's single event-loop goroutine — the whole node (votes, loop-backed HTTP, catch-up) freezes. I confirmed with a broken signer: Driver.Start() as proposer never returns, and ReceiveProposal (non-proposer prevote path) never returns; the propose-timeout-with-no-proposal path (the one the existing TestDriverBrokenSignerDropsVoteQuietly covers) DOES return, which is why the gap was missed. Today unreachable: in-memory Ed25519 signing can only fail on a wrong-length key, which config load rejects. It becomes reachable with the planned remote signer (network error/timeout/down) or with H1's proposed double-sign refusal guard.",
+          "reproduction": "verify3-R3-dos/consensus/zz_r3_signfail_test.go::TestR3SignFailPaths with a wrong-length signer: (a) proposer Start returns=false [spins], (b) non-proposer ReceiveProposal returns=false [spins], (c) propose timeout w/ no proposal returns=true. Matches verify-burn-slash/consensus/zz_vbs_signfail_test.go (Start never returns within 3s).",
+          "realistic_preconditions": "A separate/remote signer deployment (documented plan, TODO.md) where the signer is briefly unreachable or refuses while this node is the round's proposer; or H1's persisted double-sign refusal guard. Not reachable in the current integrated-signer build.",
+          "minimal_fix": "On a signing error, castVote must not report progress. I changed the three step1 branches to return d.sentPrevote[r] / d.sentPrecommit[r] (false on failure) instead of literal true (3 lines in driver.go). With the fix all three paths return promptly and `go test ./consensus -race` stays green. Pure driver logic; no state-digest or signing-preimage change.",
+          "fix_pitfalls": "Must also emit/record a retry (ActSchedule or next-timer) so a transient signer outage recovers on the next tick rather than silently stalling the round; returning progressed=false alone stops the spin but leaves the node idle until the next event/timeout — acceptable but worth a retry path. Extend the existing broken-signer test to the proposer and prevote-with-proposal paths."
+        },
+        {
+          "finding": "NEW-6-backup-goroutine-leak",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "medium",
+          "reasoning": "saveSnapshot launches `go writeAtomic(...)` per commit to mirror to BackupPath, deliberately untracked, with no in-flight bound. If the backup target hangs (open/write/fsync never return — a hard-mounted NFS/CIFS whose server vanished, which blocks in uninterruptible sleep), each goroutine parks in a blocking syscall pinning one OS thread and holding a checkpoint copy. They accumulate one per block; Go aborts the process at 10000 OS threads. The docs steer toward local disk and say a FAILED mirror is 'silently ignored' — true for errors, but a HANG is neither an error nor mentioned, and BackupPath-on-a-share is a documented-supported config. I modelled the hung mount with a reader-less FIFO (open(2) blocks identically) and confirmed accumulation and the eventual fatal abort.",
+          "reproduction": "verify3-R3-dos/node/zz_r3_backup_test.go. ThreadsPerCommit: 301 commits → goroutines 2→302, OS threads 21→305 (one per commit) while consensus keeps committing (local snapshot unaffected). ThreadCapKillsProcess (child with debug.SetMaxThreads(250)): child dies in 781ms with 'runtime: program exceeds 250-thread limit' (default cap 10000 → same crash, later).",
+          "realistic_preconditions": "No attacker. Operational: BackupPath on a mount that hangs rather than errors (classic stale/hard NFS mount). Validator runs long enough to commit ~10000 blocks while hung.",
+          "minimal_fix": "Serialise the mirror through a single in-flight guard: an atomic.Bool CAS before spawning, cleared when the write returns; skip (coalesce to the next commit) if the previous mirror is still running. I applied this (atomic.Bool backupBusy, 4-line change across node.go/persist.go): 301 commits → 3 goroutines / 22 threads, and the thread-cap child survived 120s. Node-local; no digest change. Backup tests + persistence tests pass.",
+          "fix_pitfalls": "With a bare in-flight guard, a permanent hang leaves backups disabled forever (the one stuck goroutine never clears the flag) — acceptable under best-effort durability (local snapshot still works), but a write deadline/context as the cluster suggests is better so a transient hang self-heals. Do not block the event loop waiting on the mount."
+        },
+        {
+          "finding": "NF-C10-single-validator-squat",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "medium",
+          "reasoning": "The round-1 C10 remedy ('do not pool until >=1 carried vote verifies as a current validator') stops the unauthenticated voteless squat but not a single current validator. proposalKey/reassignmentKey hash the full proposed profile, so one validator can self-sign 64 distinct Acceptable parameter profiles (and 64 distinct reassignments), each carrying only its own one valid vote, filling both 64-slot pools with entries that can never reach quorum and that bind the current sequence/digest so pruning never drops them. A genuine quorum-bearing change is then refused at the >=64 cap. I implemented the exact proposed C10 fix and reproduced the squat on both pools. It is a valid limitation of that proposed fix; in the pristine tree the live issue is its parent C10 (unauthenticated).",
+          "reproduction": "verify3-c10 (round-1 C10 fix applied to governance.go), node/zz_r3_c10_test.go: a minority validator (power 1 of 31) pooled 64 self-signed single-vote parameter proposals → pool 64/64; a genuine fee change carrying all three honest votes (power 30/31, >2/3) was refused (pooled=false) and pendingParameterChange=nil. Sibling test: same validator filled the reassignment pool 64/64.",
+          "realistic_preconditions": "One current validator, Byzantine, any stake <1/3 (in scope). Only relevant once the proposed C10 >=1-verified-vote fix is adopted; the current tree is already frozen by plain C10.",
+          "minimal_fix": "Prefer eviction-by-progress over a flat cap: when the pool is full and a new proposal carries strictly more verified voting power than the lowest-power pooled entry, evict that entry so a near-quorum real proposal always displaces junk. Optionally add a small per-proposer open-proposal cap (k). Node-local pool management; no digest/preimage change.",
+          "fix_pitfalls": "A per-proposer cap alone still lets a validator hold k slots, so a handful of colluding validators could still fill 64 — eviction-by-progress is the robust part. Must count the cap over proposals holding >=1 verified vote (the C10 fix) and keep the deterministic sorted-key pick."
+        },
+        {
+          "finding": "BE-NEW-1",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "high",
+          "reasoning": "The overdraw guard re-sums a payer's pending amounts with big.Rat on every admission (outgoingFor) and after every commit (dropOverdrawn). big.Rat.Add normalises via GCD; with pairwise-coprime ~783-digit denominators the running sum's denominator is their LCM, growing ~780 digits per payment, so each sum is super-linear in the pending count. Amounts of 1/d_i are below the fee, fit the 2000-byte cap, total ~0, and with BlockID 2^40 are never included, charged, or pruned — so they sit in the mempool and tax every commit on every node forever, for a 1-unit payer that is never debited. I confirmed through the real /hdls/pay admission path and a live single-validator commit loop. The owner's decided move to plain bounded-decimal amounts closes exactly this: all denominators then divide a fixed D=10^k, so the LCM (hence per-sum cost) is bounded — verified empirically.",
+          "reproduction": "verify3-R3-dos/node/zz_r3_coprime_test.go. IntakeCost (via AdmitPayment): 40/80/120/160 pending → last admission 44ms/482ms/1.386s/3.34s (≈cubic). CommitCost (live node): baseline 512.5 blocks/s → 0.50 blocks/s after 140 far-future coprime payments; payer balance still 1.00. ratcheck2/check.go: one outgoingFor pass over bounded-8dp amounts stays 4–7-digit denominator and flat ~2µs/payment up to 100000 pending (190ms total); coprime grows to 78132 digits / 893ms at n=100 and 156216 digits / 7.06s at n=200.",
+          "realistic_preconditions": "Any account holder with a 1-unit balance; free if transactionCost is 0 (documented as allowed). Gossip makes every node pay. No validator key needed.",
+          "minimal_fix": "Adopt the owner's decision: amounts (and the fee) must be plain decimals on a fixed grid (integer multiples of 10^-k, bounded total digits), checked at intake, in ProposeBlock, and in ApplyBlock. Then every denominator divides 10^k, every balance/sum stays bounded, and outgoingFor/dropOverdrawn are linear. Also bound BlockID to height+window at intake (C16) so below-cost far-future payments cannot reside and tax commits at all. This likely changes the amount representation/signing preimage (RatString) → re-genesis, which is allowed (no users).",
+          "fix_pitfalls": "Bounded decimals alone close the super-linear ARITHMETIC but not mempool RESIDENCY — far-future below-cost payments still pile up to MaxMempool at now-constant per-item cost; the BlockID window (C16) is what evicts them, so apply both. Pick k before genesis; changing it later is another re-genesis. Ensure the fee lies on the same grid so sums never leave it."
+        }
+      ]
+    },
+    {
+      "group": "R3-governance-ops",
+      "verdicts": [
+        {
+          "finding": "VGL-N1",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "medium",
+          "reasoning": "The shipped admin page only casts one vote per POST (ui/admin.go:172-200). addReassignmentVotes pools that first vote before quorum and relays it (node/reassignment.go:49-56; node/node.go:293-296). The unauthenticated GET /hdls/governance on every node then lists the key, the amounts and the tally. Nothing downstream helps: Valid and prune check the exact balance, so once the target moves its funds the certificate can never enact and is pruned at each commit.\n\nOff-pool collection works today, but only at the protocol level. One POST carrying 3 votes, sent to any one node (tried all 4), was pooled, reached the other nodes by gossip with all its votes, and enacted at the next block everywhere. Three gaps remain:\n- The shipped wallet has no way to sign a vote without submitting it.\n- The complete certificate is publicly visible for up to one block. A watching target escaped it in the same block 3/3 times (the C12 path); with a trial C12 exclusion rule, 0/3.\n- Hiding /hdls/governance alone is partial, because votes are gossiped to every validator.",
+          "reproduction": "Scratch copy <scratch>/verify3-R3-governance-ops (only *_test.go added). File node/zz_v3_vgln1_test.go runs everything over real HTTP: httptest servers, HTTPTransport gossip, the wallet's single-vote POST shape, GET /hdls/governance and /hdls/status, POST /hdls/pay. Run with GOLEDGER_CHAOS_SLACK=4 go test ./node -run TestV3VGLN1 -v.\n- OneAtATime: after bank 0's single vote, node 3's governance view shows the thief, 1000->0, votedPower 1, not reached. The thief's 1000 payment commits in the next block (X=999.9). Banks 1, 2 and 0 then vote: tally 3, reached=true, amendsCurrent=false. Four blocks later the sequence is still 0, X keeps 999.9, and the pool is empty.\n- OffPoolCompleteCertificateOnePOST: one POST of a 3-vote certificate, to each of nodes 0-3 in turn, enacts on all nodes at the next height; the other node saw the full certificate via gossip.\n- TargetRacesSameBlock: the target escaped 3/3 on today's code. In the trial copy <scratch>/verify3-R3-governance-ops-c12trial (C12 exclusion in ledger/block.go) it escaped 0/3.",
+          "realistic_preconditions": "The banks vote through the shipped admin page, one vote at a time at human pace. The target is any key holder who reloads /admin or GET /hdls/governance on any node (unauthenticated on the LAN), or a validator who sees the gossip. The target then signs one ordinary payment. No privileges are needed.",
+          "minimal_fix": "1. Wallet, about 40 lines: a 'sign only' action that outputs the vote (validator, signature) bound to (account, prev, new, seq), and a 'submit certificate' action that assembles the pasted votes into one Reassignment and POSTs it once.\n2. Node, 3 lines at the top of addReassignmentVotes: return false unless the submitted message is already Valid against the current accounts and sequence. Partial seizure tallies then never pool, gossip or appear, and C10's voteless squat of this pool also stops. Trialled: the ledger, consensus, signing, node and ui suites all pass.\n3. Land the C12 exclusion rule; it is a prerequisite.\n\nNo state-digest or signing-preimage change. The node change only affects intake, so it can be rolled out node by node.",
+          "fix_pitfalls": "- The node gate ends one-vote-per-POST reassignment voting, grants included, on multi-validator networks, so ship it together with the wallet change. The quorum-1 demo is unaffected.\n- Certificates bind the exact PreviousAmount and Sequence. Any balance change (the target's own payment, or anyone paying it) or any other governance action before enactment voids the certificate. A target that expects a claw-back can change its balance every block for one fee and defeat any human-paced certificate, whether or not votes are visible. Adversarial targets need a ⅔ freeze that is not bound to the balance, with the same exclusion rule and payer refusal at intake and in ProcessPayments.\n- Fix C10, or the target can pre-fill each node's 64-slot pool and block even a complete certificate.\n- C11: before submitting, drop votes from validators that have left the set.\n- docs/managing-the-currency.md lists seizures 'with no public notice' as a misuse smell. Reconcile it as freeze first, then deliberate the seizure in public."
+        },
+        {
+          "finding": "VGL-N2",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "low",
+          "reasoning": "Every factual claim reproduces. A grant-created account gets ValidatorNode \"\" (ledger/reassignment.go:120), so in dynamic mode it backs no validator. A payment-created account self-delegates (ledger.go:200) and is admitted. One self-delegating AccountUpdate admits the grantee, but the shipped wallet only sends name and description updates, so a grant-funded bank needs hand-made tooling.\n\nThe name strip happens only on the C12 path, a drain plus reassignment in one block. A drain alone already deletes the account and frees the name (C02). The reassignment just recreates the account bare. The C12 exclusion rule removes this path.\n\nThere is no security impact. Today's undelegated default is the safer one, and the suggested one-liner is harmful: a ⅔ mint of 100000 into a fresh treasury key would then carry power 100000 against a quorum of 69334, a supermajority on its own, or a chain halt if nobody runs that key.",
+          "reproduction": "Scratch node/zz_v3_vgln2_test.go, run with GOLEDGER_CHAOS_SLACK=4 go test ./node -run TestV3VGLN2 -v.\n- Dynamic single-validator node: grant-created N has validatorNode \"\" and is not a validator; payment-created M has validatorNode=M and is a validator. After one signed Delegated:N update, N becomes a validator.\n- Ledger path (ProposeBlock and ApplyBlock): drain plus reassignment leaves T at 500 with name, validatorNode, description and address all \"\". The reassignment alone keeps name 'thief' and validatorNode=T. The drain alone deletes T.\n- node/zz_v3_vgln2_fixpitfall_test.go: today total power is 4000 and the treasury has 0. With the suggested fix, total is 104000, quorum 69334, and the treasury has 100000, enough for quorum alone.",
+          "realistic_preconditions": "The grant case needs dynamic validator mode and a ⅔ grant that funds a brand-new bank key. The name-strip case needs the C12 same-block drain, which the target does to its own account.",
+          "minimal_fix": "Keep the ledger code. In governance.md:74-75 and validatorsFor's comment ('joins automatically'), document that an account created by a reassignment is undelegated until its holder delegates. Add a Delegated field to the wallet's update form (ui/wallet.go, a few lines) so a grant-funded bank can self-delegate. No consensus, digest or preimage change. The name strip is closed by the C12 exclusion rule; name release on deletion is C02.",
+          "fix_pitfalls": "Do not apply the suggested one-liner (ValidatorNode = account). It changes block results, so all validators would have to upgrade together, and it auto-admits any large grantee as a validator. A ⅔ treasury mint into a fresh key would then hand that key quorum, or halt the chain if no node runs it. The same power shift already happens today when minting into an existing self-delegated account (created by a payment or at genesis). The treasury pattern should say to keep the treasury undelegated."
+        },
+        {
+          "finding": "VSTR-NEW-3",
+          "verdict": "CONFIRMED",
+          "duplicate_of": "",
+          "final_severity": "medium",
+          "reasoning": "loadSnapshot (node/persist.go:16-35) verifies the old file against the new genesis and adopts it when the network id and keys are the same: the commit signatures verify, the digest matches because the function is unchanged, and the new genesis set vouches for the signers. Nothing in config load, New or Checkpoint binds a genesis.\n\nThe impact is worse than reported. If only ONE of 4 nodes keeps its file, the three cleaned nodes start at height 1, but catchUp (node/sync.go:38-55) adopts the stale node's old checkpoint, and within about 3 s every node continues the OLD chain with the edit lost (3/3 runs). So a forgotten file, a laptop that slept through the migration, or one dishonest validator that keeps its old node running can silently revert a re-genesis for the whole network, for as long as the new height is at most the old height.\n\nA fresh id is refused and the edit holds.\n- Not affected: scheme migration (re-keyed) and digest-changing releases.\n- Affected: releases that change only a preimage, and recovery re-geneses (the documented recovery for C13 and C10).\n\nSame root cause as C14, but a distinct consequence that C14's text does not cover.",
+          "reproduction": "Scratch node/zz_v3_vstr3_test.go: static 4-validator set over real HTTP with snapshotPath set. The old chain runs to height 25, then a same-keys re-genesis edits alice from 100 to 150. Run with GOLEDGER_CHAOS_SLACK=4 go test ./node -run TestV3VSTRNEW3 -v.\n- All nodes keep their files: start heights [25 25 25 25], alice 100 everywhere.\n- Only node 3 keeps its file: start heights [1 1 1 25]; about 7 s later all nodes are at 29-40 with alice 100 on every node (3/3 runs).\n- Fresh id 'village-2': start heights [1 1 1 1], alice 150 everywhere.",
+          "realistic_preconditions": "A re-genesis that keeps the same networkId and keys and does not change the state-digest function or the consensus-vote preimage. Plus any old-chain state still present: snapshotPath left in place (the docs recommend it and never say to clear it), a laptop asleep during the migration, or a validator that keeps its old node up.",
+          "minimal_fix": "In docs/operating-a-network.md (the migration steps and the upgrade paragraph), require a NEW networkId for every re-genesis, and add: delete snapshotPath before the first start, and do not restore old backups. This is config and docs only: no code, digest or preimage change. If C14 is fixed by binding a genesis digest instead, put it in signing.Preimage so it covers every domain, consensus votes included.",
+          "fix_pitfalls": "- The 'clear snapshotPath' checklist step alone is not enough: one stale peer reverts everyone through catch-up.\n- A genesis binding added only to payment and certificate preimages still leaves old commits valid.\n- loadSnapshot never reads backupPath; clearing it only matters if someone restores from it.\n- Wallets must switch to the new id.\n- Nodes still on the old config simply fail verification and must be reconfigured."
+        }
+      ],
+      "notes": "PoCs (only *_test.go files added; no production file changed) are in <scratch>/verify3-R3-governance-ops/node:\n- zz_v3_vgln1_test.go\n- zz_v3_vgln2_test.go\n- zz_v3_vgln2_fixpitfall_test.go\n- zz_v3_vstr3_test.go\n\nTrial fixes are in <scratch>/verify3-R3-governance-ops-c12trial:\n- ledger/block.go: the C12 exclusion rule.\n- node/reassignment.go: only a complete, currently valid reassignment certificate is pooled.\nWith both, the ledger, consensus, signing, node and ui suites pass; only my VGL-N1 leak PoC changes outcome, which is intended.\n\nHarness shortcut in the original C12/VGL-N1 PoC: the in-memory bus drops MsgReassignmentVote, which is why it submitted the certificate to every node directly. My PoCs gossip over real HTTP instead.\n\nObservation outside my findings: in dynamic mode, minting into an existing self-delegated account (treasury, bank) raises that validator's voting power one-for-one. The treasury docs should say to keep the treasury undelegated.\n\nHousekeeping: the pristine checkout's gitignored ui/ui build binary (13 MB) disappeared at 08:27:16. I did not cause it; I only ran cp and diff against pristine. No source file there differs from my copy."
+    }
+  ],
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Verify new"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "verify3:R3-history-safety",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify new",
+      "agentId": "a9dddc42a5f2c9a91",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1793089590428,
+      "queuedAt": 1793089590379,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "R3-history-safety",
+      "promptPreview": "You are an independent adversarial verifier (third pass) of a security audit of go-ledger, a small Go BFT delegated-proof-of-stake ledger with an on-chain naming registry. Pristine checkout: <repo> — NEVER modify it. The findings assigned to you were raised by second-pass verifiers and have NOT been independently checked. Their PoCs live in those verifiers' scratch copies (…",
+      "promptFramed": true,
+      "lastProgressAt": 1793092639200,
+      "tokens": 326958,
+      "toolCalls": 76,
+      "durationMs": 3048771,
+      "resultPreview": "{\"group\":\"R3-history-safety\",\"verdicts\":[{\"finding\":\"VBS-N2\",\"verdict\":\"CONFIRMED\",\"duplicate_of\":\"\",\"final_severity\":\"high\",\"reasoning\":\"Root cause confirmed. Lock, round and own votes live only in the Driver. New() reloads the H-1 snapshot and startHeight runs NewDriver().Start() at round 0, unlocked, with an empty mempool. A restart is therefore an amnesia (Byzantine-equivalent) fault. No guard…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "verify3:R3-integrity",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify new",
+      "agentId": "a435051553001080c",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1793089590428,
+      "queuedAt": 1793089590380,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "R3-integrity",
+      "promptPreview": "You are an independent adversarial verifier (third pass) of a security audit of go-ledger, a small Go BFT delegated-proof-of-stake ledger with an on-chain naming registry. Pristine checkout: <repo> — NEVER modify it. The findings assigned to you were raised by second-pass verifiers and have NOT been independently checked. Their PoCs live in those verifiers' scratch copies (…",
+      "promptFramed": true,
+      "lastProgressAt": 1793090455959,
+      "tokens": 158093,
+      "toolCalls": 40,
+      "durationMs": 864556,
+      "resultPreview": "{\"group\":\"R3-integrity\",\"verdicts\":[{\"finding\":\"NEW-1-block-height-unbound-replay\",\"verdict\":\"CONFIRMED\",\"duplicate_of\":\"\",\"final_severity\":\"high\",\"reasoning\":\"No production code compares p.Block.Height with n.height. onProposal checks only ProposalMsg.Height, the driver works on digests, commit re-applies n.blocks[digest], and the HTTP intake (handleProposal) adds no check. LedgerState.Digest omi…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "verify3:R3-liveness",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify new",
+      "agentId": "ad495dd6328b0a426",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1793089590428,
+      "queuedAt": 1793089590380,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "R3-liveness",
+      "promptPreview": "You are an independent adversarial verifier (third pass) of a security audit of go-ledger, a small Go BFT delegated-proof-of-stake ledger with an on-chain naming registry. Pristine checkout: <repo> — NEVER modify it. The findings assigned to you were raised by second-pass verifiers and have NOT been independently checked. Their PoCs live in those verifiers' scratch copies (…",
+      "promptFramed": true,
+      "lastProgressAt": 1793091123301,
+      "tokens": 225688,
+      "toolCalls": 55,
+      "durationMs": 1531895,
+      "resultPreview": "{\"group\":\"R3-liveness\",\"verdicts\":[{\"finding\":\"NEW-3-partial-peerdns-halt\",\"verdict\":\"CONFIRMED\",\"duplicate_of\":\"\",\"final_severity\":\"high\",\"reasoning\":\"Mechanism verified in code and on real processes. A publisher resolves Neighbors over the publishers only and sends only to them. A non-publisher gets nil from resolution (self is not in the key list), so it keeps its static peers and still sends t…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "verify3:R3-dos",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify new",
+      "agentId": "a3c6052f5bcba729b",
+      "model": "claude-opus-5-5",
+      "fallbackModel": "claude-opus-4-8",
+      "state": "done",
+      "startedAt": 1793089590428,
+      "queuedAt": 1793089590380,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "R3-dos",
+      "promptPreview": "You are an independent adversarial verifier (third pass) of a security audit of go-ledger, a small Go BFT delegated-proof-of-stake ledger with an on-chain naming registry. Pristine checkout: <repo> — NEVER modify it. The findings assigned to you were raised by second-pass verifiers and have NOT been independently checked. Their PoCs live in those verifiers' scratch copies (…",
+      "promptFramed": true,
+      "lastProgressAt": 1793093318900,
+      "tokens": 227286,
+      "toolCalls": 89,
+      "durationMs": 3727494,
+      "resultPreview": "{\"group\":\"R3-dos\",\"notes\":\"Threat model: single Byzantine validator (<1/3), anonymous LAN party, and sleeping/rebooting laptops are all explicitly in scope (docs/security.md). Scratch copies under <scratch>/: verify3-R3-dos (pristine + my PoCs), verify3-R3-dos-fix (combined NF1+VBS+NEW6 fix, full suite+race green…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "verify3:R3-governance-ops",
+      "phaseIndex": 1,
+      "phaseTitle": "Verify new",
+      "agentId": "aed7117ffaa2093d9",
+      "model": "claude-opus-5-5",
+      "state": "done",
+      "startedAt": 1793089590428,
+      "queuedAt": 1793089590380,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "R3-governance-ops",
+      "promptPreview": "You are an independent adversarial verifier (third pass) of a security audit of go-ledger, a small Go BFT delegated-proof-of-stake ledger with an on-chain naming registry. Pristine checkout: <repo> — NEVER modify it. The findings assigned to you were raised by second-pass verifiers and have NOT been independently checked. Their PoCs live in those verifiers' scratch copies (…",
+      "promptFramed": true,
+      "lastProgressAt": 1793091332059,
+      "tokens": 249961,
+      "toolCalls": 72,
+      "durationMs": 1740651,
+      "resultPreview": "{\"group\":\"R3-governance-ops\",\"verdicts\":[{\"finding\":\"VGL-N1\",\"verdict\":\"CONFIRMED\",\"duplicate_of\":\"\",\"final_severity\":\"medium\",\"reasoning\":\"The shipped admin page only casts one vote per POST (ui/admin.go:172-200). addReassignmentVotes pools that first vote before quorum and relays it (node/reassignment.go:49-56; node/node.go:293-296). The unauthenticated GET /hdls/governance on every node then li…"
+    }
+  ],
+  "totalTokens": 1187986,
+  "totalToolCalls": 332
+}

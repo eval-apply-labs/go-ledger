@@ -1,0 +1,27 @@
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.19s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.14s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.18s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.21s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.11s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.08s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.10s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.19s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.22s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.17s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.21s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.17s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/node	27.028s
+EXIT=0

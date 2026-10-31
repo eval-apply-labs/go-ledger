@@ -1,0 +1,53 @@
+--- a/node/reassignment.go
++++ b/node/reassignment.go
+@@ -45,6 +45,9 @@
+ 		return false
+ 	}
+ 	currentValidators := n.validatorsFor(n.accounts)
++	if !reassignment.Valid(n.cfg.Scheme, n.cfg.NetworkID, currentValidators, n.accounts, n.governanceSequence) {
++		return false // TRIAL VGL-N1: only a complete certificate pools/gossips; a partial tally would warn the target
++	}
+ 	key := reassignmentKey(reassignment)
+ 	pooled, exists := n.reassignmentProposals[key]
+ 	if !exists {
+--- a/ledger/block.go
++++ b/ledger/block.go
+@@ -148,6 +148,15 @@
+ 		nextSequence++
+ 	}
+ 
++	if ratifiedReassignment != nil { // TRIAL C12 exclusion: governance wins, the target's same-block payments lapse
++		kept := make([]Payment, 0, len(paymentsForThisBlock))
++		for _, payment := range paymentsForThisBlock {
++			if !touchesAccount(registry, payment, ratifiedReassignment.Account) {
++				kept = append(kept, payment)
++			}
++		}
++		paymentsForThisBlock = kept
++	}
+ 	resultingAccounts := ProcessPayments(previousState.Accounts, paymentsForThisBlock, transactionCost)
+ 	resultingAccounts = applyAccountUpdates(scheme, networkID, resultingAccounts, verifiedUpdates, height)
+ 	resultingAccounts = applySlashes(scheme, networkID, resultingAccounts, verifiedEvidence)
+@@ -224,6 +233,11 @@
+ 		if !block.Reassignment.Valid(scheme, networkID, firstValidatorSet(validators), previousState.Accounts, previousState.GovernanceSequence) {
+ 			return LedgerState{}, false // an unratified balance reassignment (not a > ⅔ quorum of the set)
+ 		}
++		for _, payment := range block.Payments {
++			if touchesAccount(registry, payment, block.Reassignment.Account) {
++				return LedgerState{}, false // TRIAL C12 exclusion
++			}
++		}
+ 		nextSequence++
+ 	}
+ 
+@@ -239,3 +253,10 @@
+ 	}
+ 	return nextState, true
+ }
++
++// touchesAccount (TRIAL C12 exclusion) reports whether a payment debits or credits `account`, its
++// recipient resolved against the pre-block registry exactly as ProcessPayments resolves it.
++func touchesAccount(registry map[string]string, payment Payment, account string) bool {
++	to, _ := resolveRecipient(registry, payment)
++	return payment.PublicKeyFrom == account || to == account
++}

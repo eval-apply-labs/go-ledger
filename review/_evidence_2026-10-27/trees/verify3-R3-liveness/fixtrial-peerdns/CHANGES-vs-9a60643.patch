@@ -1,0 +1,53 @@
+--- a/node/node.go
++++ b/node/node.go
+@@ -107,6 +107,8 @@
+ 	relaySeen          map[string]bool           // relay dedup, so a message floods a multi-hop topology once
+ 	heightVotes        map[string]consensus.Vote // votes seen at the current height, re-gossiped periodically (see reGossipLoop)
+ 	heightProposals    map[int32]ProposalMsg     // authentic proposals seen at the current height, by round (first wins, like the driver)
++	configuredPeers    []string                  // the transport peers before the first on-chain resolution (see resolvePeersFromState)
++	peersResolved      bool
+ 
+ 	heightVals     *consensus.ValidatorSet // the set governing the height in progress
+ 	lastCommitVals *consensus.ValidatorSet // the set that signed lastCommit (served in checkpoints)
+--- a/node/peerdns.go
++++ b/node/peerdns.go
+@@ -9,14 +9,23 @@
+ // bootstrap peers are left in place. It is a no-op for a transport whose peers can't be set (the
+ // in-memory test bus), so tests are unaffected.
+ func (n *Node) resolvePeersFromState() {
+-	peerSetter, transportSupportsResolution := n.transport.(interface{ SetPeers([]string) })
++	peers, transportSupportsResolution := n.transport.(interface {
++		SetPeers([]string)
++		Peers() []string
++	})
+ 	if !transportSupportsResolution {
+ 		return
+ 	}
+-	if resolvedAddresses := n.resolvedPeerAddresses(); resolvedAddresses != nil {
+-		peerSetter.SetPeers(resolvedAddresses)
++	switch resolvedAddresses := n.resolvedPeerAddresses(); {
++	case resolvedAddresses != nil:
++		if !n.peersResolved { // remember the configured peers before the first on-chain override
++			n.configuredPeers, n.peersResolved = peers.Peers(), true
++		}
++		peers.SetPeers(resolvedAddresses)
++	case n.peersResolved: // resolution no longer complete (e.g. an address vanished): back to config
++		peers.SetPeers(n.configuredPeers)
++		n.peersResolved = false
+ 	}
+-	// nil = nothing published on-chain yet — keep the configured bootstrap peers.
+ }
+ 
+ // resolvedPeerAddresses is the pure resolution: the gossip addresses of this node's Hypernode
+@@ -32,7 +41,10 @@
+ 			validatorKeysWithAddress = append(validatorKeysWithAddress, account.PublicKey)
+ 		}
+ 	}
+-	if len(validatorKeysWithAddress) == 0 {
++	// All or nothing: resolving over only the validators that have published would gossip to a SUBSET
++	// while the rest still use the configured peers — an asymmetric graph that can leave no node with
++	// a quorum's view. So resolve only once EVERY current validator has an on-chain address.
++	if len(validatorKeysWithAddress) == 0 || len(validatorKeysWithAddress) < len(currentValidators.Validators()) {
+ 		return nil
+ 	}
+ 	sort.Strings(validatorKeysWithAddress)

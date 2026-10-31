@@ -1,46 +1,54 @@
 package node
 
-import "sort"
-
 // resolvePeersFromState makes the network SELF-DESCRIBING — the on-chain peer DNS. It sets the
 // transport's gossip peers from the committed addresses of the CURRENT validators (each validator
 // publishes its address via an account update), applying the Hypernode topology over them, so the
-// committed state IS the address book. If no validator has published an address yet, the configured
-// bootstrap peers are left in place. It is a no-op for a transport whose peers can't be set (the
-// in-memory test bus), so tests are unaffected.
-func (n *Node) resolvePeersFromState() {
-	peerSetter, transportSupportsResolution := n.transport.(interface{ SetPeers([]string) })
+// committed state IS the address book. It is all or nothing: until EVERY current validator has an
+// address, the configured peers stay in use. Resolving among only the validators that have published
+// would have them gossip to each other alone while the rest still gossip to everyone, and the network
+// can then lose its quorum for good. The configured peers are saved when a resolution is first applied
+// and restored whenever resolution stops being complete: a validator's account, and with it its
+// address, can disappear. Only HTTPTransport has both SetPeers and Peers. For any other transport
+// (the in-memory test networks) it is a no-op, so tests are unaffected.
+func (node *Node) resolvePeersFromState() {
+	transport, transportSupportsResolution := node.transport.(interface {
+		SetPeers([]string)
+		Peers() []string
+	})
 	if !transportSupportsResolution {
 		return
 	}
-	if resolvedAddresses := n.resolvedPeerAddresses(); resolvedAddresses != nil {
-		peerSetter.SetPeers(resolvedAddresses)
+	switch resolvedAddresses := node.resolvedPeerAddresses(); {
+	case resolvedAddresses != nil:
+		if !node.peersResolved {
+			node.configuredPeers, node.peersResolved = transport.Peers(), true
+		}
+		transport.SetPeers(resolvedAddresses)
+	case node.peersResolved:
+		transport.SetPeers(node.configuredPeers)
+		node.peersResolved = false
 	}
-	// nil = nothing published on-chain yet — keep the configured bootstrap peers.
 }
 
 // resolvedPeerAddresses is the pure resolution: the gossip addresses of this node's Hypernode
-// neighbours among the current validators that have published an on-chain address. Returns nil if
-// none have (so the caller keeps the configured peers).
-func (n *Node) resolvedPeerAddresses() []string {
-	currentValidators := n.validatorsFor(n.accounts)
-	addressByValidatorKey := make(map[string]string)
-	var validatorKeysWithAddress []string
-	for _, account := range n.accounts {
-		if account.Address != "" && currentValidators.Contains(account.PublicKey) {
-			addressByValidatorKey[account.PublicKey] = account.Address
-			validatorKeysWithAddress = append(validatorKeysWithAddress, account.PublicKey)
+// neighbours among the current validators, by name, once every one of them has published an on-chain
+// address. Returns nil until then (so the caller uses the configured peers).
+func (node *Node) resolvedPeerAddresses() []string {
+	currentValidators := node.view.Load().validators
+	addressByValidatorName := make(map[string]string)
+	var validatorNamesWithAddress []string // in name order, as the accounts are
+	for _, account := range node.state.Accounts {
+		if account.Address != "" && currentValidators.Contains(account.Name) {
+			addressByValidatorName[account.Name] = account.Address
+			validatorNamesWithAddress = append(validatorNamesWithAddress, account.Name)
 		}
 	}
-	if len(validatorKeysWithAddress) == 0 {
+	if len(validatorNamesWithAddress) == 0 || len(validatorNamesWithAddress) < len(currentValidators.Validators()) {
 		return nil
 	}
-	sort.Strings(validatorKeysWithAddress)
 	var resolvedAddresses []string
-	for _, validatorKey := range Neighbors(validatorKeysWithAddress, n.self, n.parameters.MaxPeers) {
-		if address := addressByValidatorKey[validatorKey]; address != "" {
-			resolvedAddresses = append(resolvedAddresses, address)
-		}
+	for _, validatorName := range Neighbors(validatorNamesWithAddress, node.self, int(node.state.Parameters.MaxPeers)) {
+		resolvedAddresses = append(resolvedAddresses, addressByValidatorName[validatorName])
 	}
 	return resolvedAddresses
 }

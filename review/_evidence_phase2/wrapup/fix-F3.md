@@ -1,0 +1,6 @@
+F3 (node and consensus docs): all 17 findings done in 13 commits on p2-f3-nodedocs (docs only).
+Every relative link and anchor in the eight docs resolves (56 links), and links into them.
+- CON-1 59705ff; CON-2, CON-3, CON-5 3d05755; CON-6 36dc0a9; NODE-2 b56c891 (Relay bullet; POST table left); NODE-4, NODE-5 2a08e14; NODE-7 5209737 + 23e2038 (also governance.md, security.md); NODE-10 b56c891 + ef8421e (checked against a running Handler in a scratch test); NODE-11 5209737; NODE-12, GEN-11, SIG-13 e75975c; LED-1 06013a5 (did not say "the 2/3 can only freeze or re-key a validator's name" or "adding a validator takes a new genesis": neither holds in dynamic mode); LED-2 cc967b7; SIG-1 6c79b52 + ef319f7 (docs/README.md "keeps a node from signing twice" left: accurate).
+- CON-1: added "or an honest precommit" so the cross-round argument is complete.
+- Depends on F2: signature.md says cmd/server opens its port before the node, and Open empties a sign log left below the restart height at its own height.
+- Outside its files: node/proofs.go:11-13 pendingProof's comment still says the snapshot keeps a proof "so a restart does not lose it" (CON-6), node/evidence_test.go:244 milder; docs/reading-the-code.md:687 step 19 "Running a node" row should say the listener is bound first; api.md cites spec 9.4.

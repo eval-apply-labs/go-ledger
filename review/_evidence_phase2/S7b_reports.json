@@ -1,0 +1,100 @@
+{
+ "slice": "S7b",
+ "report": {
+  "branchHead": "c5278ca",
+  "commits": [
+   {
+    "hash": "921fbce",
+    "subject": "phase 2 S7b: the record in units of 100, named by network"
+   },
+   {
+    "hash": "89aafe4",
+    "subject": "phase 2 S7b: the route test plants lines where the cap cannot hide them"
+   },
+   {
+    "hash": "c5278ca",
+    "subject": "phase 2 S7b: say plainly what the no-snapshot-path test plants"
+   }
+  ],
+  "summary": "S7b is built on branch p2-s7b in <scratch>/wt/p2-s7b. Only node/record.go and node/record_test.go changed; httptransport.go did not need to.\n\nWhat the record does now (spec §6.8 as amended 2026-10-30):\n- File names: the record files are named `<snapshotPath>.<network>.record/<20-digit unit start>.jsonl` and `<snapshotPath>.<network>.lifelong.jsonl`. `<network>` is the first 16 hex digits of `node.config.Chain.GenesisHash`, which is read, never recomputed. A small new helper, `recordPrefix`, builds it. A node of another genesis on the same snapshot path neither reads nor extends the old files. There is no migration or cleanup of old-named files.\n- Units: `unitPath(directory, height)` gives the file of the unit that holds a height. The unit starts at h - h mod 100. `writeRecordEntry` writes straight to that file. The directory listing and the old 10,000-height segment logic are gone. A unit file's first entry carries the signing set, as each segment's did. `KeepUntilHeight` is never less than the entry before it in the same unit. Pruning still deletes the oldest unit file once the height passes both its last entry's KeepUntilHeight and its last height plus the current RetainBlocks. The partial-last-line handling is unchanged. Each height is still recorded once, because a height is only ever written to its own unit file and `placeOfNextLine` refuses one that file already reaches.\n- Routes:\n  - `GET /hdls/record?from=H` reads exactly two unit files, those of H and H + 100, and serves heights H to H + 99. With no `from` it serves the newest unit file.\n  - `GET /hdls/lifelong-record?from=H` serves the first 100 entries of height H and above. With no `from` it serves the newest 100, kept in a sliding window so memory stays bounded.\n  - `count` is gone. A malformed `from` gets a 400 with a short usage message: \"pass ?from=<height>, or nothing for the newest entries\".\n  - Grep confirms that no client outside node/ calls either route.\n- Size: record.go goes from 368 to 359 lines (+69/-78; code lines only, +42/-57). The route code went from 78 to 70 lines: `recordRange` and `readEntries` became `recordFrom` and one `readRecord`.\n\nTests:\n- Five new tests, as named in §10.2.\n- Rewritten for units, keeping what each protected: the prune test, the retention-cut test and the longer-retention test, with their numbers scaled from 10,000 to 100; the partial-line test, which now also checks the no-from forms of both routes; the each-height-once test, which now also crosses a unit boundary and checks the hash chain; and the no-snapshot-path test, which now plants files where the record would be and checks the routes still serve none.\n- `TestRecordRoutesServeAtMostAHundredEntries` is replaced by the three new route tests, which keep all of its cases except those that exist only for `count`.\n- The record tests that run a real node already used S10's keepBusy. That keeps the chain going only to about height 64, so those runs stay inside unit 0.\n\nProof that the tests fail without the change:\n1. Against the parent commit (8c08c56's record.go, plus a test-only `unitPath` shim), all 12 affected tests fail.\n2. 21 mutations of the new code were each killed by the test aimed at them. Examples: no network in the name, the whole hash, 15 hex digits; reading a third unit or the unit before; 101 heights; the oldest unit when there is no `from`; no newest-100 cap; units of 10; the set only in the record's first entry; no snapshot-path guard; negative or malformed `from` accepted; heights recorded twice; both pruning conditions and the KeepUntilHeight carry-over; no pruning at all; reading one unit only; a partial line served.\n3. The first version of the route test let a route that read a third unit pass, because the 100-entry cap hid it. Commit 89aafe4 fixes that, and that mutation is now killed.",
+  "tests": [
+   {
+    "name": "TestRecordFilesAreNamedByNetwork",
+    "failsWithoutChange": "yes: on the parent the record is at snapshot.json.record (no network); killed by mutations M1 (no network), M1b (whole hash), M1c (15 hex digits)"
+   },
+   {
+    "name": "TestRecordUnitsHoldAHundredAlignedHeights",
+    "failsWithoutChange": "yes: on the parent there is one segment, 00000000000000000001.jsonl; killed by M8 (units of 10) and M9 (set only in the record's first entry)"
+   },
+   {
+    "name": "TestRecordRouteServesAHundredHeights",
+    "failsWithoutChange": "yes: on the parent ?from=0 answers 400 (count required); killed by M2 (third unit), M3 (unit before), M4 (101 heights), M11 (negative from), M12 (malformed from), M18 (one unit only)"
+   },
+   {
+    "name": "TestRecordRouteWithoutFromServesTheNewestUnit",
+    "failsWithoutChange": "yes: on the parent /hdls/record answers 400; killed by M5 (oldest unit instead of newest)"
+   },
+   {
+    "name": "TestLifelongRouteWithoutFromServesTheNewest",
+    "failsWithoutChange": "yes: on the parent /hdls/lifelong-record answers 400; killed by M6 (first 100 instead of newest) and M7 (no cap of 100)"
+   },
+   {
+    "name": "TestRecordPrunesWholeUnitsAfterKeepUntilHeight (rewritten from ...Segments...)",
+    "failsWithoutChange": "yes: on the parent one segment instead of two units; killed by M17 (no pruning)"
+   },
+   {
+    "name": "TestRetentionCutAppliesOnlyToNewRecords (rewritten)",
+    "failsWithoutChange": "yes: on the parent the unit file is missing; killed by M15 (prune ignores KeepUntilHeight) and M16 (KeepUntilHeight not carried within the unit)"
+   },
+   {
+    "name": "TestLongerRetentionKeepsOldUnits (rewritten from ...Segments)",
+    "failsWithoutChange": "yes: on the parent one segment; killed by M14 (prune ignores the current retention)"
+   },
+   {
+    "name": "TestRecordHoldsEachHeightOnce (rewritten, now crosses a unit)",
+    "failsWithoutChange": "yes: on the parent the route answers 400; killed by M13 (the already-recorded check removed)"
+   },
+   {
+    "name": "TestPartialLastLineIsSkipped (rewritten routes)",
+    "failsWithoutChange": "yes: on the parent the no-from route answers 400; killed by M19 (partial line served)"
+   },
+   {
+    "name": "TestNodeWithoutASnapshotPathRecordsNothing (planted files added)",
+    "failsWithoutChange": "yes: on the parent the no-from route answers 400; killed by M10 (no snapshot-path guard on reads)"
+   },
+   {
+    "name": "TestLifelongRecordKeepsGovernanceAndEvidence (route query without count)",
+    "failsWithoutChange": "yes: on the parent ?from=3 without count answers 400"
+   }
+  ],
+  "deviations": "1. A negative `from` is refused with a 400. The spec only says a malformed `from` is a 400. I refuse negative values too, because for `from` between -99 and -1 both paths point at unit 0, and its entries would be served twice. One condition in `recordFrom`, tested.\n2. Each height is still recorded once, but the check now looks only at the unit file of that height, not at the newest file. S7 refused any height at or below the newest recorded one. Now a height is refused only if its own unit file already reaches it. In one rare case the new code records more than S7 did: a restart from a snapshot older than a whole unit that a catch-up skipped. For example, the record holds 1–4 and 250, and the snapshot is at 4: heights 5–199 are now recorded, and S7 would have refused them. Even then no height is recorded twice.\n3. Test renames: TestRecordPrunesWholeSegmentsAfterKeepUntilHeight became TestRecordPrunesWholeUnitsAfterKeepUntilHeight, and TestLongerRetentionKeepsOldSegments became TestLongerRetentionKeepsOldUnits. TestRecordRoutesServeAtMostAHundredEntries is replaced by the three new route tests named in §10.2.\n4. Test helper: `syntheticRecord.onNetwork(genesisHash)` sets the chain's genesis hash, and block 1 builds on it. `heightsFrom` is unchanged.\n\nNo file outside node/record.go and node/record_test.go was edited, and no time limit was raised.",
+  "suite": "All passed. The tree was clean before the suites started; the last commit changes one test comment.\n- gofmt -l . (review/ ignored): no output.\n- go vet ./... and go vet -C ui ./...: clean.\n- go build ./... and go build -C ui -o /dev/null .: OK.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./...: passed twice on 89aafe4 (node about 68 s) and once more on the final c5278ca.\n- The same with -C ui: passed twice (about 35.6 s each).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: passed (90.5 s).\nThe record tests take about 1.4 s together.",
+  "openIssues": "- The docs still describe S7's file names, the 10,000-height segments and the `count` parameter. That is S11's work (§6.8, §9.3, and the operator's step of deleting old-named record files). review/phase2_spec.md and the progress file are untouched, as the orchestrator asked.\n- The newest-100 lifelong read scans the whole lifelong file to find the last 100 entries, though it holds only 100 in memory. The file grows only with governance actions and evidence, as the spec says. A read from the end of the file would cost more code.\n- A route request with no `from` lists the record directory, at most about 6,000 unit files at the default retention. A request with a `from` lists nothing."
+ },
+ "verdict": {
+  "confirmed": true,
+  "problems": [
+   {
+    "severity": "minor",
+    "file": "node/record.go",
+    "problem": "pruneRecord still lists the whole record directory on the node loop at every commit (unitFirstHeights). This was cheap with 10,000-height segments. With units of 100 there are 100 times as many files, so each commit now pays for a listing that grows with RetainBlocks. Nothing is wrong or unsafe; the cost is CPU time on the consensus loop. A no-from GET /hdls/record lists the same directory too, but that runs off the loop, and the builder already reported it.",
+    "evidence": "Scratch test <scratch>/p2-scratch/verify-S7b-2/node/zz_verify_prune_cost_test.go puts the 6,048 unit files of the default retention (604,800) beside the record and times node.pruneRecord: 12.3 ms per commit. The same setup against the parent's record.go (verify-S7b-3, 61 segment files, its two listings plus pruneRecord) takes 0.17 ms per commit. A raw os.ReadDir of 60,000 files takes about 124 ms on this ext4 disk. The ⅔ may raise RetainBlocks to 315,360,000, which is 3.15M unit files, so at a year's retention each commit would block the loop for well over half a second.",
+    "fix": "List only when something may be due. For example, keep one Node field holding the height at which the oldest unit becomes due (max of its last KeepUntilHeight and its last height + RetainBlocks, as checked at the last listing), and return early from pruneRecord until the height passes it or RetainBlocks changes. That is about 4 lines and keeps the exact pruning heights the tests check. Another option is to remember the oldest unit's first height instead of listing. If the owner accepts the cost, a sentence in §9.3 or the docs (S11) is enough."
+   }
+  ],
+  "evidence": "S7b holds up against the spec (§6.8 as amended 2026-10-30, the S7b entry in §10.2, §0, §12, the Review record). The one real problem is minor: pruning cost on the node loop, listed above.\n\nWhat I checked:\n\n1. **Scope.**\n   - Only node/record.go (+69/-78; code lines +42/-57) and node/record_test.go changed. httptransport.go, ui/, the docs and review/ are untouched.\n   - File names: `<snapshotPath>.%x(GenesisHash[:8]).record/<20-digit unit start>.jsonl` and `.lifelong.jsonl`. The genesis hash is read from config.Chain.GenesisHash, which cmd/server sets in ledger/genesis.go:199-200. It is not recomputed.\n   - Unit of h = h - h%100. A unit file's first entry carries the set. KeepUntilHeight carries over within a unit.\n   - Pruning removes whole units, oldest first, under both conditions.\n   - Partial-line handling is unchanged.\n   - Routes: `from` only; H..H+99 from units(H) and (H+100); the newest unit with no `from`; lifelong gives the first 100 from H or the newest 100. A malformed `from` is a 400.\n   - Route code shrank from 76 to 68 lines. No migration code, no old-format paths, no stale \"segment\"/\"count\" left in node/.\n   - grep: no client outside node/ calls either route.\n   - Deviations: the negative-from 400 is justified, because `from` -99..-1 maps both paths to unit 0 and would serve it twice. The each-height-once check is now per unit. Every height is still written at most once, and its practical behaviour equals S7's: a node behind the network catches up by checkpoint, so it never re-commits heights under a newer unit.\n\n2. **Adversarial tests** (scratch verify-S7b-2, zz_verify_s7b_test.go):\n   - from=MaxInt64 and from=...750 give 200 [] with no panic. from=9223372036854775808 gives 400. +5 and 007 parse.\n   - Restart from height 4 after a skip to 250/251, then re-committing 5..260: every file stays strictly increasing, no height appears twice, and each unit's first entry and only it carries the set.\n   - 4 goroutines hammered both routes while 2,500 blocks were written and pruned, under -race: no race, every answer a valid JSON array in increasing height order.\n\n3. **Tests fail without the change.**\n   - Parent record.go (8c08c56) plus a test-only unitPath shim: 12 of the 15 record tests fail, all 5 new §10.2 tests included.\n   - 33 of my own mutations of the new code:\n     - Network naming (dropped, 14 hex digits, last bytes) is killed by TestRecordFilesAreNamedByNetwork.\n     - Unit size, one file per height, and the set only in the record's first entry are killed by TestRecordUnitsHoldAHundredAlignedHeights and the pruning tests.\n     - One unit, the unit before, a third unit, 101 or 99 heights, negative or malformed `from` are killed by TestRecordRouteServesAHundredHeights.\n     - Oldest unit instead of newest, and the no-from `from` never set, are killed by TestRecordRouteWithoutFromServesTheNewestUnit.\n     - First 100 instead of newest, no sliding window, cap of 101, lifelong ranged to 100 heights are killed by TestLifelongRouteWithoutFromServesTheNewest.\n     - Each prune condition, the KeepUntilHeight carry, and no pruning at all are killed by the three retention tests.\n     - Heights recorded twice is killed by TestRecordHoldsEachHeightOnce.\n     - A partial line served is killed by TestPartialLastLineIsSkipped.\n     - No snapshot-path guard is killed by TestNodeWithoutASnapshotPathRecordsNothing.\n     - Two mutants survived, both equivalent or contrived: the newest flag on the rolling route, and `len > 1` when the only unit is unit 0.\n   - Rewritten tests keep every case of the old ones except the count-only ones.\n\n4. **Suite** (my run, scratch copy of HEAD c5278ca):\n   - gofmt -l . (review/ ignored): empty. vet: root and ui clean. build: root and ui OK.\n   - GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice (node 66.9 s and 67.0 s); the same with -C ui passed twice (39.1 s, 36.1 s).\n   - -count=3 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed (91.1 s).\n   - The record tests at -race -count=5 passed (31.7 s).\n   - No time limit was raised. The real-node record tests stay inside unit 0, because keepBusy's work ends at height 65 (maxBlockIDLookahead 64).\n\n5. **Naming, comments, commits.** Names are spelled out; comments match the code; no dead code. Commit messages follow \"phase 2 S7b: ...\" with the trailer. The worktree is clean and was not touched.\n\nScratch evidence is under <scratch>/p2-scratch/: verify-S7b-suite.log, verify-S7b-tools/mutations.json and mutations2.json, verify-S7b-2/node/zz_verify_*.go, verify-S7b-3 (the parent's record.go)."
+ },
+ "fix": {
+  "branchHead": "6739bf6",
+  "fixed": [
+   "minor, node/record.go, pruneRecord listed the record directory at every commit. Fixed in 6739bf6, 'phase 2 S7b: pruning lists the record only when its oldest unit is due (review follow-up)'. The node now keeps the oldest unit file's end: the Height and KeepUntilHeight of its last entry, as pruneRecord last read them. A small type unitEnd with a method dueAt holds the one pruning condition. pruneRecord returns early until that end is due under the current RetainBlocks. Only then does it list, delete as before, and remember the first unit that is not due. The deletion heights are exactly the old ones, for three reasons. Entries added to a unit only make its end later, and KeepUntilHeight carries over within a unit. The check uses the current RetainBlocks for both the remembered end and the listed one, so raising or cutting the retention needs no extra case. A new node starts from the zero end, which is due no later than any file's, so it never holds back a due unit. All existing prune and retention tests pass unchanged. The pruning loop now decodes only those two fields of the last line, not the whole RecordEntry. Timing with the check's own scratch test (6,048 unit files, default retention): 72 µs per call averaged over 100 calls, the one listing included, against 12.3 ms per call before. New test: TestPruningListsTheRecordOnlyWhenTheOldestUnitIsDue in node/record_test.go. It removes read permission from the record directory (mode 0o300); its files can still be read and written by name. Pruning must succeed at heights 111 to 120 and must list, and fail with a permission error, at 121. The test is skipped when run as root. Proof that it fails without the fix: against the parent (c5278ca's record.go and node.go) it fails at height 111. With a mutation that never stores the end, it also fails at 111. A mutation that never prunes fails the premise check and TestLongerRetentionKeepsOldUnits. Deviation: one field line was added to the Node struct in node/node.go (oldestUnitEnd unitEnd), which is outside S7b's file list. A struct field cannot be declared from record.go. S7b runs alone in group 8, so the merge stays clean."
+  ],
+  "notFixed": [
+   "Kept on purpose, a limit of the cache: if an operator deletes the oldest unit file by hand while the node runs, the next unit file may be pruned later than the rule says. The delay lasts until the remembered end of the deleted file is due, at most that file's own retention. The record is then kept longer, never shorter, and the node's own writes cannot cause this, because a node's heights only rise within one run. A restart starts from the zero end, which is safe.",
+   "Not changed: a GET /hdls/record with no from still lists the record directory. It runs off the node loop, the builder already reported it, and the check called it acceptable.",
+   "Not changed, S11's work: the docs (§6.8, §9.3) still describe S7's file names, the 10,000-height segments and the count parameter. The docs could also say that pruning lists the directory only when the oldest unit is due. review/phase2_spec.md was not touched."
+  ],
+  "suite": "All checks passed on 6739bf6 with a clean tree. gofmt -l . (review/ ignored): no output. go vet ./... and go vet -C ui ./...: clean. go build ./... and go build -C ui -o /dev/null .: OK. GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice (node 68.6 s and 66.2 s, consensus 57.3 s and 53.9 s). The same with -C ui passed twice (35.0 s and 33.2 s). GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed (90.0 s). No time limit was raised. The scratch copy used for the revert and mutation runs is <scratch>/p2-scratch/s7b-followup."
+ },
+ "recheck": null
+}

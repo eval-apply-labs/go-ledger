@@ -1,0 +1,24 @@
+--- a/node/node.go
++++ b/node/node.go
+@@ -508,7 +508,11 @@
+ 		return false // wrong proposer or bad signature — drop, don't relay
+ 	}
+ 	_, valid := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, p.Block, n.validatorsFor(n.accounts))
+-	n.blocks[p.Block.StateDigest] = p.Block
++	if p.Block.Height != n.height {
++		valid = false // the body's height keys every replay guard in ApplyBlock: it must be THIS height
++	} else {
++		n.blocks[p.Block.StateDigest] = p.Block
++	}
+ 	n.rememberProposal(p)
+ 	n.process(n.driver.ReceiveProposal(consensus.Proposal{
+ 		Round: p.Round, Digest: p.Block.StateDigest, ValidRound: p.ValidRound, Valid: valid,
+@@ -626,7 +630,7 @@
+ 
+ func (n *Node) commit(act consensus.ActDecided) {
+ 	blk, ok := n.blocks[act.Digest]
+-	if !ok {
++	if !ok || blk.Height != n.height {
+ 		return
+ 	}
+ 	nextState, ok := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, blk, n.heightVals)

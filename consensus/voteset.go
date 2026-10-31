@@ -6,33 +6,24 @@ import (
 	"github.com/eval-apply-labs/go-ledger/signing"
 )
 
-// Evidence records that a validator equivocated: it signed two different votes for the same
-// (height, round, type). Two conflicting signed votes by one key are a transferable, durable
-// proof that any node can present later to slash the validator -- unlike a view-local check,
-// which is non-durable and non-transferable (audit A1).
-type Evidence struct {
-	Validator string
-	A, B      Vote
-}
-
 // VoteSet accumulates verified votes for a single (height, round, type) and tallies power per
-// block digest. A validator's second, conflicting vote is recorded as Evidence and the
+// block hash. A validator's second, conflicting vote is recorded as Evidence and the
 // validator's power is removed entirely -- an equivocator gets no vote.
 type VoteSet struct {
 	height       int64
 	round        int32
-	typ          VoteType
-	vals         *ValidatorSet
+	voteType     VoteType
+	validatorSet *ValidatorSet
 	votes        map[string]Vote
 	power        map[[32]byte]int64
 	equivocators map[string]bool
-	evidence     []Evidence
+	evidence     []VoteEvidence
 }
 
 // NewVoteSet creates an empty vote set scoped to one (height, round, type).
-func NewVoteSet(vals *ValidatorSet, height int64, round int32, typ VoteType) *VoteSet {
+func NewVoteSet(validatorSet *ValidatorSet, height int64, round int32, voteType VoteType) *VoteSet {
 	return &VoteSet{
-		height: height, round: round, typ: typ, vals: vals,
+		height: height, round: round, voteType: voteType, validatorSet: validatorSet,
 		votes:        map[string]Vote{},
 		power:        map[[32]byte]int64{},
 		equivocators: map[string]bool{},
@@ -41,89 +32,93 @@ func NewVoteSet(vals *ValidatorSet, height int64, round int32, typ VoteType) *Vo
 
 // Add verifies and records a vote. It returns (counted, error): counted is true only if the
 // vote was newly tallied. A vote is rejected (and NOT counted) when it is for the wrong
-// height/round/type, is not from a set validator, has a bad signature, or is a conflicting
-// second vote from a validator (which is recorded as Evidence and un-counts that validator).
-func (s *VoteSet) Add(scheme signing.Scheme, networkID string, v Vote) (bool, error) {
-	if v.Height != s.height || v.Round != s.round || v.Type != s.typ {
+// height/round/type, does not name a set validator, does not verify under the key the set holds for
+// that name, or is a conflicting second vote from a validator (which is recorded as evidence and
+// un-counts that validator).
+func (voteSet *VoteSet) Add(scheme signing.Scheme, networkID string, vote Vote) (bool, error) {
+	if vote.Height != voteSet.height || vote.Round != voteSet.round || vote.Type != voteSet.voteType {
 		return false, ErrWrongVote
 	}
-	if !s.vals.Contains(v.Validator) {
+	if !voteSet.validatorSet.Contains(vote.Validator) {
 		return false, ErrNotValidator
 	}
-	if !v.Verify(scheme, networkID) {
+	if !vote.Verify(scheme, networkID, voteSet.validatorSet.PublicKey(vote.Validator)) {
 		return false, ErrBadSignature
 	}
-	if s.equivocators[v.Validator] {
+	if voteSet.equivocators[vote.Validator] {
 		return false, ErrEquivocation
 	}
-	if prev, ok := s.votes[v.Validator]; ok {
-		if prev.BlockDigest == v.BlockDigest {
+	if previous, found := voteSet.votes[vote.Validator]; found {
+		if previous.BlockHash == vote.BlockHash {
 			return false, nil // identical duplicate: ignore
 		}
 		// Conflicting second vote: un-count the first, ban from this set, keep the proof.
-		s.power[prev.BlockDigest] -= s.vals.Power(v.Validator)
-		s.equivocators[v.Validator] = true
-		s.evidence = append(s.evidence, Evidence{Validator: v.Validator, A: prev, B: v})
+		voteSet.power[previous.BlockHash] -= voteSet.validatorSet.Power(vote.Validator)
+		voteSet.equivocators[vote.Validator] = true
+		voteSet.evidence = append(voteSet.evidence, VoteEvidence{Name: vote.Validator, First: previous, Second: vote})
 		return false, ErrEquivocation
 	}
-	s.votes[v.Validator] = v
-	s.power[v.BlockDigest] += s.vals.Power(v.Validator)
+	voteSet.votes[vote.Validator] = vote
+	voteSet.power[vote.BlockHash] += voteSet.validatorSet.Power(vote.Validator)
 	return true, nil
 }
 
-// TwoThirdsMajority returns the digest that has reached quorum power, if any. The map iteration is
-// order-independent ONLY because quorum is a strict >2/3 majority, so at most one digest can ever
+// TwoThirdsMajority returns the block hash that has reached quorum power, if any. The map iteration is
+// order-independent ONLY because quorum is a strict >2/3 majority, so at most one block hash can ever
 // reach it within one set — weaken the quorum rule and this must pick deterministically instead.
-func (s *VoteSet) TwoThirdsMajority() ([32]byte, bool) {
-	q := s.vals.Quorum()
-	for d, p := range s.power {
-		if p >= q {
-			return d, true
+func (voteSet *VoteSet) TwoThirdsMajority() ([32]byte, bool) {
+	quorum := voteSet.validatorSet.Quorum()
+	for blockHash, power := range voteSet.power {
+		if power >= quorum {
+			return blockHash, true
 		}
 	}
 	return [32]byte{}, false
 }
 
-// TotalVoted is the total counted power across all digests (equivocators excluded).
-func (s *VoteSet) TotalVoted() int64 {
+// TotalVoted is the total counted power across all block hashes (equivocators excluded).
+func (voteSet *VoteSet) TotalVoted() int64 {
 	var sum int64
-	for _, p := range s.power {
-		sum += p
+	for _, power := range voteSet.power {
+		sum += power
 	}
 	return sum
 }
 
-// PowerFor is the counted power for a specific digest.
-func (s *VoteSet) PowerFor(d [32]byte) int64 { return s.power[d] }
-
 // HasQuorumAny reports whether the total counted power has reached quorum (>2/3 for any mix
 // of values) -- the "+2/3 prevotes(*)" condition that starts a timeout.
-func (s *VoteSet) HasQuorumAny() bool { return s.TotalVoted() >= s.vals.Quorum() }
+func (voteSet *VoteSet) HasQuorumAny() bool {
+	return voteSet.TotalVoted() >= voteSet.validatorSet.Quorum()
+}
 
-// HasQuorumFor reports whether one specific digest has reached quorum power.
-func (s *VoteSet) HasQuorumFor(d [32]byte) bool { return s.power[d] >= s.vals.Quorum() }
+// HasQuorumFor reports whether one specific block hash has reached quorum power.
+func (voteSet *VoteSet) HasQuorumFor(blockHash [32]byte) bool {
+	return voteSet.power[blockHash] >= voteSet.validatorSet.Quorum()
+}
 
 // Evidence returns a copy of the equivocation evidence gathered so far.
-func (s *VoteSet) Evidence() []Evidence { return append([]Evidence(nil), s.evidence...) }
+func (voteSet *VoteSet) Evidence() []VoteEvidence {
+	return append([]VoteEvidence(nil), voteSet.evidence...)
+}
 
-// Commit assembles a commit certificate from a precommit vote set if a digest has reached
-// quorum. It returns (Commit, false) for a prevote set or when no digest has quorum. The
-// committed digest is exactly the state digest validators precommitted -- what got agreed is
+// Commit assembles a commit certificate from a precommit vote set if a block hash has reached
+// quorum. It returns (Commit, false) for a prevote set or when no block hash has quorum. The
+// committed hash is exactly the block hash validators precommitted -- what got agreed is
 // what gets applied (audit A2).
-func (s *VoteSet) Commit() (Commit, bool) {
-	if s.typ != Precommit {
+func (voteSet *VoteSet) Commit() (Commit, bool) {
+	if voteSet.voteType != Precommit {
 		return Commit{}, false
 	}
-	d, ok := s.TwoThirdsMajority()
-	if !ok {
+	blockHash, hasMajority := voteSet.TwoThirdsMajority()
+	if !hasMajority {
 		return Commit{}, false
 	}
 	var votes []Vote
-	for _, v := range s.votes {
-		if v.BlockDigest == d && !s.equivocators[v.Validator] {
-			votes = append(votes, v)
+	for _, vote := range voteSet.votes {
+		if vote.BlockHash == blockHash && !voteSet.equivocators[vote.Validator] {
+			votes = append(votes, vote)
 		}
 	}
 	sort.Slice(votes, func(i, j int) bool { return votes[i].Validator < votes[j].Validator })
-	return Commit{Height: s.height, Round: s.round, BlockDigest: d, Votes: votes}, true
+	return Commit{Height: voteSet.height, Round: voteSet.round, BlockHash: blockHash, Votes: votes}, true
 }

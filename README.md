@@ -2,239 +2,180 @@
 
 [![CI](https://github.com/eval-apply-labs/go-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/eval-apply-labs/go-ledger/actions/workflows/ci.yml)
 
-A Byzantine-fault-tolerant, delegated-proof-of-stake ledger with a consensus-backed **naming
-registry**: pay people by name, resolve names on-chain, and run the whole thing — validator node and
-wallet — from one `go build`, with **no runtime and no third-party dependencies**. Tendermint-style
-⅔ commit safety, exact-rational money, self-amending governance, and a browser wallet, in a codebase
-small enough to read. It descends from the original Hypernode ledger (see [Origins](#origins)) but
-stands on its own.
+A Byzantine-fault-tolerant ledger in which **names are the accounts**: you register a name at your
+bank, pay people by name, and look names up on-chain. Validators are the banks, each with the
+voting power the genesis gives it (or, in the optional dynamic mode, the stake delegated to it).
+Everything, the validator node and the wallet, builds with `go build`, with **no runtime
+and no third-party dependencies**: Tendermint-style ⅔ commit safety, post-quantum ML-DSA-65
+signatures, exact decimal money, ⅔ governance, and a browser wallet, in a codebase small enough to
+read. It descends from the original Hypernode ledger (see [Origins](#origins)).
 
 ## Try it in one command
 
     make demo
 
-Brings up a self-contained network on this machine — a single-validator node with funded, named
-accounts (founder/bakery/cafe) plus the wallet + admin UI — and prints the URL. Send a payment by
-*name*, register your own name, or vote a fee change into effect, then watch it commit. Ctrl-C to stop.
+This starts a one-validator network on this machine, with three funded names (`founder`, `bakery`,
+`cafe`), and the wallet with its admin page, and prints their addresses. Pay a name, vote a fee
+change, or start the second wallet the demo prints and register a new name at the founder's bank.
+Ctrl-C stops it.
 
-![The browser wallet against a running local network](docs/wallet.png)
+![The wallet in the demo, as founder, after paying 12.50 to bakery: the payment committed at block 5, and each name's bank of record](docs/wallet.png)
 
-![The admin / governance page: live parameters, vote tallies, and balance reassignment](docs/admin.png)
+![The admin page: the ten parameters in force, a parameter change to draft and sign, and the ⅔ name action](docs/admin.png)
 
 ## Design goals
 
-- **No JVM, no dependencies** — a single static binary per command, trivially deployable on scavenged
-  / older hardware (the initial target is a handful of laptops on a local intranet).
-- **Small and auditable** — the domain core is a pure, dependency-free package with no I/O,
-  crypto or networking mixed in, so it can be read and tested in isolation.
-- **Separate executables, separate codebases** — the **ledger node / server** and the **wallet
-  UI** are independent modules/executables so each stays small and auditable. The wallet lives
-  under [`ui/`](ui/) (its own Go module) for now and can be split into its own repo unchanged.
+- **No JVM, no dependencies.** One static binary per command (`make build` sets `CGO_ENABLED=0`),
+  easy to run on old hardware: the first target is a handful of laptops on a local intranet.
+- **Small and auditable.** The rules are pure packages with no I/O, so each can be read and tested
+  on its own.
+- **Separate executables.** The node and the wallet are separate programs and Go modules; the wallet
+  lives under [`ui/`](ui/) and can move to its own repository once the root module is published:
+  drop the `replace` in `ui/go.mod` and require that version.
 
 ## Status
 
-A runnable, race-free multi-node ledger — the **Go port of the Java Hypernode engine** (see
-[Origins](#origins)), re-implemented one layer at a time and pinned by tests. Porting was also a
-chance to harden it: the ledger has been through **several rounds of review** — a from-the-start
-security audit (worked through in passes) and a release-candidate pass over the naming/DNS work — all
-recorded in [`findings.md`](findings.md), and their fixes are baked in below.
+A runnable, race-free, multi-node ledger, the Go port of the Java Hypernode engine, hardened by
+several review rounds: the 2026-07 security audit and a release-candidate pass
+([`findings.md`](findings.md)), and the post-eMudhra review of 2026-10-27
+([`findings_20261027.md`](findings_20261027.md)). Its fixes came in two phases. Phase 1 fixed what
+needed no new genesis. Phase 2, built by 2026-10-31, is one new genesis:
 
-- [x] `ledger` — account state, payment application, state digest, and block application, with
-      the audited supply-integrity fixes in from the start (B1/B2).
-- [x] `signing` — domain-separated signatures (Ed25519); cross-domain / cross-network /
-      field-injection replay rejected by test (audit C1/C6/C7).
-- [x] `consensus` — ⅔ commit safety core (A1/A2/A4/C5) plus the round driver (locking, timeouts).
-- [x] `node` — race-free actor-model validator: event loop, mempool, block production, HTTP
-      transport + node API. Four nodes reach consensus over HTTP in tests (under `-race`).
-- [x] `cmd/server` + `cmd/keygen` — a config-driven node binary and a key generator.
-- [x] onboarding / rejoin sync — a node with `bootstrap` peers fetches and certificate-verifies the
-      committed state and fast-forwards, so a restarted node rejoins at the current height.
-- [x] snapshot persistence — a node with `snapshotPath` persists its committed state after every
-      block and reloads it on restart (recovers a whole-network outage with no peer to sync from).
-- [x] payment gossip + replay protection — payments flood to peers so they reach the proposer, and
-      each is bound to the exact block it names (a resubmitted, cleared payment is stale and never
-      re-applied). Submitting to a node returns a signed receipt.
-- [x] stake-weighted proposer — a validator proposes proportionally to its voting power.
-- [x] Hypernode dimensional gossip (`maxPeers`) — auto-scaled Hamming-graph topology + relay, so
-      fan-out is ~d·(k−1) instead of N−1 while gossip still reaches everyone; all-to-all by default.
-- [x] dynamic validator admission (`validatorThreshold`) — the validator set is derived from account
-      stake each block, so a funded account crossing the threshold joins automatically.
-- [x] dynamic-set onboarding — a joiner adopts a checkpoint whose validator set grew while it was
-      away, under the BFT skipping-trust rule (>⅓ of a trusted anchor set co-signed the commit).
-- [x] straggler catch-up — a running node that missed a commit window polls peers and fast-forwards.
-- [x] f+1 higher-round skip — a round-lagging node skips forward on >⅓ power from a higher round.
-- [x] off-machine backup (`backupPath`) — each committed checkpoint is mirrored to a second path.
-- [x] fork-binding tier (optional `PrevStateDigest`) — pin a payment to one chain history; for
-      self-hosted high-value users (run your own node), while `BlockID` alone suffices for everyone else.
-- [x] payment identity by content, not signature — a malleated signature can't double-spend (mempool,
-      gossip, and `ProcessPayments` all dedup by `PaymentID`).
-- [x] resource bounds — mempool size ceiling + payment comment cap (`maxMempool` / `maxCommentLength`),
-      plus a governed per-message serialized-size cap (`maxMessageBytes`), so one transaction fee can't
-      write a megabyte into permanent, every-block-rehashed state. A message that is oversized — or
-      resolves to nobody (an unregistered name) — is a zero-fee no-op and so is kept out of a block
-      entirely (refused at intake, excluded by the proposer, rejected on apply), not carried for free.
-- [x] slashing — equivocation proof carried in a block (`Block.Evidence`) removes the double-signer's
-      account (confiscates stake, ejects from a dynamic set); unforgeable, so it can't frame the honest.
-- [x] overdraw intake guardrail — a payment that would overdraw the payer (counting its already-queued
-      outgoing) is refused at intake with no receipt, at the client endpoint and the gossip ingress
-      alike (`node.admitPayment`), so an honest wallet can't trip the ledger's overdraw ban; a
-      committed overdraw then implies only a misused/cloned key or a proposer that bypassed intake.
-- [x] vote re-gossip — each node periodically re-broadcasts the current height's votes (`reGossipLoop`),
-      so a partition that drops every side below quorum self-heals on merge instead of freezing.
-- [x] adversarial test harness — a deterministic driver-level simulator (`consensus/sim_test.go`) and a
-      fault-injecting node-level chaos suite (`node/chaos_test.go`): partitions, message loss / dup /
-      reorder, equivocators and byzantine agents, with *no fork* and *no silent mint* held as invariants
-      across thousands of randomized, replayable schedules.
+- **ML-DSA-65** is the only signature scheme, and the network id is bound to the genesis.
+- **Names are the identity.** A name is registered at a bank: the requestor pays the fee, the bank
+  co-signs and becomes the name's bank of record, and the new key proves its holder has it. Payments,
+  delegations and validator seats are by name; paying to a raw key is gone.
+- **Key changes, bank changes and the freeze.** A key change (a sale too) needs the holder, its
+  bank and the new key; a bank change needs the holder and the new bank; both wait about a day. The
+  holder can freeze the name at once, for free. A frozen name neither pays nor is paid.
+- **A double-sign freezes the name** and takes no money; the ⅔ decide about the money.
+- **The ⅔ name action** re-keys, freezes, unfreezes, sets a balance or a bank of record, or creates a
+  name.
+- **Plain-decimal amounts and caps** on a single payment and on a balance, as ⅔-governed parameters.
+- **Each block hash covers its body, its signing set and a random nonce**, and proposals sign it.
+- **The signature record** keeps who signed each block for `retainBlocks` heights, and every
+  governance certificate and double-sign proof for life. It never keeps payments.
+- **The idle chain**: a height starts only when there is work, so a network nobody uses commits,
+  signs and records nothing after block 1.
+- **The fork-binding pin** binds a payment to the full state digest its block builds on.
 
-The distinctive engine — a consensus-backed **naming/DNS service with payments underneath** — is
-restored on top of the hardened core:
+The Phase 2 build record, its spec and the code notes are in [`review/`](review/README.md); start
+with [`review/phase2_progress.md`](review/phase2_progress.md). Where things stand on 2026-10-31:
+Phase 2 and the fixes from its final read-through are built and checked, and they await the
+owner's review before they are pushed. What the owner decided, and what is still a builder default,
+is in the spec's [§12](review/phase2_spec.md#12-open-questions-for-the-owner); what is left to do is in [`TODO.md`](TODO.md). The words and the finding ids
+(A1, C1, E1, Q1, R1 and the rest) are explained in [`docs/glossary.md`](docs/glossary.md).
 
-- [x] naming registry — a signed `AccountUpdate` claims a unique name (a "domain"), re-delegates
-      stake, or sets a description; committed in blocks, first-come-unique.
-- [x] payment by name — the signed payment carries the *name*; every node resolves it against the
-      committed registry independently (as the original did), so no single node can remap it. A name
-      that resolves to nobody (a typo) is refused with a clear error, not silently accepted as a no-op.
-- [x] on-chain node addressing — validators publish a gossip address on-chain; nodes resolve their
-      peers from committed state (the self-describing peer DNS) rather than a static list.
-- [x] name-server endpoint — `GET /hdls/resolve?name=alice` returns the name's public key AND its
-      published address from committed state, each answer anchored to the committed digest so
-      clients can cross-check independent nodes: a decentralized replacement for a name server.
-- [x] catch-up from gossip peers — any node that falls behind self-recovers from a peer that's ahead.
-- [x] supply-conservation property test — payments can never mint (value only moves or burns as fees).
-- [x] governance — self-amending parameters (currently the transaction cost) by a > ⅔ validator
-      vote, carried in a block as a replay-guarded change certificate: see [`docs/governance.md`](docs/governance.md).
-- [x] balance reassignment — a > ⅔-ratified override of one account's balance (the community's
-      deliberate exception to payment-conservation: it can mint or reduce), same certificate shape,
-      replay-guarded by the balance it amends, with a non-negative guard.
-- [x] admin / governance UI — a page in the wallet to propose and vote on transaction-cost changes and
-      balance reassignments, with live vote tallies (reads `GET /hdls/governance`).
+Phase 3, the split into four containers, one per docs area (a signer, an engine, an edge proxy and
+the wallet), is planned, not built (see [`TODO.md`](TODO.md)). The real gate before value rides on
+it is an independent **human** audit: an AI review is an input, not a substitute. Why the project
+stays small: [`docs/why-small-and-auditable.md`](docs/why-small-and-auditable.md).
 
-The port is complete and reviewed. What's left is scope beyond a testnet-grade node: an independent
-**human** audit (the real gate before value rides on it — an AI review is an input, not a substitute);
-a remote/airgapped validator signer (fits behind the `signing` abstraction); and PoS operating
-realities to *understand* rather than code — weak subjectivity for long-range attacks, stake
-concentration vs the ⅓/⅔ thresholds. The original Java implementation is upstream and out of scope.
-
-See [`docs/`](docs/) for the architecture, consensus design, security model, how to run a network, and
-— just as important as the code — [**managing the currency**](docs/managing-the-currency.md): the
-monetary policy of a burn-and-mint community currency, and the honest limits of it.
+The docs are in [`docs/`](docs/), in four areas: signature, node, API/CDN and UI. Just as important
+as the code is [**managing the currency**](docs/managing-the-currency.md): the monetary policy of a
+burn-and-mint community currency, and its honest limits.
 
 ## Layout
 
-    cmd/server/   the node binary (config-driven)
-    cmd/keygen/   Ed25519 key-pair generator
-    ledger/       pure domain core: Account, Payment, ProcessPayments, StateDigest, Block (+ tests)
-    signing/      domain-separated signatures: Scheme (Ed25519), Domain, Signer (+ tests)
-    consensus/    safety core + round driver: ValidatorSet, Vote, Commit, Evidence, Driver (+ tests)
-    node/         the running validator: event loop, mempool, HTTP transport + API (+ tests)
-    docs/         architecture, consensus, security, and operations
+| Package | Area | What it holds |
+|---|---|---|
+| `signing/` | signature | ML-DSA-65, the signing domains, and the preimage every signature binds |
+| `cmd/keygen/` | signature | prints a fresh key pair |
+| `consensus/` | node | the validator set, votes, the commit, signed proposals, double-sign evidence, the round driver |
+| `ledger/` | node | the state, the messages, the ⅔ certificates, the genesis, `ProposeBlock` and `ApplyBlock`; no I/O |
+| `node/` | node, API/CDN | the running node: event loop, pools, snapshot and sign log, catch-up, the signature record; its HTTP routes, relay and peers |
+| `cmd/server/` | API/CDN | runs one node from a config file and a genesis file |
+| `cmd/demo/` | API/CDN | runs one node and one wallet on this machine |
+| `ui/` | UI | the wallet, its own Go module |
+| `docs/` | | the docs, in the four areas |
 
-## Audit invariants already enforced in `ledger`
+The imports run `signing` → `consensus` → `ledger` → `node` → `cmd/server`, `cmd/demo` and `ui`;
+`cmd/keygen` imports only `signing`. To read the code in that order, one step at a time with each
+step's tests, follow [`docs/reading-the-code.md`](docs/reading-the-code.md).
+
+## Audit invariants enforced in `ledger`
 
 From the 2026-07 security audit:
 
-- **B1** — a negative-amount payment cannot mint to the payer.
-- **B2** — a payment from a non-existent account cannot mint to the payee.
+- **B1**: a negative-amount payment cannot mint to the payer.
+- **B2**: a payment from a name that does not exist cannot mint to the payee.
 
-`ProcessPayments` only moves value for payments whose amount is at least the transaction
-cost (so strictly positive) and whose payer exists. Money is exact (`math/big.Rat`); there
-is no floating point anywhere in the money path.
+`ledger.ProcessPayments` moves value only for a payment of at least the transaction cost, never a
+negative one, between two names that exist. Money is exact (`math/big.Rat`); there is no floating
+point anywhere in the money path.
 
-## Signatures (domain separation)
+## Signatures
 
-The central audit finding (C1): signing every payload type with one unscoped key over bare
-`:`-joined strings lets a signature coerced in one context (e.g. a peer-controlled join handshake)
-be replayed as a payment. The `signing` package rules that out structurally:
+The audit's central finding (C1): one unscoped key signing every payload over bare `:`-joined
+strings lets a signature made in one context be replayed as a payment. The `signing` package rules
+that out by construction:
 
-- There is **no "sign raw bytes" API.** Every signature is scoped to a `Domain`
-  (`payment`, `server-auth`, `account-update`, …).
-- The signed preimage is **canonical and length-prefixed**, and binds a fixed protocol tag,
-  the **network id**, the domain, and each field — so field boundaries can't be shifted (C7),
-  and a signature can't cross domains (C1) or networks/forks (C6).
-- The algorithm sits behind a `Scheme` interface (Ed25519 by default). A post-quantum scheme,
-  ML-DSA, drops in without touching the domain-separation layer — the commented, non-default slot is
-  at [`signing/mldsa.go`](signing/mldsa.go); see **Cryptographic agility** below.
+- `Signer`, the only signing API the node and the wallet use, has **no "sign raw bytes" call.**
+  Every signature is scoped to a domain (`payment`, `account-update`, `registration`,
+  `block-revision`, …).
+- The signed preimage is **length-prefixed** and binds a protocol tag, the **network id**, the
+  domain and each field, so field boundaries cannot shift (C7), and a signature cannot cross
+  domains (C1) or networks (C6). The network id is made from the genesis hash.
+- The scheme is **ML-DSA-65** (FIPS 204), from Go's standard library `crypto/mldsa`: 1952-byte
+  public keys, 3309-byte signatures, keys stored as their 32-byte seed. Signing is deterministic.
+  `keygen` prints a fresh pair.
 
-The tests assert the replay attacks are actually rejected: a `server-auth` signature does not
-verify as a `payment`, a `testnet` signature does not verify on `mainnet`, and re-splitting a
-field's bytes does not verify.
+The tests check that the replays fail: a `receipt` signature does not verify as a `payment`, a
+`testnet` signature does not verify on `mainnet`, and re-splitting a field's bytes does not verify.
+See [`docs/signature.md`](docs/signature.md).
 
-## Cryptographic agility (and post-quantum)
+## Cryptographic agility
 
-The signature algorithm is a **whole-network choice fixed at genesis** — a signature is
-scheme-specific and every node must agree on the exact verifier, the same reason "one Ed25519
-implementation is a consensus rule" (see [`docs/security.md`](docs/security.md)). It is Ed25519
-today. A post-quantum scheme, **ML-DSA** (FIPS 204), already fits the `Scheme` interface with no
-change to the domain-separation layer; it sits commented and non-default in
-[`signing/mldsa.go`](signing/mldsa.go), un-activated only because Go's standard library ships no
-ML-DSA signer yet and wiring a third-party one would break the zero-dependency rule (see
-[`TODO.md`](TODO.md)).
-
-"Fixed at genesis" does **not** mean "locked forever." Because a community can **export a faithful
-snapshot of the agreed ledger and reseed a fresh network from it** (the ledger is deliberately
-portable — see Origins), migrating the whole currency to a new signature scheme is a real, available
-decision, not a wall: agree on a snapshot height, capture the committed state, reseed genesis under
-the new scheme, and have everyone re-key. The cost is a short, *planned* downtime — on the order of a
-couple of hours to snapshot, agree, and reseed — rather than a hard fork or a lost ledger. So if the
-day comes that Ed25519 is judged at risk, moving to post-quantum is a governance call the community
-gets to make, priced at a known and bounded outage.
+The signature scheme is a whole-network choice fixed at genesis: every node must verify exactly as
+every other does. Phase 2 changed it from Ed25519 to ML-DSA-65, at a new genesis. A later change
+works the same way, without losing the ledger: agree a height, capture the committed state, have
+everyone make new keys, write a new genesis from the captured state under a new network name, and
+start the network again. The money supply and every balance carry over; the keys and the network
+id change, and frozen marks and pending changes do not carry over. It is a planned outage of hours,
+and a decision the community owns (see
+[`docs/operating-a-network.md`](docs/operating-a-network.md#starting-a-new-network)).
 
 ## Consensus
 
-The audit's central consensus finding (A1/A4): finalising a block on a single ">½ of all stake"
-snapshot of one node's local gossip view — no quorum intersection, no durable equivocation
-accountability — lets a sub-½ Byzantine coalition fork the chain under a partition, and risks voting
-on a value derived from a *different* input than the state that gets applied (A2).
+The audit's central consensus finding (A1, A4): finalising on "more than ½ of all stake" in one
+node's local view lets a coalition under ½ fork the chain under a partition, and the value voted on
+was not the value applied (A2). The `consensus` package fixes this:
 
-The `consensus` package is the pure, tested **safety core** that fixes this:
+- **Finalisation needs > ⅔ of the power**, precommitting one block hash. Any two such quorums
+  overlap in an honest validator, who precommits at most one block in a round, so two conflicting
+  blocks cannot both commit in one round while at most ⅓ is Byzantine.
+- **The block hash covers the applied state**, the content, the signing set and the proposer's
+  nonce. Every node re-runs the block and takes it only if it gets the same state.
+- **A round driver with locking** (`Driver`): prevote, precommit, a lock, and timeouts that grow
+  with the round. The lock keeps it safe across rounds, and the timeouts make it live. It is a pure
+  state machine, tested without clocks.
+- **A double-sign freezes the name**: two signatures by one name for different block hashes in one
+  slot are a proof a later block carries.
 
-- **Finalisation needs a > ⅔ stake quorum** of precommit votes for one block digest
-  (`ValidatorSet.Quorum() = floor(2·total/3)+1`). Requiring more than two-thirds is what makes
-  any two quorums intersect in an honest validator, so two conflicting blocks cannot both
-  commit while ≤ ⅓ of power is Byzantine. `TestConflictingCommitsRequireEquivocation` proves it:
-  two commits for different digests must share a validator, i.e. a double-signer.
-- **Votes are signed** through the `signing` layer (block-revision domain, network-bound), and a
-  validator that casts a second conflicting vote is recorded as transferable `Evidence` and
-  un-counted — a durable, slashable proof.
-- **A `Commit` binds the applied-state digest** (`ledger.StateDigest`, SHA-256, sorted,
-  length-prefixed — replacing MD5, audit C5). What got agreed is exactly what gets applied (A2),
-  and any node or light client can verify a `Commit` against the validator set after the fact.
-
-The **round driver** (`Driver`) turns that safety core into a live protocol: a pure, event-driven
-Tendermint-style state machine over two phases (prevote → precommit) with a lock. It selects the
-round's proposer, casts prevotes/precommits under the locking rule (a node that has locked value
-X will not prevote a conflicting Y without a proof-of-lock — so it can never precommit two
-conflicting values), and advances rounds on timeout. It is deterministic and fully unit-tested:
-timeouts arrive as `Timeout` events (not real clocks), and the caller executes the `Action`s it
-returns (broadcast a proposal/vote, arm a timer, record a decision). Tests cover the happy-path
-decision, timeout-driven round advance, and the locking rule directly.
-
-The **`node`** package wires this into a running validator (see [`docs/architecture.md`](docs/architecture.md)):
-a single-goroutine event loop owns the ledger state, mempool and per-height driver — race-free by
-construction, the deliberate fix for lock-free shared mutable state — with an HTTP transport
-carrying proposals and votes between peers. Nodes periodically **re-gossip the current height's
-votes**, so a network partition that drops every side below quorum self-heals when it merges rather
-than freezing on the stuck votes. The safety and liveness of the whole stack are exercised by an
-**adversarial harness** — a deterministic driver-level simulator plus a fault-injecting node-level
-chaos suite (partitions, loss, reorder, equivocators) — that holds *no fork* and *no silent mint* as
-invariants across thousands of randomized schedules.
+The `node` package runs it all in one event loop per node, race-free by construction. An adversarial
+harness, a deterministic driver simulator and a fault-injecting chaos suite (partitions, loss,
+reorder, double-signers), holds *no fork* and *no silent mint* across thousands of random schedules.
+See [`docs/consensus.md`](docs/consensus.md) and [`docs/architecture.md`](docs/architecture.md).
 
 ## Build & test
 
-    go test -short ./...       # fast: unit + integration (skips the chaos scenarios)
-    go test -race ./...        # full: adds the adversarial chaos + driver-simulator scenarios
-    go build ./cmd/server
+    go test -short ./...            # fast: skips the chaos scenarios, runs fewer simulator seeds
+    go test -race ./...             # full, as CI runs it
+    go test -C ui -race ./...       # the wallet module
+    make build                      # the four programs into bin/, static (CGO_ENABLED=0)
 
-Requires Go 1.22+. The chaos scenarios (`node/chaos_test.go`) are skipped under `-short`; a run
-prints a `GOLEDGER_CHAOS_SEED` you can set to replay its exact fault schedule, the randomized soak
-lengthens with `GOLEDGER_CHAOS_SOAK_SECONDS`, and the driver simulator's seed count scales with
-`GOLEDGER_SIM_SEED_FACTOR`.
+Requires Go 1.27 or later. A chaos run prints a `GOLEDGER_CHAOS_SEED` that replays its fault
+schedule; `GOLEDGER_CHAOS_SOAK_SECONDS` lengthens the random soak, `GOLEDGER_SIM_SEED_FACTOR` scales
+the simulator's seeds, and `GOLEDGER_CHAOS_SLACK` stretches the tests' deadlines on a slow machine
+(CI sets 4).
 
-## Money representation
+## Money
 
-Amounts are `*big.Rat` (exact, arbitrary-precision rationals). This is a deliberate first choice for
-exactness; switching to fixed-point integers (minor units) is a possible later optimisation once a
-canonical scale is fixed.
+Amounts are exact rationals (`*big.Rat`) on a fixed grid: a whole number of 0.00000001 units. They
+are read only as plain decimals, 1 to 18 digits and up to 8 decimals (`12`, `0.5`), and written in
+one canonical form, as JSON strings. A sign, an exponent, a fraction like `1/2`, or anything finer
+than the grid is refused before a number is built. Two ⅔-governed caps bound a single payment and a
+balance.
 
 ## Origins
 
@@ -248,6 +189,6 @@ design belongs upstream:
 > **Original project (Java):** <https://github.com/JauntyJackalope351/hypernode-ledger> — *Hypernode
 > distributed ledger, AGPL-3.0.*
 
-The original Java tree is untouched and out of scope here. This repository is a derivative work and is
+The original Java project is not part of this repository and stays as it is. This repository is a derivative work and is
 likewise licensed **AGPL-3.0** (see [`LICENSE`](LICENSE)), as the original's copyleft requires.
 

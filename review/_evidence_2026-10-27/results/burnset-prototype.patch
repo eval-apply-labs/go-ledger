@@ -1,0 +1,408 @@
+diff -ru '--exclude=*_test.go' '--exclude=.git' verify-burn-slash/ledger/block.go verify-burn-slash-fix/ledger/block.go
+--- verify-burn-slash/ledger/block.go	2026-10-27 07:24:15.375128085 +0000
++++ verify-burn-slash-fix/ledger/block.go	2026-10-27 07:57:10.962117521 +0000
+@@ -69,15 +69,17 @@
+ // the set. Only evidence that verifies is acted on; it is deterministic, so every node computes the
+ // same slashed state. This is the durable penalty behind the vote sets' in-round un-counting — it
+ // zeroes out anyone who double-signs for a block.
+-func applySlashes(scheme signing.Scheme, networkID string, accounts []Account, evidence []consensus.Evidence) []Account {
++func applySlashes(scheme signing.Scheme, networkID string, accounts []Account, evidence []consensus.Evidence) ([]Account, []string) {
+ 	offenders := make(map[string]bool)
++	var burned []string
+ 	for _, equivocation := range evidence {
+-		if equivocation.Valid(scheme, networkID) {
++		if equivocation.Valid(scheme, networkID) && !offenders[equivocation.Validator] {
+ 			offenders[equivocation.Validator] = true
++			burned = append(burned, equivocation.Validator)
+ 		}
+ 	}
+ 	if len(offenders) == 0 {
+-		return accounts
++		return accounts, nil
+ 	}
+ 	remainingAccounts := make([]Account, 0, len(accounts))
+ 	for _, account := range accounts {
+@@ -85,7 +87,21 @@
+ 			remainingAccounts = append(remainingAccounts, account)
+ 		}
+ 	}
+-	return remainingAccounts
++	return remainingAccounts, burned
++}
++
++// evidenceAdmissible: an equivocation may burn only a CURRENT validator (of the set this block is
++// validated against) that is not already burned, once per block — so a byzantine proposer cannot
++// bloat the burned set with junk keys, and a burned key is never re-carried.
++func evidenceAdmissible(e consensus.Evidence, set *consensus.ValidatorSet, burned []string, seen map[string]bool) bool {
++	if set != nil && !set.Contains(e.Validator) {
++		return false
++	}
++	if IsBurned(burned, e.Validator) || seen[e.Validator] {
++		return false
++	}
++	seen[e.Validator] = true
++	return true
+ }
+ 
+ // ProposeBlock builds the block that results from applying `content` to `previousState`. The
+@@ -126,8 +142,10 @@
+ 		}
+ 	}
+ 	var verifiedEvidence []consensus.Evidence
++	seenOffender := map[string]bool{}
+ 	for _, equivocation := range content.Evidence {
+-		if equivocation.Valid(scheme, networkID) && evidenceInWindow(equivocation, height) {
++		if equivocation.Valid(scheme, networkID) && evidenceInWindow(equivocation, height) &&
++			evidenceAdmissible(equivocation, validatorSet, previousState.Burned, seenOffender) {
+ 			verifiedEvidence = append(verifiedEvidence, equivocation) // only carry provable, recent equivocation
+ 		}
+ 	}
+@@ -150,11 +168,11 @@
+ 
+ 	resultingAccounts := ProcessPayments(previousState.Accounts, paymentsForThisBlock, transactionCost)
+ 	resultingAccounts = applyAccountUpdates(scheme, networkID, resultingAccounts, verifiedUpdates, height)
+-	resultingAccounts = applySlashes(scheme, networkID, resultingAccounts, verifiedEvidence)
++	resultingAccounts, newlyBurned := applySlashes(scheme, networkID, resultingAccounts, verifiedEvidence)
+ 	if ratifiedReassignment != nil {
+ 		resultingAccounts = applyReassignment(resultingAccounts, ratifiedReassignment.Account, ratifiedReassignment.NewAmount)
+ 	}
+-	nextState := LedgerState{Accounts: resultingAccounts, Parameters: nextParameters, GovernanceSequence: nextSequence}
++	nextState := LedgerState{Accounts: resultingAccounts, Parameters: nextParameters, GovernanceSequence: nextSequence, Burned: burnedUnion(previousState.Burned, newlyBurned)}
+ 	return Block{
+ 		Height:          height,
+ 		PrevStateDigest: previousState.Digest(),
+@@ -202,8 +220,10 @@
+ 			return LedgerState{}, false // an unsigned, misplaced or oversized account update
+ 		}
+ 	}
++	seenOffender := map[string]bool{}
+ 	for _, equivocation := range block.Evidence {
+-		if !equivocation.Valid(scheme, networkID) || !evidenceInWindow(equivocation, block.Height) {
++		if !equivocation.Valid(scheme, networkID) || !evidenceInWindow(equivocation, block.Height) ||
++			!evidenceAdmissible(equivocation, firstValidatorSet(validators), previousState.Burned, seenOffender) {
+ 			return LedgerState{}, false // slash without unforgeable proof, or stale re-included evidence
+ 		}
+ 	}
+@@ -229,11 +249,11 @@
+ 
+ 	resultingAccounts := ProcessPayments(previousState.Accounts, block.Payments, previousState.Parameters.TransactionCost)
+ 	resultingAccounts = applyAccountUpdates(scheme, networkID, resultingAccounts, block.Updates, block.Height)
+-	resultingAccounts = applySlashes(scheme, networkID, resultingAccounts, block.Evidence)
++	resultingAccounts, newlyBurned := applySlashes(scheme, networkID, resultingAccounts, block.Evidence)
+ 	if block.Reassignment != nil {
+ 		resultingAccounts = applyReassignment(resultingAccounts, block.Reassignment.Account, block.Reassignment.NewAmount)
+ 	}
+-	nextState := LedgerState{Accounts: resultingAccounts, Parameters: nextParameters, GovernanceSequence: nextSequence}
++	nextState := LedgerState{Accounts: resultingAccounts, Parameters: nextParameters, GovernanceSequence: nextSequence, Burned: burnedUnion(previousState.Burned, newlyBurned)}
+ 	if nextState.Digest() != block.StateDigest {
+ 		return LedgerState{}, false // claimed result does not match the recomputed result
+ 	}
+diff -ru '--exclude=*_test.go' '--exclude=.git' verify-burn-slash/ledger/parameters.go verify-burn-slash-fix/ledger/parameters.go
+--- verify-burn-slash/ledger/parameters.go	2026-10-27 07:24:15.375128085 +0000
++++ verify-burn-slash-fix/ledger/parameters.go	2026-10-27 07:57:10.962117521 +0000
+@@ -4,6 +4,7 @@
+ 	"crypto/sha256"
+ 	"encoding/binary"
+ 	"math/big"
++	"sort"
+ 	"strconv"
+ )
+ 
+@@ -110,6 +111,30 @@
+ 	Accounts           []Account
+ 	Parameters         LedgerParameters
+ 	GovernanceSequence int64
++	// Burned is the sorted set of canonical validator keys proven to have equivocated. A burned key
++	// is never a validator again (static or dynamic). Hashed into Digest only when non-empty, so every
++	// existing state digest / snapshot / checkpoint stays valid (coordinated upgrade, no re-genesis).
++	Burned []string
++}
++
++// IsBurned reports whether key is in the (sorted) burned set.
++func IsBurned(burned []string, key string) bool {
++	i := sort.SearchStrings(burned, key)
++	return i < len(burned) && burned[i] == key
++}
++
++func burnedUnion(burned []string, add []string) []string {
++	if len(add) == 0 {
++		return burned
++	}
++	out := append([]string(nil), burned...)
++	for _, k := range add {
++		if !IsBurned(out, k) {
++			out = append(out, k)
++			sort.Strings(out)
++		}
++	}
++	return out
+ }
+ 
+ // Digest is the committed digest over accounts, parameters AND the governance sequence.
+@@ -122,6 +147,16 @@
+ 	var sequence [8]byte
+ 	binary.BigEndian.PutUint64(sequence[:], uint64(state.GovernanceSequence))
+ 	hasher.Write(sequence[:])
++	if len(state.Burned) > 0 {
++		burnedHasher := sha256.New()
++		for _, k := range state.Burned {
++			var length [4]byte
++			binary.BigEndian.PutUint32(length[:], uint32(len(k)))
++			burnedHasher.Write(length[:])
++			burnedHasher.Write([]byte(k))
++		}
++		hasher.Write(burnedHasher.Sum(nil))
++	}
+ 	var committedDigest [32]byte
+ 	copy(committedDigest[:], hasher.Sum(nil))
+ 	return committedDigest
+diff -ru '--exclude=*_test.go' '--exclude=.git' verify-burn-slash/node/httptransport.go verify-burn-slash-fix/node/httptransport.go
+--- verify-burn-slash/node/httptransport.go	2026-10-27 07:24:15.375128085 +0000
++++ verify-burn-slash-fix/node/httptransport.go	2026-10-27 07:57:47.196208948 +0000
+@@ -124,7 +124,7 @@
+ // it, for a joining/rebooting peer to verify and adopt.
+ func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {
+ 	snap := s.node.Snapshot()
+-	writeJSON(w, Checkpoint{Accounts: snap.Accounts, Parameters: snap.Parameters, GovernanceSequence: snap.GovernanceSequence, Commit: snap.LastCommit, Validators: snap.Validators})
++	writeJSON(w, Checkpoint{Accounts: snap.Accounts, Parameters: snap.Parameters, GovernanceSequence: snap.GovernanceSequence, Commit: snap.LastCommit, Validators: snap.Validators, Burned: snap.Burned})
+ }
+ 
+ func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
+diff -ru '--exclude=*_test.go' '--exclude=.git' verify-burn-slash/node/messages.go verify-burn-slash-fix/node/messages.go
+--- verify-burn-slash/node/messages.go	2026-10-27 07:24:15.375128085 +0000
++++ verify-burn-slash-fix/node/messages.go	2026-10-27 07:57:47.196208948 +0000
+@@ -103,4 +103,5 @@
+ 	GovernanceSequence int64                   // committed governance sequence (also under the digest)
+ 	Commit             consensus.Commit
+ 	Validators         []consensus.Validator
++	Burned             []string // committed burned keys (under the digest the Commit binds)
+ }
+diff -ru '--exclude=*_test.go' '--exclude=.git' verify-burn-slash/node/node.go verify-burn-slash-fix/node/node.go
+--- verify-burn-slash/node/node.go	2026-10-27 07:24:15.375128085 +0000
++++ verify-burn-slash-fix/node/node.go	2026-10-27 08:02:13.775583200 +0000
+@@ -76,6 +76,7 @@
+ 	Accounts           []ledger.Account
+ 	Parameters         ledger.LedgerParameters // committed operating parameters (for checkpoints)
+ 	GovernanceSequence int64                   // committed governance sequence (for checkpoints)
++	Burned             []string
+ 	Decided            [32]byte
+ 	LastCommit         consensus.Commit
+ 	Validators         []consensus.Validator // the set that signed LastCommit (for checkpoints)
+@@ -96,6 +97,7 @@
+ 	accounts           []ledger.Account
+ 	parameters         ledger.LedgerParameters // committed operating parameters (governed; see governance)
+ 	governanceSequence int64                   // committed governance sequence (single-use guard for certs)
++	burned             []string                // committed burned keys (never validators again)
+ 	driver             *consensus.Driver
+ 	mem                *mempool
+ 	updates            *updatePool
+@@ -309,6 +311,7 @@
+ 			Accounts:           append([]ledger.Account(nil), n.accounts...),
+ 			Parameters:         n.parameters,
+ 			GovernanceSequence: n.governanceSequence,
++			Burned:             n.burned,
+ 			Decided:            n.lastDecision,
+ 			LastCommit:         n.lastCommit,
+ 			Validators:         lastVals,
+@@ -331,7 +334,7 @@
+ 	if cp.Commit.Height+1 <= n.height {
+ 		return // not ahead of our configured/current height
+ 	}
+-	if !n.verifyCheckpoint(cp, n.accounts) {
++	if !n.verifyCheckpoint(cp, n.accounts, n.burned...) {
+ 		return
+ 	}
+ 	n.fastForward(cp)
+@@ -342,6 +345,7 @@
+ 	n.accounts = cp.Accounts
+ 	n.parameters = cp.Parameters
+ 	n.governanceSequence = cp.GovernanceSequence
++	n.burned = cp.Burned
+ 	n.height = cp.Commit.Height + 1
+ 	n.lastCommit = cp.Commit
+ 	n.lastDecision = cp.Commit.BlockDigest
+@@ -361,9 +365,10 @@
+ 	if cp.Commit.Height+1 <= n.height {
+ 		return // not actually ahead of us
+ 	}
+-	if !n.verifyCheckpoint(cp, n.accounts) {
++	if !n.verifyCheckpoint(cp, n.accounts, n.burned...) {
+ 		return
+ 	}
++	n.harvestEvidence() // C28: the abandoned driver's equivocation proofs survive the height change
+ 	n.fastForward(cp)
+ 	n.startHeight()
+ }
+@@ -375,7 +380,7 @@
+ 	if n.cfg.Validators == nil && len(cp.Validators) > 0 {
+ 		return consensus.NewValidatorSet(cp.Validators)
+ 	}
+-	return n.validatorsFor(cp.Accounts)
++	return n.validatorsForState(cp.Accounts, cp.Burned)
+ }
+ 
+ // verifyCheckpoint reports whether cp is trustworthy from THIS node's vantage: its Commit is a valid
+@@ -385,14 +390,14 @@
+ // the BFT "skipping" rule: it lets a node safely adopt a checkpoint whose validator set grew while
+ // it was away, without trusting the serving peer. (Full rotation past the anchor would need a chain
+ // of checkpoints; for incremental growth the anchor overlaps the signing set — the real case here.)
+-func (n *Node) verifyCheckpoint(cp Checkpoint, anchor []ledger.Account) bool {
++func (n *Node) verifyCheckpoint(cp Checkpoint, anchor []ledger.Account, anchorBurned ...string) bool {
+ 	if !cp.Commit.Verify(n.cfg.Scheme, n.cfg.NetworkID, n.checkpointSigners(cp)) {
+ 		return false
+ 	}
+-	if (ledger.LedgerState{Accounts: cp.Accounts, Parameters: cp.Parameters, GovernanceSequence: cp.GovernanceSequence}).Digest() != cp.Commit.BlockDigest {
++	if (ledger.LedgerState{Accounts: cp.Accounts, Parameters: cp.Parameters, GovernanceSequence: cp.GovernanceSequence, Burned: cp.Burned}).Digest() != cp.Commit.BlockDigest {
+ 		return false
+ 	}
+-	trusted := n.validatorsFor(anchor)
++	trusted := n.validatorsForState(anchor, anchorBurned)
+ 	var vouched int64
+ 	for _, voter := range cp.Commit.Voters() {
+ 		vouched += trusted.Power(voter)
+@@ -400,6 +405,15 @@
+ 	return vouched*3 > trusted.TotalPower()
+ }
+ 
++// harvestEvidence records the current driver's equivocation proofs (call before replacing it).
++func (n *Node) harvestEvidence() {
++	if n.driver != nil {
++		for _, ev := range n.driver.Evidence() {
++			n.pendingSlashes[ev.Validator] = ev
++		}
++	}
++}
++
+ // slashEvidence returns the pending equivocation proofs for offenders that are still validators, to
+ // carry into a proposed block. Once slashed (removed from state) they stop being validators and are
+ // pruned in commit, so a proof is not carried forever.
+@@ -468,10 +482,11 @@
+ 		return // already started this height — ignore a stale evNextHeight/evCatchUp that would
+ 		//        otherwise replace the live driver mid-height and discard its in-progress votes.
+ 	}
++	n.harvestEvidence() // late conflicting votes that reached the decided driver after commit
+ 	n.heightStarted = n.height
+ 	n.heightVals = n.validatorsFor(n.accounts) // the set governing this height (and signing its commit)
+ 	candidateBlock := ledger.ProposeBlock(n.cfg.Scheme, n.cfg.NetworkID, n.height,
+-		ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence},
++		ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence, Burned: n.burned},
+ 		ledger.BlockContent{
+ 			Payments:        n.mem.snapshot(),
+ 			Updates:         n.updates.snapshot(),
+@@ -507,7 +522,7 @@
+ 	if p.Proposer != n.driver.Proposer(p.Round) || !VerifyProposal(n.cfg.Scheme, n.cfg.NetworkID, p) {
+ 		return false // wrong proposer or bad signature — drop, don't relay
+ 	}
+-	_, valid := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, p.Block, n.validatorsFor(n.accounts))
++	_, valid := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence, Burned: n.burned}, p.Block, n.validatorsFor(n.accounts))
+ 	n.blocks[p.Block.StateDigest] = p.Block
+ 	n.rememberProposal(p)
+ 	n.process(n.driver.ReceiveProposal(consensus.Proposal{
+@@ -629,26 +644,24 @@
+ 	if !ok {
+ 		return
+ 	}
+-	nextState, ok := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, blk, n.heightVals)
++	nextState, ok := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence, Burned: n.burned}, blk, n.heightVals)
+ 	if !ok {
+ 		return
+ 	}
+ 	n.accounts = nextState.Accounts
+ 	n.parameters = nextState.Parameters
+ 	n.governanceSequence = nextState.GovernanceSequence
++	n.burned = nextState.Burned
+ 	n.lastDecision = act.Digest
+ 	n.lastCommit = act.Commit
+ 	n.lastCommitVals = n.heightVals // the set that signed this commit, for checkpoints we serve
+ 	// Record any equivocation seen this height (to slash in a future block), and drop proofs for
+ 	// offenders already slashed out of the validator set.
+-	if n.driver != nil {
+-		for _, ev := range n.driver.Evidence() {
+-			n.pendingSlashes[ev.Validator] = ev
+-		}
+-	}
+-	slashed := n.validatorsFor(n.accounts)
+-	for offender := range n.pendingSlashes {
+-		if !slashed.Contains(offender) {
++	n.harvestEvidence()
++	for offender, ev := range n.pendingSlashes {
++		// Prune only once the key is BURNED (or its proof aged out) — not merely when it left the
++		// set, or a self-staked offender could be re-admitted by a payment with no one re-slashing it.
++		if ledger.IsBurned(n.burned, offender) || n.height+1-ev.A.Height > 1000 {
+ 			delete(n.pendingSlashes, offender)
+ 		}
+ 	}
+diff -ru '--exclude=*_test.go' '--exclude=.git' verify-burn-slash/node/persist.go verify-burn-slash-fix/node/persist.go
+--- verify-burn-slash/node/persist.go	2026-10-27 07:24:15.375128085 +0000
++++ verify-burn-slash-fix/node/persist.go	2026-10-27 07:57:55.724701140 +0000
+@@ -46,7 +46,7 @@
+ 	if n.lastCommitVals != nil {
+ 		vals = n.lastCommitVals.Validators()
+ 	}
+-	data, err := json.Marshal(Checkpoint{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence, Commit: n.lastCommit, Validators: vals})
++	data, err := json.Marshal(Checkpoint{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence, Commit: n.lastCommit, Validators: vals, Burned: n.burned})
+ 	if err != nil {
+ 		return
+ 	}
+diff -ru '--exclude=*_test.go' '--exclude=.git' verify-burn-slash/node/validators.go verify-burn-slash-fix/node/validators.go
+--- verify-burn-slash/node/validators.go	2026-10-27 07:24:15.379128312 +0000
++++ verify-burn-slash-fix/node/validators.go	2026-10-27 07:57:47.196208948 +0000
+@@ -12,10 +12,27 @@
+ // stake (dynamic admission): the set is a pure function of the committed state, so every node
+ // computes the same one, and a newly-funded account joins automatically at the next block.
+ func (n *Node) validatorsFor(accounts []ledger.Account) *consensus.ValidatorSet {
++	return n.validatorsForState(accounts, n.burned)
++}
++
++// validatorsForState is the single choke point: the configured (static) or stake-derived (dynamic)
++// set MINUS every burned key. Every consumer — heightVals, proposer selection, vote sets, commit
++// verification, checkpoint trust, governance pools/validity — goes through here, so a burned key's
++// votes, proposals, commit signatures and ⅔ governance votes are refused everywhere.
++func (n *Node) validatorsForState(accounts []ledger.Account, burned []string) *consensus.ValidatorSet {
+ 	if n.cfg.Validators != nil {
+-		return n.cfg.Validators
++		if len(burned) == 0 {
++			return n.cfg.Validators
++		}
++		var kept []consensus.Validator
++		for _, v := range n.cfg.Validators.Validators() {
++			if !ledger.IsBurned(burned, v.PublicKey) {
++				kept = append(kept, v)
++			}
++		}
++		return consensus.NewValidatorSet(kept)
+ 	}
+-	return deriveValidators(accounts, n.cfg.ValidatorThreshold)
++	return deriveValidators(accounts, n.cfg.ValidatorThreshold, burned...)
+ }
+ 
+ // deriveValidators builds a validator set from account stake: each account's balance counts toward
+@@ -28,11 +45,11 @@
+ // fast path (Node.Snapshot) shares Amount pointers with committed state on the strength of this
+ // package-wide treat-amounts-as-immutable invariant; an "optimization" reusing account Amounts as
+ // accumulators here would silently corrupt served snapshots.
+-func deriveValidators(accounts []ledger.Account, threshold *big.Rat) *consensus.ValidatorSet {
++func deriveValidators(accounts []ledger.Account, threshold *big.Rat, burned ...string) *consensus.ValidatorSet {
+ 	stake := make(map[string]*big.Rat)
+ 	for _, a := range accounts {
+-		if a.Amount == nil || a.ValidatorNode == "" {
+-			continue
++		if a.Amount == nil || a.ValidatorNode == "" || ledger.IsBurned(burned, a.ValidatorNode) {
++			continue // stake delegated to a burned key counts for no one until re-delegated
+ 		}
+ 		if cur, ok := stake[a.ValidatorNode]; ok {
+ 			cur.Add(cur, a.Amount)
+diff -ru '--exclude=*_test.go' '--exclude=.git' verify-burn-slash/signing/signer.go verify-burn-slash-fix/signing/signer.go
+--- verify-burn-slash/signing/signer.go	2026-10-27 07:24:15.379128312 +0000
++++ verify-burn-slash-fix/signing/signer.go	2026-10-27 08:10:35.060150284 +0000
+@@ -59,8 +59,8 @@
+ // false on malformed base64.
+ func VerifyBase64(scheme Scheme, networkID, pubB64 string, domain Domain, sigB64 string, fields ...[]byte) bool {
+ 	pub, err := base64.StdEncoding.DecodeString(pubB64)
+-	if err != nil {
+-		return false
++	if err != nil || base64.StdEncoding.EncodeToString(pub) != pubB64 {
++		return false // only the one canonical spelling of a key may sign (no trailing-bit / newline aliases)
+ 	}
+ 	sig, err := base64.StdEncoding.DecodeString(sigB64)
+ 	if err != nil {

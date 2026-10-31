@@ -1,0 +1,278 @@
+--- a/cmd/server/config.go
++++ b/cmd/server/config.go
+@@ -85,6 +85,9 @@
+ 	if !ok {
+ 		return cfg, "", nil, fmt.Errorf("bad transactionCost %q", fc.TransactionCost)
+ 	}
++	if !ledger.InUnits(cost) {
++		return cfg, "", nil, fmt.Errorf("transactionCost %q is finer than the smallest money unit (1e-8)", fc.TransactionCost)
++	}
+ 	if cost.Sign() < 0 {
+ 		// A negative cost would credit every payee MORE than the payer is debited (minting |cost| per
+ 		// payment) and re-admit negative amounts past the below-cost filter. Governance can never vote
+@@ -100,7 +103,7 @@
+ 	genesis := make([]ledger.Account, 0, len(fc.Genesis))
+ 	for _, a := range fc.Genesis {
+ 		amt, ok := new(big.Rat).SetString(a.Amount)
+-		if !ok {
++		if !ok || !ledger.InUnits(amt) {
+ 			return cfg, "", nil, fmt.Errorf("bad genesis amount %q for %s", a.Amount, a.PublicKey)
+ 		}
+ 		genesis = append(genesis, ledger.Account{
+--- a/node/admission_test.go
++++ b/node/admission_test.go
+@@ -82,14 +82,14 @@
+ 	defer nd.Stop()
+ 
+ 	small, _ := ledger.SignPayment(founder, ledger.Payment{
+-		PublicKeyFrom: founder.PublicKeyBase64(), PublicKeyTo: "B", Amount: rat("1"), BlockID: 100000,
++		PublicKeyFrom: founder.PublicKeyBase64(), PublicKeyTo: "B", Amount: rat("1"), BlockID: 50,
+ 	})
+ 	if err := nd.AdmitPayment(small); err != nil {
+ 		t.Fatalf("a plain payment should fit the bound, got: %v", err)
+ 	}
+ 	huge, _ := ledger.SignPayment(founder, ledger.Payment{
+ 		PublicKeyFrom: founder.PublicKeyBase64(), PublicKeyTo: "B", Amount: rat("1"),
+-		Comment: strings.Repeat("x", 4*ledger.MinMessageBytes), BlockID: 100000,
++		Comment: strings.Repeat("x", 4*ledger.MinMessageBytes), BlockID: 50,
+ 	})
+ 	if err := nd.AdmitPayment(huge); err == nil || !strings.Contains(err.Error(), "too large") {
+ 		t.Fatalf("an oversized payment must be refused at intake, got: %v", err)
+--- a/node/node.go
++++ b/node/node.go
+@@ -283,7 +283,9 @@
+ 	case evUpdate:
+ 		// Same governed size bound as payments — an oversized update would otherwise put an
+ 		// arbitrarily large name/description into permanent, every-block-rehashed state for free.
+-		if ledger.WithinMessageBound(n.parameters.MaxMessageBytes, *e.update) && n.updates.add(*e.update) {
++		if e.update.BlockID >= n.height && e.update.BlockID <= n.height+maxBlockIDLookahead &&
++			ledger.AccountAmount(n.accounts, e.update.From).Sign() > 0 &&
++			ledger.WithinMessageBound(n.parameters.MaxMessageBytes, *e.update) && n.updates.add(*e.update) {
+ 			n.relay(Message{Type: MsgUpdate, From: n.self, Update: e.update})
+ 		}
+ 	case evParameterVote:
+@@ -429,12 +431,25 @@
+ // The guard is against this node's local view (committed balance + its own pending pool); pending
+ // incoming credits don't count, so it is conservative. A duplicate of an already-queued payment is
+ // admitted as a no-op (idempotent resubmission — the receipt can be re-issued).
++// maxBlockIDLookahead bounds how far ahead of the current height a pooled payment/update may name its
++// block, so pool entries always expire (C16 far-future residency).
++const maxBlockIDLookahead = 64
++
+ func (n *Node) admitPayment(p ledger.Payment) error {
+ 	if p.Amount == nil || p.Amount.Sign() <= 0 {
+ 		return errors.New("non-positive amount")
+ 	}
++	if !ledger.InUnits(p.Amount) {
++		return errors.New("amount is not a whole number of the smallest money unit")
++	}
++	if cost := n.parameters.TransactionCost; cost != nil && p.Amount.Cmp(cost) < 0 {
++		return errors.New("amount below the transaction cost: it would never move value")
++	}
+ 	if p.BlockID < n.height {
+ 		return errors.New("stale block id: the payment names an already-committed block")
++	}
++	if p.BlockID > n.height+maxBlockIDLookahead {
++		return errors.New("block id too far ahead")
+ 	}
+ 	if !ledger.WithinMessageBound(n.parameters.MaxMessageBytes, p) {
+ 		return errors.New("payment too large: its serialized form exceeds the governed message bound")
+--- a/node/overdraw_guard_test.go
++++ b/node/overdraw_guard_test.go
+@@ -32,7 +32,7 @@
+ 	pay := func(signer *signing.Signer, amount, comment string) ledger.Payment {
+ 		p, _ := ledger.SignPayment(signer, ledger.Payment{
+ 			PublicKeyFrom: signer.PublicKeyBase64(), PublicKeyTo: stranger.PublicKeyBase64(),
+-			Amount: rat(amount), Comment: comment, BlockID: 100000,
++			Amount: rat(amount), Comment: comment, BlockID: 50,
+ 		})
+ 		return p
+ 	}
+@@ -83,7 +83,7 @@
+ 
+ 	toName := func(name string) ledger.Payment {
+ 		p, _ := ledger.SignPayment(founder, ledger.Payment{
+-			PublicKeyFrom: founder.PublicKeyBase64(), ToName: name, Amount: rat("1"), BlockID: 100000,
++			PublicKeyFrom: founder.PublicKeyBase64(), ToName: name, Amount: rat("1"), BlockID: 50,
+ 		})
+ 		return p
+ 	}
+--- a/ledger/block.go
++++ b/ledger/block.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/hex"
+ 	"encoding/json"
++	"math/big"
+ 
+ 	"github.com/eval-apply-labs/go-ledger/consensus"
+ 	"github.com/eval-apply-labs/go-ledger/signing"
+@@ -20,6 +21,50 @@
+ 	}
+ 	serialized, err := json.Marshal(message)
+ 	return err == nil && len(serialized) <= maxBytes
++}
++
++// MaxBlockContentBytes bounds the summed serialized size of a block's payments and updates, well
++// under the 1 MiB proposal body every receiver decodes under (node/httptransport.go decode), leaving
++// room for the envelope, evidence and one governance action (< 100 KB even at 100 validators).
++const MaxBlockContentBytes = 768 << 10
++
++func serializedSize(message any) int {
++	b, err := json.Marshal(message)
++	if err != nil {
++		return MaxBlockContentBytes + 1
++	}
++	return len(b)
++}
++
++// clearable reports whether a payment would actually move value if applied alone against the
++// pre-block state: amount in money units, at least the cost, and at most the payer's pre-block
++// balance (so the payer exists). Anything else is a fee-free no-op (C16) or a lone overdraw (C06) and
++// is never carried. With every carried payment individually within the balance, the overdraw ban can
++// fire only for two or more distinct same-block payments: two conflicting signings.
++func clearable(balances map[string]*big.Rat, cost *big.Rat, p Payment) bool {
++	if p.Amount == nil || !InUnits(p.Amount) {
++		return false
++	}
++	if cost != nil && cost.Sign() > 0 && p.Amount.Cmp(cost) < 0 {
++		return false
++	}
++	if cost == nil || cost.Sign() <= 0 {
++		if p.Amount.Sign() <= 0 {
++			return false
++		}
++	}
++	balance, ok := balances[p.PublicKeyFrom]
++	return ok && p.Amount.Cmp(balance) <= 0
++}
++
++func balancesOf(accounts []Account) map[string]*big.Rat {
++	out := make(map[string]*big.Rat, len(accounts))
++	for _, a := range accounts {
++		if a.Amount != nil {
++			out[a.PublicKey] = a.Amount
++		}
++	}
++	return out
+ }
+ 
+ // digestHex is the hex form a payment's PrevStateDigest is compared against.
+@@ -102,11 +147,17 @@
+ 	// Binding a payment to an exact block (its BlockID) is the replay guard: a payment applies at
+ 	// most once, and a resubmitted (past-block) payment is stale here; a future-block payment waits.
+ 	registry := nameRegistry(previousState.Accounts)
++	balances := balancesOf(previousState.Accounts)
++	budget := MaxBlockContentBytes
++	seenContent := map[string]bool{}
+ 	var paymentsForThisBlock []Payment
+ 	for _, payment := range ValidPayments(scheme, networkID, content.Payments) {
+ 		if payment.BlockID != height {
+ 			continue
+ 		}
++		if !clearable(balances, transactionCost, payment) || seenContent[PaymentID(payment)] {
++			continue // a no-op (below cost, no payer, duplicate) or a lone overdraw: never carried
++		}
+ 		if payment.PrevStateDigest != "" && payment.PrevStateDigest != accountDigestHex {
+ 			continue // fork-binding tier: the payment is pinned to a different history
+ 		}
+@@ -116,13 +167,22 @@
+ 		if _, resolves := resolveRecipient(registry, payment); !resolves {
+ 			continue // unresolvable recipient — would be a zero-fee no-op; never carried into a block
+ 		}
+-		paymentsForThisBlock = append(paymentsForThisBlock, payment)
++		if size := serializedSize(payment); size <= budget {
++			budget -= size
++			seenContent[PaymentID(payment)] = true
++			paymentsForThisBlock = append(paymentsForThisBlock, payment)
++		}
+ 	}
+ 	var verifiedUpdates []AccountUpdate
+ 	for _, update := range content.Updates {
+ 		if update.BlockID == height && VerifyAccountUpdate(scheme, networkID, update) &&
+-			WithinMessageBound(previousState.Parameters.MaxMessageBytes, update) {
+-			verifiedUpdates = append(verifiedUpdates, update)
++			WithinMessageBound(previousState.Parameters.MaxMessageBytes, update) &&
++			balances[update.From] != nil && !seenContent[UpdateID(update)] {
++			if size := serializedSize(update); size <= budget {
++				budget -= size
++				seenContent[UpdateID(update)] = true
++				verifiedUpdates = append(verifiedUpdates, update)
++			}
+ 		}
+ 	}
+ 	var verifiedEvidence []consensus.Evidence
+@@ -182,7 +242,15 @@
+ 	}
+ 	accountDigestHex := digestHex(StateDigest(previousState.Accounts))
+ 	registry := nameRegistry(previousState.Accounts)
++	balances := balancesOf(previousState.Accounts)
++	used := 0
++	seenContent := map[string]bool{}
+ 	for _, payment := range block.Payments {
++		if !clearable(balances, previousState.Parameters.TransactionCost, payment) || seenContent[PaymentID(payment)] {
++			return LedgerState{}, false // a no-op or a lone overdraw a proposer carried
++		}
++		seenContent[PaymentID(payment)] = true
++		used += serializedSize(payment)
+ 		if payment.BlockID != block.Height {
+ 			return LedgerState{}, false // every payment must name exactly this block (replay guard)
+ 		}
+@@ -198,9 +266,15 @@
+ 	}
+ 	for _, update := range block.Updates {
+ 		if update.BlockID != block.Height || !VerifyAccountUpdate(scheme, networkID, update) ||
+-			!WithinMessageBound(previousState.Parameters.MaxMessageBytes, update) {
+-			return LedgerState{}, false // an unsigned, misplaced or oversized account update
+-		}
++			!WithinMessageBound(previousState.Parameters.MaxMessageBytes, update) ||
++			balances[update.From] == nil || seenContent[UpdateID(update)] {
++			return LedgerState{}, false // an unsigned, misplaced, oversized, duplicate or no-account update
++		}
++		seenContent[UpdateID(update)] = true
++		used += serializedSize(update)
++	}
++	if used > MaxBlockContentBytes {
++		return LedgerState{}, false // over the per-block content budget (C15)
+ 	}
+ 	for _, equivocation := range block.Evidence {
+ 		if !equivocation.Valid(scheme, networkID) || !evidenceInWindow(equivocation, block.Height) {
+--- a/ledger/parameters.go
++++ b/ledger/parameters.go
+@@ -6,6 +6,16 @@
+ 	"math/big"
+ 	"strconv"
+ )
++
++// amountScale fixes the smallest money unit at 10^-8: every amount (payment, cost, genesis balance,
++// reassignment) must be an integer multiple of it, so every balance's denominator divides 10^8 and
++// its encoding is bounded by the supply's digits (C08). A constant, not a governed parameter.
++var amountScale = new(big.Int).Exp(big.NewInt(10), big.NewInt(8), nil)
++
++// InUnits reports whether r is a non-nil integer multiple of the smallest money unit.
++func InUnits(r *big.Rat) bool {
++	return r != nil && new(big.Int).Rem(amountScale, r.Denom()).Sign() == 0
++}
+ 
+ // AssumedGossipHopMs is a conservative per-hop budget: how long one relay hop of gossip is assumed to
+ // take. It is used only to check that a governed step timeout is long enough for a proposal/vote to
+@@ -87,7 +97,7 @@
+ // Acceptable reports whether the parameters are a well-formed operating profile for a network of
+ // `participants` nodes: a non-negative transaction cost and a timing-consistent window/fan-out.
+ func (parameters LedgerParameters) Acceptable(participants int) bool {
+-	if parameters.TransactionCost == nil || parameters.TransactionCost.Sign() < 0 {
++	if parameters.TransactionCost == nil || parameters.TransactionCost.Sign() < 0 || !InUnits(parameters.TransactionCost) {
+ 		return false
+ 	}
+ 	if parameters.MaxMessageBytes != 0 && parameters.MaxMessageBytes < MinMessageBytes {
+--- a/ledger/reassignment.go
++++ b/ledger/reassignment.go
+@@ -84,7 +84,7 @@
+ 	if reassignment.Sequence != currentSequence {
+ 		return false // single-use: bound to a governance sequence, and applying bumps it
+ 	}
+-	if reassignment.NewAmount.Sign() < 0 {
++	if reassignment.NewAmount.Sign() < 0 || !InUnits(reassignment.NewAmount) {
+ 		return false // the non-negative guard (an account cannot be driven below zero)
+ 	}
+ 	if AccountAmount(currentAccounts, reassignment.Account).Cmp(reassignment.PreviousAmount) != 0 {

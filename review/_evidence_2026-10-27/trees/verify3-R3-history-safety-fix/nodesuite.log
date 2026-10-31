@@ -1,0 +1,87 @@
+=== RUN   TestNodeRegistersNameViaUpdate
+--- PASS: TestNodeRegistersNameViaUpdate (0.22s)
+=== RUN   TestDeriveValidatorsByStake
+--- PASS: TestDeriveValidatorsByStake (0.00s)
+=== RUN   TestDynamicValidatorAdmission
+--- PASS: TestDynamicValidatorAdmission (0.00s)
+=== RUN   TestIntakeRefusesOversizedPayment
+--- PASS: TestIntakeRefusesOversizedPayment (0.00s)
+=== RUN   TestBackupMirrorsSnapshot
+--- PASS: TestBackupMirrorsSnapshot (0.01s)
+=== RUN   TestMempoolBounds
+--- PASS: TestMempoolBounds (0.00s)
+=== RUN   TestStragglerCatchUp
+--- PASS: TestStragglerCatchUp (0.00s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793091565861354028 (set GOLEDGER_CHAOS_SEED=1793091565861354028 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.07s)
+=== RUN   TestChaosLostProposalRecoversViaReGossip
+    chaos_test.go:403: chaos seed 1793091569928336334 (set GOLEDGER_CHAOS_SEED=1793091569928336334 to replay this fault schedule)
+--- PASS: TestChaosLostProposalRecoversViaReGossip (2.81s)
+=== RUN   TestChaosMinorityPartitionCannotProgressOrFork
+    chaos_test.go:468: chaos seed 1793091572740063570 (set GOLEDGER_CHAOS_SEED=1793091572740063570 to replay this fault schedule)
+--- PASS: TestChaosMinorityPartitionCannotProgressOrFork (2.04s)
+=== RUN   TestChaos2x2PartitionFreezesThenRecovers
+    chaos_test.go:518: chaos seed 1793091574783474974 (set GOLEDGER_CHAOS_SEED=1793091574783474974 to replay this fault schedule)
+--- PASS: TestChaos2x2PartitionFreezesThenRecovers (2.52s)
+=== RUN   TestChaosGossipIsolatedNodeTracksViaCheckpoints
+    chaos_test.go:553: chaos seed 1793091577301817578 (set GOLEDGER_CHAOS_SEED=1793091577301817578 to replay this fault schedule)
+--- PASS: TestChaosGossipIsolatedNodeTracksViaCheckpoints (6.01s)
+=== RUN   TestChaosEquivocatorIsSlashedWithoutFork
+    chaos_test.go:604: chaos seed 1793091583311815102 (set GOLEDGER_CHAOS_SEED=1793091583311815102 to replay this fault schedule)
+--- PASS: TestChaosEquivocatorIsSlashedWithoutFork (0.50s)
+=== RUN   TestChaosGovernanceCycleReplayStaysInert
+    chaos_test.go:677: chaos seed 1793091583811227348 (set GOLEDGER_CHAOS_SEED=1793091583811227348 to replay this fault schedule)
+--- PASS: TestChaosGovernanceCycleReplayStaysInert (1.84s)
+=== RUN   TestChaosDynamicAdmissionConverges
+    chaos_test.go:750: chaos seed 1793091585651455841 (set GOLEDGER_CHAOS_SEED=1793091585651455841 to replay this fault schedule)
+--- PASS: TestChaosDynamicAdmissionConverges (1.39s)
+=== RUN   TestChaosSoak
+    chaos_test.go:796: chaos seed 1793091587045044001 (set GOLEDGER_CHAOS_SEED=1793091587045044001 to replay this fault schedule)
+--- PASS: TestChaosSoak (2.01s)
+=== RUN   TestNodeEnactsParameterChangeByVote
+--- PASS: TestNodeEnactsParameterChangeByVote (0.03s)
+=== RUN   TestNodesReachConsensusOverHTTP
+--- PASS: TestNodesReachConsensusOverHTTP (0.08s)
+=== RUN   TestResolveEndpointServesNameAndAddress
+--- PASS: TestResolveEndpointServesNameAndAddress (0.00s)
+=== RUN   TestResolveToleratesRawPlusInKey
+--- PASS: TestResolveToleratesRawPlusInKey (0.00s)
+=== RUN   TestZeroBlockIntervalDoesNotRecurse
+--- PASS: TestZeroBlockIntervalDoesNotRecurse (0.04s)
+=== RUN   TestMempoolDedupsMalleatedDuplicate
+--- PASS: TestMempoolDedupsMalleatedDuplicate (0.00s)
+=== RUN   TestNodesReachConsensusAndApplyPayment
+--- PASS: TestNodesReachConsensusAndApplyPayment (0.01s)
+=== RUN   TestIntakeRefusesOverdraw
+--- PASS: TestIntakeRefusesOverdraw (0.00s)
+=== RUN   TestIntakeRefusesUnresolvableRecipient
+--- PASS: TestIntakeRefusesUnresolvableRecipient (0.00s)
+=== RUN   TestMempoolDropsOverdrawnOnBalanceDrop
+--- PASS: TestMempoolDropsOverdrawnOnBalanceDrop (0.00s)
+=== RUN   TestResolvePeersFromOnChainAddresses
+--- PASS: TestResolvePeersFromOnChainAddresses (0.00s)
+=== RUN   TestNodePersistsAndReloads
+--- PASS: TestNodePersistsAndReloads (0.09s)
+=== RUN   TestOnProposalRelaysFirstSightOnlyNeverDuplicates
+--- PASS: TestOnProposalRelaysFirstSightOnlyNeverDuplicates (0.00s)
+=== RUN   TestNodeEnactsReassignmentByVote
+--- PASS: TestNodeEnactsReassignmentByVote (0.03s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (16.61s)
+=== RUN   TestNodeSyncsFromCheckpoint
+--- PASS: TestNodeSyncsFromCheckpoint (0.04s)
+=== RUN   TestNodeRejectsUnverifiableCheckpoint
+--- PASS: TestNodeRejectsUnverifiableCheckpoint (0.32s)
+=== RUN   TestFullMeshNeighbors
+--- PASS: TestFullMeshNeighbors (0.00s)
+=== RUN   TestGroupParametersScalesDimension
+--- PASS: TestGroupParametersScalesDimension (0.00s)
+=== RUN   TestHypercubeConnectedAndReducesFanout
+--- PASS: TestHypercubeConnectedAndReducesFanout (0.00s)
+=== RUN   TestConsensusOverHypercubeTopology
+--- PASS: TestConsensusOverHypercubeTopology (0.03s)
+=== RUN   TestDeriveValidatorsSaturatesHugeStake
+--- PASS: TestDeriveValidatorsSaturatesHugeStake (0.00s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/node	40.745s

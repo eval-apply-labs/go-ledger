@@ -1,138 +1,199 @@
 # Consensus
 
-`go_ledger` finalises blocks with a Tendermint-style Byzantine-fault-tolerant protocol. This
-document explains the rule and why it is safe.
+Area: **node**. Code: `consensus/` (the validator set, votes, commits, proposals, evidence, the vote
+set and the round driver), and the node's use of them in `node/node.go`, `node/proofs.go` and
+`node/sync.go`. This doc explains the commit rule, why it is safe, and what a double-sign does.
 
 ## The problem it avoids
 
-A naive rule finalises a block when signatures representing **more than ½ of all stake** agree, from
-a single snapshot of one node's local gossip view — no two-phase commit, no quorum-intersection
-guarantee, no durable equivocation accountability. The audit showed the consequences of that
-approach:
-
-- **A sub-½ Byzantine coalition can fork the chain under a partition.** If the network splits and a
-  validator with, say, 40% stake sends result X to one side and Y to the other, each side sees its
-  local honest stake + 40% clear ½, and the two sides finalise conflicting blocks. Detection came
-  only *after* both sides collected both messages — too late; the fork was already final.
-- **The value voted on was not the value applied.** The tally ran over a string derived from one
-  transport message while the state was rebuilt from another, so two nodes could "agree" and still
-  compute different ledgers.
+The audit found that finalising once more than ½ of all stake agrees, in one node's local view, lets
+a coalition under ½ fork the chain under a partition: a validator with 40% sends X to one side and Y
+to the other, and each side clears ½. And the value voted on was not the value applied.
 
 ## The rule
 
-Finalisation requires a **strict > ⅔ stake quorum** of *precommit* votes for one block digest:
+Finalisation needs precommits for one block hash from validators holding a strict > ⅔ of the power:
 
 ```
 Quorum = floor(2 · totalPower / 3) + 1
 ```
 
-Two properties follow, and they are the whole point:
+1. **Quorum intersection: no fork while at most ⅓ of the power is Byzantine.** Two sets that each
+   hold more than ⅔ overlap in more than ⅓, so the overlap holds an honest validator, and in one
+   round an honest validator never precommits two blocks
+   (`TestConflictingCommitsRequireEquivocation`). Across rounds the lock carries it: once a block
+   has > ⅔ precommits in a round, the honest validators among them, more than ⅓ of the power, are
+   locked on it, so no other block gets > ⅔ prevotes, or an honest precommit, in a later round.
+2. **The block hash covers the applied state.** A commit is over the block hash, which covers the
+   height, the previous block hash, the signing set's hash, the content, the proposer's nonce and the
+   digest of the resulting state (see [architecture.md](architecture.md#the-block-and-its-hashes)).
+   Every node re-runs the block with `ApplyBlock` and takes it only if it gets that digest.
 
-1. **Quorum intersection ⇒ no forks under ≤ ⅓ Byzantine.** Any two sets that each hold more than
-   ⅔ of the power must overlap in more than ⅓ of it. If at most ⅓ of power is Byzantine, that
-   overlap contains at least one honest validator — who will not precommit two conflicting digests.
-   So two conflicting blocks can never both reach quorum. The single-½ rule has no such guarantee:
-   two disjoint halves can each clear ½.
+Voting power saturates at 2^40 per validator (`consensus.MaxValidatorPower`).
 
-   This is asserted directly in code: `TestConflictingCommitsRequireEquivocation` builds two
-   commits for different digests and shows they must share a validator — i.e. a double-signer.
+## What is signed
 
-2. **The digest *is* the applied state.** A `Commit` binds `ledger.StateDigest` (SHA-256 of the
-   sorted, length-prefixed accounts). Every node recomputes that digest with `ApplyBlock` and
-   accepts a block only if it matches, so "what was agreed" and "what was applied" cannot diverge.
+- A **vote** (`consensus.Vote`): height, round, type (prevote or precommit), block hash, and the
+  validator's **name**. A vote carries no key: it verifies under the key the validator set holds for
+  that name, the name's current key in the state. A nil vote has an all-zero block hash.
+- A **signed proposal** (`consensus.SignedProposal`): height, round, valid round, block hash and the
+  proposer's name. Since the block hash covers the whole block, the proposer signs the block (E15).
+  The node sends it with its block as a `node.ProposalMessage`.
+- A **commit** (`consensus.Commit`): the precommits of one height and round for one block hash,
+  from distinct names of the set, whose power reaches the quorum (`Commit.Verify`).
 
 ## The round driver
 
-A single ⅔ snapshot is safe but not live: after a failed round nodes need to try again without
-ever contradicting an earlier commit. The `Driver` is the state machine that provides this, over
-two phases with a **lock**:
+`consensus.Driver` is a Tendermint-style state machine for one height, with two phases and a lock:
 
-- **Propose.** The round's proposer (stake-weighted over the validator set — see
-  `ValidatorSet.ProposerAt`) broadcasts a block — its locked value if it holds one, otherwise a fresh
-  block from its mempool. The proposal is signed by the proposer, and peers accept it only from the
-  round's scheduled proposer, so it cannot be front-run.
-- **Prevote.** A validator prevotes the proposed value only if the value is valid **and** it holds
-  no lock, is locked on that value, or there is a proof-of-lock from a round ≥ its own locked round.
-  Otherwise it prevotes nil. On seeing ⅔ prevotes for a value it **locks** it and precommits it.
-- **Precommit.** On ⅔ precommits for a real digest it **decides**. On ⅔ prevotes/precommits for nil,
-  or on a timeout, it moves on.
-- **Timeouts** (`propose → prevote-nil`, `prevote → precommit-nil`, `precommit → next round`) grow
-  with the round number, so under an unreliable network the rounds eventually stretch past message
-  latency and progress resumes (eventual synchrony). They are delivered to the driver as `Timeout`
-  events, never read from a real clock — which is what makes the driver deterministic and testable.
+- **Propose.** The round's proposer (`ValidatorSet.ProposerAt`, weighted by power) proposes its
+  valid value, the block it last saw more than ⅔ prevote for, if it has one; otherwise its
+  candidate. A validator can hold a valid value without a lock.
+- **Prevote.** A validator prevotes the proposal only if it is valid and the validator holds no
+  lock, is locked on that block, or sees a proof-of-lock from a round at or above its own locked
+  round. Otherwise it prevotes nil. On > ⅔ prevotes for the round's proposal it locks it and
+  precommits it.
+- **Precommit.** On > ⅔ precommits in any round for that round's proposal, it decides. It holds
+  only the first proposal of each round, so a node that took an equivocating proposer's other block
+  cannot decide that round, even once the decided block reaches it; it recovers by checkpoint
+  catch-up. On > ⅔ prevotes for nil it precommits nil. When a step times out without a decision, it
+  moves on, and in the end to the next round.
+- **Timeouts** grow with the round: `stepTimeoutMs` × (round + 1). They reach the driver as
+  `Timeout` events, never from a clock, so the driver is deterministic and tested directly. The
+  propose timeout starts with each round, but the prevote and precommit timeouts start only once
+  that step's votes from more than ⅔ of the power are in, whatever they are for. So a partition
+  that leaves no side above ⅔ stalls in its round instead of running through rounds.
 
-The lock is what preserves safety *across* rounds: a node that locked X will not prevote a
-conflicting Y without a proof-of-lock, so it can never precommit two conflicting values. This is
-tested directly (`TestDriverLockingPreventsConflictingPrevote`).
+The lock keeps a validator from prevoting another block in a later round, unless it holds > ⅔
+prevotes for that block from a round at or above its locked round
+(`TestDriverLockingPreventsConflictingPrevote`; the release is `TestDriverPOLUnlockReleasesLock`).
+An honest validator can precommit two blocks at one height, in two rounds: that is no double-sign.
+On > ⅓ of the power from a later round, the driver skips to that round, which helps liveness and
+does not touch the commit rule. The lock must survive a restart too; the sign log does that (see
+[signature.md](signature.md#the-sign-log)).
 
-## Equivocation
+## Intake of proposals and votes
 
-A validator that signs two different votes for the same (height, round, type) is recorded as
-`Evidence` — a pair of conflicting signed votes. Because each vote is self-authenticating, this
-evidence is **transferable and durable**, and it is acted on at two levels:
+A node checks a proposal (`Node.onProposal`) in this order, cheap steps first:
 
-- **In-round:** inside a vote set the equivocator's power is removed from the tally entirely, so a
-  double-signer cannot help form a quorum.
-- **Durably (slashing):** a node carries the proof into a block (`Block.Evidence`); `ApplyBlock`
-  re-verifies it (`Evidence.Valid` — two validly-signed conflicting votes by the same validator,
-  which only that validator could produce, so it is unforgeable and can't frame the honest) and
-  **removes the offender's account**, confiscating their stake and ejecting them from a dynamic set.
-  It zeroes out the double-signer with portable, transferable proof rather than a view-local check —
-  any node applies the same slash deterministically.
+1. it is for the height in progress, and the node has a set for it;
+2. no proposal is held for its round yet (a second one from the proposer is a double-sign, below);
+3. its round is at most one past the driver's, and fewer than two authentic proposals of that
+   round failed to apply;
+4. it names the round's scheduled proposer;
+5. its signature verifies under the set's key for that name;
+6. its block hashes to the signed block hash, at the right height;
+7. `ApplyBlock` accepts the block.
 
-## What is deferred (and why it's safe to defer)
+A copy that fails step 5 or 6 is not authentic: it is dropped, and a genuine copy that comes later
+is still taken.
 
-- ~~The "f+1 messages from a higher round → skip to it" catch-up for stragglers.~~ **Implemented**
-  (`Driver.step1`): on seeing > ⅓ of power from a round ahead, the driver skips forward to it. A
-  liveness aid — it does not affect safety, since the commit rule is unchanged.
-- ~~Straggler catch-up and dynamic membership.~~ **Implemented.** A running node that missed a
-  commit window periodically polls its bootstrap peers' checkpoints and fast-forwards (`catchUpLoop`
-  → `catchUp`) instead of staying stuck. Dynamic membership is the `validatorThreshold` stake-derived
-  set, with the skipping-trust onboarding above.
-- ~~Stake-weighted proposer order.~~ **Implemented.** Proposer selection is stake-weighted
-  (`ValidatorSet.ProposerAt`), so a validator proposes proportionally to its power — a fairness/liveness
-  property, not a safety one.
+A node drops a vote that is byte for byte a vote it holds, before any check: signing is
+deterministic, so every relayed copy of an honest vote is the same bytes. It keeps a new vote only
+if the height in progress counts it: the validator is in the set, the type is known, the round is
+not too far ahead, and it verifies. It keeps at most two votes per validator, round and type. While
+a driver runs, the node re-sends the height's votes and the current round's proposal every
+`stepTimeoutMs` in force (a ⅔ change reaches it within a second), so a merged partition
+re-exchanges what each side held.
 
-None of these changes the commit rule, so none can introduce a fork.
+## Signing only while seated
 
-## Onboarding / rejoin (implemented)
+A node signs votes and proposals only at heights where its name is seated with exactly its
+configured key (`Node.seatedSigner`). Otherwise its driver has no signer: it follows the rounds and
+decides, but signs no vote or proposal. If its name is seated under another key, as after a ⅔
+re-key, the node logs that once, when it next starts a height. An observer, a node whose name is
+not seated, signs no vote or proposal. Every node still signs a receipt, with its configured key,
+for each payment a wallet posts to it (`/hdls/pay`) that it newly pools.
 
-A node configured with `bootstrap` peer URLs syncs on start instead of replaying history:
+## Equivocation freezes the name
 
-1. It fetches each bootstrap peer's `GET /hdls/checkpoint` — that peer's current accounts plus the
-   `Commit` certificate that finalised them.
-2. It **verifies the certificate** against its validator set (a > ⅔ quorum of precommits for the
-   digest) and checks that the certificate binds the digest of the supplied accounts. An
-   unverifiable or mismatched checkpoint is rejected.
-3. It adopts the highest verified checkpoint and resumes consensus at that height.
+A double-sign is two votes of one name for the same height, round and type with different block
+hashes, or two signed proposals of one name for the same height and round with different block
+hashes. Two blocks that differ only in their nonce are two blocks. A different valid round alone is
+none.
 
-So a joiner trusts the quorum's signatures, not the peer that served the snapshot — safe even from
-an untrusted bootstrap peer, because the snapshot is trusted for its quorum certificate, not for who
-served it. This is what lets a rebooted node rejoin at the current height.
+- **In the round.** Once a vote set holds both votes, the double-signer's power leaves the tally.
+  Until then its first vote counts, so a commit may include it. A node that decides before it has
+  precommitted precommits the decided block first, so its commit carries its own vote.
+- **As evidence.** A node keeps a double-sign as a pending proof (`node.pendingProof`), by name,
+  with the key it convicts. It finds them in three places: the vote sets of a height it leaves
+  (`Node.retireDriver`); a late precommit that conflicts with the last commit
+  (`Node.recordLateDoubleSign`); and a second authentic proposal for a held round
+  (`Node.reportEquivocation`). A proof reaches the snapshot file at the node's next commit or
+  catch-up, and from then on a restart does not lose it. Until then it lives only in memory, as
+  does a double-sign in the vote sets of the height in progress. A proof is dropped only when its
+  name is frozen or no longer has the convicted key.
+- **In a block.** The node offers its pending proofs to `ProposeBlock` at every height.
+  `ApplyBlock` takes `VoteEvidence` and `ProposalEvidence` when both signatures verify under the
+  name's current key in the pre-block state, the name exists and is not frozen, and the double-sign
+  is below the block's height. There is no other age limit. A block carries one item per name, and
+  an honest proposer at most 8.
+- **The effect.** The block freezes the name. It leaves the validator set, with the power delegated
+  to it, and keeps its balance: there is no slash. The ⅔ decide about the money. Only the ⅔ name
+  action unfreezes the name, with a new key, and after that the old evidence no longer verifies.
+- **The one-third cap.** A block carries evidence only while the frozen names would hold under a
+  third of the power. With N the names frozen before the block plus those it freezes, and each
+  name's power counted as if no account were frozen: 3 × power(N) < power(seated names and N).
+  Evidence over the cap waits. Freezes by a holder or by the ⅔ have no cap.
 
-### Dynamic validators — the "skipping" trust rule
+Known behaviour:
 
-With **dynamic validators** (`validatorThreshold`) the set that signed a checkpoint's commit may
-differ from what its accounts yield now, so the checkpoint carries that **signing set** and the
-joiner adopts it under the standard BFT *skipping* rule (`Node.verifyCheckpoint`):
+- Evidence the cap holds back stays pending in the snapshot of each node that holds it, until a
+  block can carry it, the name is frozen, or the name's key changes: by the ⅔ name action, or by a
+  key change the name files once it is no longer seated. No node sends a proof on its own, outside
+  a block: only the nodes that saw both signatures hold it.
+- A late double-sign wakes an idle chain. But a proof the cap holds back does not keep the chain
+  moving, and a proof kept while the chain idles lives only in memory until the next commit writes
+  the snapshot. If every node restarts before other work arrives, that proof is lost. It needs
+  frozen names already near a third of the power, the case that calls for a new genesis.
 
-1. the `Commit` is a valid > ⅔ quorum of the carried signing set, and binds the accounts' digest;
-2. **and** more than ⅓ of the power of a set the joiner already trusts (its *anchor* — genesis, or
-   its last committed state) is among the commit's signers.
+The freeze handles double-signing by under a third of the power. Its limits are in
+[security.md](security.md#the-freeze-and-its-limits).
 
-Condition (2) means at least one validator the joiner trusts co-signed the commit, so a growing set
-is adopted safely without trusting the serving peer — an honest anchored validator only signs valid
-commits, and a fabricated all-stranger set has no anchor overlap and is rejected. The static path is
-a trivial special case (anchor = signing set, so (2) always holds). The one bound: *full* validator
-rotation past the anchor (no overlap left) would need a chain of intermediate checkpoints to walk;
-for the incremental growth this system actually sees, the anchor overlaps the signing set.
+## Catching up
+
+- **The last commit.** As a node commits, it sends the commit's precommits and the decided proposal
+  to its peers, and again on every re-gossip while it runs a driver. An idle node re-gossips
+  nothing, so a node one precommit short of a height the others committed gets the last commit once,
+  at commit time, and otherwise by checkpoint catch-up.
+- **Checkpoint catch-up.** Every 3 s, or every 5 block intervals if that is longer, a
+  running node asks its peers' `/hdls/status` and fetches a checkpoint only from a peer that is
+  ahead (`Node.catchUpLoop`, `Node.bestCheckpoint`). Bootstrap peers come first; gossip peers are
+  asked only when no bootstrap peer gives a checkpoint that verifies.
+
+## Onboarding and the checkpoint
+
+A `node.Checkpoint` is what a joining or restarting node adopts: `State` (the committed state),
+`LastBlock` (the header of the block that produced it: height, previous block hash, validators hash,
+nonce, content hash), `Commit`, and `Validators` (the set that signed the commit: name, key, power).
+The set is not signed, but the block hash covers its hash. A node checks a peer's checkpoint
+(`Node.verifyCheckpoint`) in this order, each step only if the one before passed:
+
+1. **Shape:** state, header and commit are of one height; the state's names are strictly ascending;
+   the set is sorted by name, distinct, each with power.
+2. **Hashes:** the set hashes to the header's validators hash, and the block hash recomputed from
+   the header and the state's digest is the commit's block hash.
+3. **Anchor:** names of the node's anchor holding more than ⅓ of its power signed the commit, each
+   under the key the anchor holds for it. One check per anchor name, so padding costs nothing.
+4. **Commit:** the commit is a valid > ⅔ quorum of the carried set.
+
+The anchor is the set (name, key, power) of the node's last committed state. So a checkpoint that
+gives real bank names keys an attacker holds fails, and a set padded with made-up validators fails
+step 2 before any signature is checked. A node trusts its own snapshot when it passes steps 1, 2 and
+4, and refuses to start, rather than fall back to genesis, if it does not.
+
+A joiner with no snapshot anchors on the genesis set. On a network whose banks have re-keyed or
+left, or in dynamic mode, start a joiner from a snapshot of a node you trust (see
+[operating-a-network.md](operating-a-network.md#rejoining-after-a-restart)). The same holds for a
+node so far behind that the names of its anchor that still sign, each under the key the anchor
+holds for it, hold a third or less of the anchor's power: step 3 then fails.
 
 ## Mapping to the audit
 
 | Audit finding | Fix here |
 |---|---|
-| A1 — sub-½ fork under partition | > ⅔ quorum with intersection |
-| A2 — vote ≠ applied state | commit binds `StateDigest`; `ApplyBlock` re-checks |
-| A4 — no BFT margin, hard liveness cliff | ⅔ quorum + round timeouts + locking |
-| C5 — MD5 content hash | SHA-256 `StateDigest` |
-| (equivocation) — view-local, non-durable | transferable `Evidence` |
+| A1, sub-½ fork under partition | > ⅔ quorum with intersection |
+| A2, vote ≠ applied state | the commit signs the block hash, which covers the resulting state; `ApplyBlock` re-checks it |
+| A4, no BFT margin | ⅔ quorum, round timeouts and locking |
+| C5, MD5 content hash | SHA-256 everywhere |
+| equivocation, view-local and non-durable | transferable evidence that freezes the name |

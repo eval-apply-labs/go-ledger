@@ -1,0 +1,257 @@
+{
+ "run": "node1 and ui",
+ "notes": {
+  "node1": "C8, C9, C10, C13 with C74, C67 with C12 (status), C14, C16, C17, C19 to C23, C31",
+  "ui": "C7, C11, C12 (governance), C15, C30, C65, C66, C69"
+ },
+ "results": [
+  {
+   "slice": "node1",
+   "report": {
+    "branchHead": "40e98f0cf8e74cc110b0474336ee6cea25cbf971",
+    "commits": [
+     {
+      "hash": "16cae6f",
+      "subject": "phase 2 C14: delete Message.From, which nothing read"
+     },
+     {
+      "hash": "f86f2cb",
+      "subject": "phase 2 C17: the certificate pools and their inputs say \"certificate\", not \"proposal\" or \"vote\""
+     },
+     {
+      "hash": "6dfb1a4",
+      "subject": "phase 2 C8: the certificate routes answer 409 with the reason when the node refuses a certificate"
+     },
+     {
+      "hash": "1fd619f",
+      "subject": "phase 2 C9: Open refuses a snapshot path whose folder does not exist, and names the folder"
+     },
+     {
+      "hash": "671b3b7",
+      "subject": "phase 2 C10: catch-up and adopt empty the sign log of a height they leave"
+     },
+     {
+      "hash": "99f98e4",
+      "subject": "phase 2 C13 and C74: /hdls/status reads the committed view, and names its height heightInProgress"
+     },
+     {
+      "hash": "dc23c16",
+      "subject": "phase 2 C67 and C12 (status): one wallet status() reads /hdls/status, bounded and status-checked"
+     },
+     {
+      "hash": "52de209",
+      "subject": "phase 2 C16: the wallet reads the node's request window and checkpoint bound from package node"
+     },
+     {
+      "hash": "c38a8ef",
+      "subject": "phase 2 C21: the re-gossip interval, the wait without a sign log and the catch-up interval follow a vote"
+     },
+     {
+      "hash": "1749ba2",
+      "subject": "phase 2 C31: Server's comment points to the routes Handler registers"
+     },
+     {
+      "hash": "16a86c6",
+      "subject": "phase 2 C22: relay's comment states what relaying costs on all-to-all peers"
+     },
+     {
+      "hash": "459306c",
+      "subject": "phase 2 C23: the re-gossip comments state what a tick costs since ML-DSA-65"
+     },
+     {
+      "hash": "43cccf8",
+      "subject": "phase 2 C20: commit's comment says the sign log on disk keeps no block; memory keeps the last proposal"
+     },
+     {
+      "hash": "40e98f0",
+      "subject": "phase 2 C19: the doc comments of package node, Node and startHeight describe today's node"
+     }
+    ],
+    "summary": "Run 'node1' fixed all of its code notes on branch p2-node1 (worktree <scratch>/wt/p2-node1). There are 14 commits on top of 3c0f97c, one per note, and every commit builds. Nothing in review/ was touched.\n\n- **C14:** `Message.From` and its 15 settings are deleted.\n- **C17:** the certificate names no longer say \"proposal\" or \"vote\":\n  - `proposalKey` became `parameterChangeKey`.\n  - `parameterProposals` became `parameterCertificatePool`, and `reassignmentProposals` became `reassignmentCertificatePool`.\n  - `pruneParameterProposals` became `pruneParameterCertificates`.\n  - The Submit, Message and event names say Certificate.\n  - The JSON keys, routes, route handlers and exported view types are unchanged.\n- **C8:** the two certificate routes now answer 202 once the certificate is pooled (now or before), or 409 with the reason. They go through an admission channel, like the update route: `AdmitParameterCertificate` and `AdmitReassignmentCertificate` replace the Submit inputs. `addParameterVotes` and `addReassignmentVotes` return (pooled, error), and `reassignmentFits` returns the rule that FitsState names, or R9's. The wallet needs no change: on a 409, `postJSON` already makes the admin page show the error, and \"certificate submitted\" now only follows a pooled certificate.\n- **C9:** `loadSnapshot`, called from Open, refuses a SnapshotPath whose folder does not exist, with an error that names the folder.\n- **C10:** a new helper, `emptySignLog`, is used by commit, catchUp and adopt once the new snapshot is on disk.\n  - commit and catchUp write the empty log for the height in progress.\n  - adopt empties the log at its own height (see deviations).\n- **C13 and C74:**\n  - `/hdls/status` now reads `node.view` off the loop: committed height + 1, the account count and the network id.\n  - Its key `height` is now `heightInProgress`. `fetchHeight`, the wallet and every fake-node test read the new key.\n  - `/hdls/resolve` keeps `height`, the committed height.\n  - No other route serves the Snapshot type with a height key.\n- **C67 and C12 (status part):** `Wallet.status()` GETs `/hdls/status`, refuses a status of 300 or more, reads at most `maxStatusBytes` (4 KiB) through an `io.LimitReader`, and returns the height in progress and the network id. `Wallet.height` keeps its jump guard, and `servedNetworkID` uses `status()`.\n- **C16:**\n  - `node.MaxRequestLookahead` and `node.MaxCheckpointBytes` are exported, and the wallet's copies `maxRequestLead` and `maxStateBytes` are gone.\n  - `requests.html` prints `{{.MaxLead}}`, carried by `requestsPageData`.\n- **C21:**\n  - `reGossipInterval` (used by the re-gossip loop and the wait in `startFirstHeight`) reads the committed view's StepTimeoutMs; its 1 s floor stays.\n  - A new `catchUpInterval` is five of the view's BlockIntervalMs, with the 3 s floor.\n  - Both loops run on one helper, `everyInterval`, which resets its ticker when the interval changes.\n  - The comment on `Config.Genesis` is fixed.\n- **Comment notes:**\n  - C19: the package, `Node`, `startHeight` and `Config.SnapshotPath` doc comments are reworded, and `handle`, `process` and `commit` get one line each.\n  - C20: the claim now says the sign log on disk keeps no block, while memory keeps the last proposal.\n  - C22: relay's comment gives the N × (N − 1) cost.\n  - C23: the re-gossip comments give the real cost of a tick.\n  - C31: Server's comment points to the routes Handler registers.\n\n**Docs changed in the same commits:**\n- docs/api.md: the 409, `heightInProgress`, status read off the loop, the catch-up interval.\n- docs/governance.md: the 409, and which timings follow a vote.\n- docs/consensus.md and docs/operating-a-network.md: timings no longer named as genesis values; the missing-folder sentence.\n- docs/signature.md: the C10 exception is replaced by the rule.\n- docs/reading-the-code.md: the renamed functions and the new ones are named, and the test counts are updated — step 14 from 25 to 27, step 15 from 14 to 15 (new test added to its command), step 17 from 13 to 15 (two new tests added). Every node check command in the guide was recounted with `go test -list` and matches its stated count.",
+    "tests": [
+     {
+      "name": "TestCertificateRefusalAnswers409 (node/http_test.go, C8)",
+      "failsWithoutChange": "Yes: against the parent commit both refused certificates (one with no vote, a seizure of a balance the name does not hold) were answered 202 \"\"."
+     },
+     {
+      "name": "TestOpenRefusesAMissingSnapshotFolder (node/persist_test.go, C9)",
+      "failsWithoutChange": "Yes: against the parent commit Open returned no error for a SnapshotPath in a missing folder."
+     },
+     {
+      "name": "TestSignLogLeftBehindIsEmptied (node/persist_test.go, C10)",
+      "failsWithoutChange": "Yes: against the parent commit, after the catch-up and after adopt the log on disk still held height 1 with 1 vote and 1 proposal. With adopt writing the empty log for the adopted height instead, it also fails: the node started at once, without the re-gossip wait."
+     },
+     {
+      "name": "TestStatusServesTheHeightInProgressOffTheLoop (node/http_test.go, C13/C74)",
+      "failsWithoutChange": "Yes: against the parent commit /hdls/status waited for the event loop of a node that was never started (failed after 5 s). It also checks that the key is heightInProgress and that no height key is served."
+     },
+     {
+      "name": "TestWalletBoundsTheStatusItReads (ui/wallet_test.go, C67/C12)",
+      "failsWithoutChange": "Yes: against the parent commit the wallet took the height 10 and the network id from a 503 answer, and from an answer padded past 4 KiB."
+     },
+     {
+      "name": "TestTimingsFollowAVote (node/sync_test.go, C21)",
+      "failsWithoutChange": "Yes: against the parent commit (catchUpInterval computed from the genesis, as catchUpLoop did), after a ⅔ change of StepTimeoutMs from 50 ms to 1 h and BlockIntervalMs from 0 to 2 s, the loop still re-gossiped 20 times a second, and the intervals stayed at 50 ms and 3 s."
+     },
+     {
+      "name": "TestVoteIsReleasedOnlyOnceLogged, TestProposalIsSentOnlyOnceLogged (node/restart_test.go, rewritten for C9)",
+      "failsWithoutChange": "Not new behaviour. They used a missing data folder to break every sign-log write, which Open now refuses. They now put a folder where `<snapshot>.votes.tmp` goes, as TestSoleValidatorRestartRecommitsItsLockedBlock does for the snapshot. They pass on both the parent and the new code, and still guard 'not released before logged'."
+     },
+     {
+      "name": "C14, C16, C17 (renames and removals)",
+      "failsWithoutChange": "Pure removals or renames, as the rules allow: go build, go vet, and the existing node and ui tests pass. C16's page reads the same; requests_test.go now checks the window against node.MaxRequestLookahead. The C17 tests use a small helper, newlyPooled(pooled bool, _ error), for the new two-value results."
+     }
+    ],
+    "deviations": "1. **C10, adopt.** adopt empties the log in place, at the log's own height, not \"for the new height\". startFirstHeight starts at once only when the sign log is for the height it starts at. So an empty log written by adopt for the adopted height would end the lost-log wait. That wait is what docs/operating-a-network.md relies on for a node restarted with bootstrap peers up, and a log restored together with an older snapshot cannot vouch for the heights above it. catchUp does write the empty log for the new height, as commit does; catchUp starts the height at once anyway. To switch adopt, change one argument (`node.signLog.Height` to `node.height()`) and drop the last assertion of TestSignLogLeftBehindIsEmptied.\n2. **C10, commit.** commit now uses the same helper, so its condition widened. It used to empty the log only when the log held exactly the committed block's height; now it empties any log below the height in progress. The difference shows only for a node that did not sign at the committed height after an earlier failed snapshot write. Writing an empty log for the next height is truthful there.\n3. **C8, inputs.** The certificate inputs became Admit* functions that wait for the verdict, and no fire-and-forget variant is kept. The test buses deliver through them; the delivery goroutines can wait.\n4. **C8, refusal reason.** The reason for a refused parameter change is one plain sentence listing the possible causes. ledger.ParameterChange.Valid returns only a bool, and ledger is run 'core''s. A refused name action gets FitsState's exact rule, or R9's.\n5. **C17, extra renames.** Besides the listed names, I renamed eventParameterVote/eventReassignmentVote to eventParameterCertificate/eventReassignmentCertificate and pruneParameterProposals to pruneParameterCertificates, so all certificate names agree. addParameterVotes and addReassignmentVotes kept their names.\n6. **C13.** Snapshot.Height, a Go field and not on the wire, keeps its name and meaning (the height in progress). About 76 test uses depend on it.\n7. **Files of run 'ui'.**\n   - ui/admin_test.go: 1 line, its fake /hdls/status key renamed to heightInProgress; without it the admin tests would read height 0.\n   - ui/main.go: 2 lines, `requestsPageData.MaxLead` and its value, needed by C16.\n   - I also edited the fake status key in ui/security_test.go and ui/trust_test.go.\n8. **C19.** gofmt realigned Config's Genesis and Bootstrap lines when SnapshotPath's comment moved above the field.\n9. **C21.** The two loops share a new helper, everyInterval, instead of each repeating the reset code.",
+    "suite": "All checks pass at 40e98f0:\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: ok.\n- go build ./... and go build -C ui -o /dev/null .: ok.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., run twice: ok both times. consensus took 56.7 s then 54.8 s; node 69.0 s then 70.6 s; baseline before the changes was node 66.9 s, consensus 56.1 s.\n- The same with -C ui, run twice: ok both times (40.1 s, 39.1 s), while another run's ui tests shared the machine.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: ok (94.0 s).\n\nNo time limit was raised. The full log is <scratch>/p2-scratch/suite.log.",
+    "openIssues": "1. **For the owner: C10's adopt choice** (deviation 1). Should adopt write the empty log for the adopted height, as asked, and give up the re-gossip wait of a node that restarts and adopts a checkpoint while it still holds a log from before?\n2. **C21 lag after lowering a timing.** A running loop takes a new interval at its next tick. So after a ⅔ vote lowers the step timeout from, say, a day, re-gossip keeps the old cadence for one more old interval (up to a day). For catch-up the lag is up to five old block intervals. Raising takes effect within one tick of the old value. docs/governance.md says the loops take a new value at their next tick. Removing the lag would need a signal from the loop to both goroutines, which is more code.\n3. **For the orchestrator.**\n   - Update spec 6.1 (re-gossip interval now governed), 6.9 (catch-up and adopt empty the log) and 6.10 (status key heightInProgress, read off the loop; certificate routes 409).\n   - Update the code notes and the progress note.\n   - The Wallet.Governance part of C12 is run 'ui''s.\n4. **Merge overlap.** ui/main.go (requestsPageData) and ui/admin_test.go line 62 are also in run 'ui''s file list. docs/reading-the-code.md is edited by several runs, but my changes are single lines.\n5. **Guide check command.** TestWalletBoundsTheStatusItReads is not in any wallet check command of docs/reading-the-code.md; I left those lists to run 'ui'."
+   },
+   "verdict": {
+    "confirmed": true,
+    "problems": [
+     {
+      "severity": "minor",
+      "file": "node/sync.go",
+      "problem": "everyInterval resets its ticker only at the next tick under the old interval. So after a vote that lowers a timing, the loop keeps the old cadence for up to one old interval: up to a day for re-gossip and up to 5 days for catch-up (MaxTimingMs is a day). The instruction was 'A ticker is reset when its value changes'. A raised timing is followed correctly. The builder disclosed this as open issue 2, and docs/governance.md states it ('take a new value at their next tick').",
+      "evidence": "Scratch test TestVerifyLoweringLag (p2-scratch/verify-node1-10/node/zz_verify_lag_test.go): genesis StepTimeoutMs is 1 h, and a ⅔ change to 250 ms is pooled and committed through startHeight. Afterwards reGossipInterval() returns 250ms, but the loop sent 0 re-gossips in the next 2 s (about 8 expected).",
+      "fix": "This is the owner's choice. Either accept it as documented, or make everyInterval wait at most min(interval(), 1 s) at a time and run the action once time.Since(last) >= interval(). That is about 6 lines, and a test that lowers the step timeout would then see re-gossip within a second."
+     },
+     {
+      "severity": "minor",
+      "file": "node/node.go",
+      "problem": "In handle, the eventParameterCertificate and eventReassignmentCertificate cases send the verdict only 'if event.admit != nil'. Production never leaves admit nil: AdmitParameterCertificate and AdmitReassignmentCertificate always set it. Only idle_test's direct node.handle(event{...}) calls need the guards. eventNameRequest, the matching Admit-only case, has no guard. This is test-only code in the loop, against the minimal-code rule.",
+      "evidence": "Scratch copy verify-node1-12 with both guards removed: TestReplacingCertificateWakesAnIdleNode hangs (test timed out after 20s). With idle_test.go's two handle calls given admit: make(chan admission, 1) as well, go test -run 'Certificate|Governance|Idle|Wakes|Chaos' ./node passes (21.8 s).",
+      "fix": "Drop the two 'if event.admit != nil' guards, as for eventNameRequest. In idle_test.go TestReplacingCertificateWakesAnIdleNode, pass admit: make(chan admission, 1) in the two handle calls."
+     },
+     {
+      "severity": "minor",
+      "file": "TODO.md",
+      "problem": "Line 99 still says re-gossip sends 'every genesis `stepTimeoutMs` (`Node.reGossipLoop`)'. Since C21 it uses the step timeout in force. The shared rule is to fix a doc sentence that a change makes false in the same commit.",
+      "evidence": "grep -n 'genesis `stepTimeoutMs`' TODO.md finds line 99. reGossipInterval now reads node.view.Load().state.Parameters.StepTimeoutMs.",
+      "fix": "Change 'every genesis `stepTimeoutMs`' to 'every `stepTimeoutMs` in force' (C21's commit)."
+     },
+     {
+      "severity": "minor",
+      "file": "node/node.go",
+      "problem": "C23's new comment on reGossipProposal calls it 'the costly part of a tick: the whole block goes to every peer'. But the same tick's reGossipVotes calls sendLastCommit, which also sends the last decided proposal, block included, to every peer, plus every held vote at about 4.7 KB each. The reGossipLoop comment prices this correctly. The reGossipProposal comment reads as if this were the only block in a tick, the kind of mispricing C23 set out to remove.",
+      "evidence": "node.go reGossipVotes: the votes loop, then node.sendLastCommit(), which broadcasts lastProposal (a ProposalMessage with its Block). The eventRegossip handler runs reGossipVotes and then reGossipProposal.",
+      "fix": "Write 'It is a costly part of a tick, as is the last decided proposal sendLastCommit sends: the whole block goes to every peer, ...'."
+     },
+     {
+      "severity": "minor",
+      "file": "docs/reading-the-code.md",
+      "problem": "The wallet step's table now names Wallet.status ('Wallet.height (→ Wallet.status)'). But no check command runs its new test TestWalletBoundsTheStatusItReads. The builder left this to run 'ui' (open issue 5), and run 'ui' was not told about it.",
+      "evidence": "None of the three '-C ui' commands in the guide matches TestWalletBoundsTheStatusItReads. Adding 'WalletBoundsTheStatus' to the line-777 command gives 39 tests (go test -C ui -list), up from the stated 38.",
+      "fix": "Add 'WalletBoundsTheStatus|' to the line-777 command and change 'Run (38 tests)' to 'Run (39 tests)', in the C67 commit."
+     }
+    ],
+    "evidence": "Branch p2-node1 at 40e98f0: 14 commits on 3c0f97c, one per note, each with the required subject and trailer. Nothing under review/ was touched. Each commit builds on its own: go build ./..., go build -C ui, go vet ./node and go vet -C ui ./... pass at every one of the 14.\n\nFull gate, run myself on a scratch copy of HEAD (p2-scratch/verify-node1-1; log in p2-scratch/verify-node1-logs/gate.log):\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: ok.\n- Both builds: ok.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., run twice: ok both times (node 69.6 s and 69.3 s; consensus 58.9 s and 56.9 s).\n- The same with -C ui, run twice: ok (37.9 s, 37.7 s).\n- go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: ok (144.9 s, while my mutation builds shared the machine).\n\nEach new test against its change reverted, in a scratch copy:\n- C8: handlers answer 202 again. TestCertificateRefusalAnswers409 fails: both refusals answered 202 \"\".\n- C9: the folder check removed. TestOpenRefusesAMissingSnapshotFolder fails: error <nil>.\n- C10: emptySignLog dropped from catchUp and adopt. TestSignLogLeftBehindIsEmptied fails: both logs still hold height 1 with 1 vote and 1 proposal.\n- C13: handleStatus goes through Snapshot() again. TestStatusServesTheHeightInProgressOffTheLoop fails: it waited 5 s for the loop.\n- C67, the status check alone removed: TestWalletBoundsTheStatusItReads fails on the 503 case.\n- C67, the LimitReader alone removed: the same test fails on the padded case.\n- C21, the intervals reading the genesis again: TestTimingsFollowAVote fails (20 re-gossips a second, intervals 50ms and 3s).\n- C21, the ticker Reset alone removed: the same test fails (20 re-gossips a second).\n\nC10 deviation 1, adopt keeping its old height: I agree it is justified. With adopt writing the log for the adopted height, TestSignLogLeftBehindIsEmptied fails because the node starts at once. That skips the startFirstHeight wait, which protects a node restored with an older snapshot and its log, and which the parent also kept. emptySignLog only acts on a non-zero log below the height in progress. That makes commit's wider condition (deviation 2) safe: the empty log it writes is always for a height the running node has not signed.\n\nChecked by reading the code and the docs:\n- C14: no Message.From is left.\n- C17: names and docs follow the renames; JSON keys, routes, handlers and view types unchanged; no ledger.ParameterChangeID.\n- C8: the wallet shows 'node rejected the submission: certificate refused: …' through postJSON. docs/api.md and governance.md are fixed.\n- C9: the operating-a-network.md sentence is fixed. The demo uses an existing temp folder.\n- C13/C74: fetchHeight, the wallet and every fake node read heightInProgress; resolve keeps height; no other route serves Snapshot's height.\n- C16: the exports are used in requests.go and trust.go, and requests.html prints {{.MaxLead}}.\n- C21: StepTimeoutMs and BlockIntervalMs are capped at a day (MaxTimingMs), so the Duration product cannot overflow into a ticker panic.\n- C19, C20, C22, C31 comments: accurate.\n\nI recounted every guide check command with go test -list; each matches its stated count (27, 15 and 15 for the changed steps).\n\nAdversarial test showing the lowering lag: p2-scratch/verify-node1-10/node/zz_verify_lag_test.go. 0 re-gossips in the 2 s after a vote from 1 h to 250 ms."
+   },
+   "fix": {
+    "branchHead": "5879f940c0e0f4676b5ce43adf1ee383bf9c75db",
+    "fixed": [
+     "Lag after a vote lowers a timing (node/sync.go, minor). Commit acb5b32: 'phase 2 node1: a lowered timing reaches the re-gossip and catch-up loops within a second (review follow-up)'. everyInterval no longer uses a ticker. It waits min(interval() - time since the last run, 1 s), asks interval() again, and runs the action once that interval has passed since the last run. A lowered timing therefore takes effect within a second instead of after up to one old interval (a day for re-gossip, five days for catch-up). A raised timing is followed as before. The function stays the same size (17 lines down to 15). TestTimingsFollowAVote (node/sync_test.go) gains a second vote that lowers the step timeout from an hour to 250 ms (ledger.AssumedGossipHopMs, the least one validator allows) and expects at least 3 re-gossips in the next 2 s. Against the old everyInterval in a scratch copy (p2-scratch/node1-followup-lag) it fails with 0 re-gossips in 2 s. In the same commit, docs/governance.md now says 'within a second, whether it is shorter or longer' instead of 'at their next tick', and the reading guide's row calls everyInterval 'the timer both loops share, which follows a vote within a second'. This also closes the builder's open issue 2.",
+     "Unneeded admit guards (node/node.go, minor). Commit 554a974. handle's eventParameterCertificate and eventReassignmentCertificate cases now send the verdict without 'if event.admit != nil', as eventNameRequest does. TestReplacingCertificateWakesAnIdleNode (node/idle_test.go) now passes admit: make(chan admission, 1) in its two direct handle calls. The admit field's comment now says it is nil only from SubmitPayment and SubmitUpdate, which keep their guards because they really send no channel. Behaviour does not change. go test -run 'Certificate|Governance|Idle|Wakes' ./node passes.",
+     "TODO.md line 99 (minor). Commit 2aa6570. It now reads 'every `stepTimeoutMs` in force' instead of 'every genesis `stepTimeoutMs`'. The same commit fixes the same false phrase in the Phase 2 note of findings_20261027.md line 633, 'the wait is the genesis `stepTimeoutMs`', which C21 had also made false. After this, a search for 'genesis `stepTimeoutMs`' outside review/ finds nothing.",
+     "reGossipProposal comment (node/node.go, minor). Commit be8aa71. It now says the current round's proposal is 'a costly part of a tick, as is the last decided proposal that sendLastCommit sends', instead of 'the costly part'. Comment only.",
+     "Reading guide wallet check (docs/reading-the-code.md, minor). Commit 5879f94. 'WalletBoundsTheStatus|' is added to the wallet step's -C ui command (line 777), and 'Run (38 tests)' becomes 'Run (39 tests)'. go test -C ui -list on the new pattern counts 39, and they pass. Open issue 5 is closed here, not left to run 'ui'."
+    ],
+    "notFixed": [
+     "Nothing is left unfixed: all five problems were minor, cheap and correct, and each is fixed in its own new commit. The check suggested folding three of them into the C21 and C67 commits, but they are follow-up commits on top of 40e98f0, as the task asked. No history was rewritten.",
+     "For the merge: two small edits fall outside run node1's strict file list. findings_20261027.md line 633 is one phrase, and the reading guide (docs/reading-the-code.md) has two single-line edits, one at line 589 and one at lines 776-777. Run 'ui' also edits the guide, so the merge may conflict on line 777. If it does, keep both changes and recount with go test -C ui -list."
+    ],
+    "suite": "All checks pass at 5879f94 (log: <scratch>/p2-scratch/node1-followup-suite.log):\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: ok.\n- go build ./... and go build -C ui -o /dev/null .: ok.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., run twice: ok both times. consensus took 53.2 s then 56.4 s; node 72.3 s then 71.3 s; ledger about 14 s.\n- The same with -C ui, run twice: ok both times (38.1 s, 38.7 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: ok (91.0 s).\n\nNo time limit was raised."
+   },
+   "recheck": null
+  },
+  {
+   "slice": "ui",
+   "report": {
+    "branchHead": "74318aa2da94e751a81f102c3e01680aa4a23ea7",
+    "commits": [
+     {
+      "hash": "b4fdb8c",
+      "subject": "phase 2 C7: the admin page signs a parameter draft only while it fits the verified state"
+     },
+     {
+      "hash": "a8b3053",
+      "subject": "phase 2 C11: an unknown wallet path is not found, and reads no checkpoint"
+     },
+     {
+      "hash": "0ff27b9",
+      "subject": "phase 2 C12: the wallet reads the node's governance view through a bound, and only on success"
+     },
+     {
+      "hash": "216c37a",
+      "subject": "phase 2 C15: the wallet decodes the node's own governance view types"
+     },
+     {
+      "hash": "77daa61",
+      "subject": "phase 2 C30: LastPaymentBlockID's comment points to the manual for one key on two machines"
+     },
+     {
+      "hash": "6450c2a",
+      "subject": "phase 2 C65: the admin page's data no longer carries the wallet's key"
+     },
+     {
+      "hash": "6f907e7",
+      "subject": "phase 2 C66: NameRequestFitsState compares the nil-safe fee, so a null fee no longer panics"
+     },
+     {
+      "hash": "74318aa",
+      "subject": "phase 2 C69: pageData.PublicKey's comment says render finds the wallet's name by it"
+     }
+    ],
+    "summary": "All eight wallet notes for run 'ui' are fixed on branch p2-ui, one commit each, on top of 3c0f97c. The worktree is <scratch>/wt/p2-ui. In all: 124 lines added and 70 removed, across 8 files.\n\n- C7 (ui/admin.go SignParameters): the wallet now refuses a parameter draft and says \"draft it again\" if any of these holds: its Sequence is not state.GovernanceSequence, its PreviousParametersDigest is not state.Parameters.Digest(), or its NewParameters fail Acceptable(len(checkpoint.Validators)). The check runs before the wallet looks up its name or signs anything.\n- C11 (ui/main.go index): any path other than exactly \"/\" gets http.NotFound, so /favicon.ico no longer reads and verifies a checkpoint.\n- C12, the Governance part (ui/admin.go Wallet.Governance): an answer with status 300 or more is refused with \"the node answered <status>\". The body is read through io.LimitReader(maxStateBytes), the same bound verifiedState uses.\n- C15: Wallet.Governance returns node.GovernanceView. adminPageData holds node.ParametersView, []node.ParameterProposalView and []node.ReassignmentView. The four copied types are deleted (45 lines). admin.html needed no change because the field names are the same.\n- C30: LastPaymentBlockID's comment now points to ui/USER_MANUAL.md, \"One key, one machine\".\n- C65: adminPageData.PublicKey and its assignment in renderAdmin are deleted.\n- C66 (ledger/name_request.go): NameRequestFitsState compares request.fee() instead of request.Fee, so a null fee on a registration, key change or bank change is refused as \"not the network's new-key fee\" instead of panicking. One comment line on fee() changed to \"zero when it is null (a freeze has none)\".\n- C69: pageData.PublicKey's comment now says render finds the wallet's name by the key, and the copy button copies it.\n\nDocs: only docs/reading-the-code.md changed, each line in the commit that made it false:\n- step 5 now names four tests, the new ledger test included;\n- step 8 counts 124 ledger tests;\n- step 21's row for the governance view now names Wallet.Governance and the node's GovernanceView (step 13);\n- step 21's command adds GovernanceView and runs 40 tests;\n- step 22's command adds UnknownPath and runs 12 tests.\n\nEvery count was checked with go test -list.\n\nGate, all passing at 74318aa:\n- gofmt -l . prints nothing outside review/;\n- both go vet and both go build commands pass;\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice, and the same with -C ui passed twice;\n- the -count=3 Chaos|Restart|SignLog|Resume|CatchUp run of ./node/ passed.\n\nLogs are in <scratch>/p2-scratch/ui-gate/.",
+    "tests": [
+     {
+      "name": "ui: TestParameterDraftIsSignedOnlyWhileItFitsTheState (C7)",
+      "failsWithoutChange": "Yes, run against the parent's ui/admin.go in a scratch copy. A sole validator's wallet signed and submitted the drafts with another sequence, another previous digest and a retention below its floor (err nil, submitted true), and 3 requests reached the node."
+     },
+     {
+      "name": "ui: TestUnknownPathIsNotFound (C11)",
+      "failsWithoutChange": "Yes, run against the parent's ui/main.go. GET /favicon.ico and GET /nowhere answered 200 and read the checkpoint twice."
+     },
+     {
+      "name": "ui: TestGovernanceViewRefusesAFailedAnswer (C12)",
+      "failsWithoutChange": "Yes, run against the parent's ui/admin.go. A view sent with status 500 was decoded and returned (TotalPower 3, Quorum 3) with no error. This test covers only the status check; the size bound has no test of its own (see deviations)."
+     },
+     {
+      "name": "ledger: TestNameRequestWithANullFeeIsRefusedAgainstTheState (C66)",
+      "failsWithoutChange": "Yes, run against the parent's ledger/name_request.go. The test panics with a nil pointer dereference in math/big.(*Rat).Cmp, called from NameRequestFitsState."
+     },
+     {
+      "name": "C15 and C65 (pure removals); C30 and C69 (comments only)",
+      "failsWithoutChange": "No new test, as the rules allow for removals and comment changes. The ui suite passes unchanged, including the admin page tests that render pooled certificates from node.ReassignmentView and that execute admin.html, which would fail on a missing field."
+     }
+    ],
+    "deviations": "1. The C12 size bound (io.LimitReader at maxStateBytes, 64 MiB) has no test of its own. Under -race, the stdlib JSON decoder read only 23 MiB of an endless body within the wallet's 5-second client timeout (measured in p2-scratch/limitbench; without -race it read 73 MiB in 0.23 s). A test past the 64 MiB bound would therefore take over 14 s per run, and would hit the client timeout first. Making the bound a parameter so a test could use a small one, as node's fetchCheckpoint does, would change Governance's signature, which goes beyond the note. Only the status refusal is tested, and that test fails without the change.\n2. For the governance read I reused maxStateBytes instead of adding a new constant. The governance view holds at most 64 + 64 pooled certificates and lists of validator names; a checkpoint that size breaks the same bound first.\n3. C66: besides the one-line fix, fee()'s comment changed from \"zero for a freeze\" to \"zero when it is null (a freeze has none)\", because fee() now also covers a null fee on the other kinds. The new test sits in ledger/name_request_test.go, in the middle of the file after TestNameRequestShapeIsCheckedFirst, to keep merges with run 'core' clean.\n4. The C7 and C12 tests sit in the middle of ui/admin_test.go, after TestParameterDraftCarriesTheTenParameters, away from the SubmitParameters and SubmitReassignment tests that run 'core' may touch. The C11 test sits before the last test of ui/wallet_test.go. The new tests use their own fake servers or the existing governanceNode helper unchanged, so the shared fake node was not edited.\n5. The C7 refusal is one message covering both causes (a stale sequence or digest, or values out of bounds). It ends with \"draft it again\".\nNo edits outside my file list were needed. review/ was not touched.",
+    "suite": "All passing at 74318aa:\n- gofmt -l . prints nothing outside review/.\n- go vet ./... and go vet -C ui ./... pass.\n- go build ./... and go build -C ui -o /dev/null . pass.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice. Run 1: consensus 52.6 s, ledger 14.7 s, node 66.6 s; cmd/demo, cmd/server and signing also ok. Run 2: consensus 55.8 s, ledger 13.9 s, node 67.7 s.\n- GOLEDGER_CHAOS_SLACK=4 go test -C ui -race -count=1 ./... passed twice (39.6 s, then 37.9 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed (90.8 s).\nNo time limit was raised.",
+    "openIssues": "- Merge with the parallel runs: docs/reading-the-code.md has new test counts on the step 8 line (124 ledger tests) and the step 21 line (40 ui tests). If run 'core' adds ledger tests, or run 'node1' adds ui tests matched by step 21's command, both sides will change those lines; recount with go test -list after the merge.\n- ui/requests.go SignNameRequest still has its own `case request.Fee == nil` check. After C66 it is no longer what stops the panic, only a friendlier message. That file belongs to run 'node1', so I left it alone.\n- C12 for Wallet.height and servedNetworkID is run 'node1''s. If they write a shared status reader (C67), Governance could later use the same helper for its status and size checks.\n- C8 is still open: a certificate the node refuses still gets a 202. C7 removes the likeliest cause, a parameter draft that no longer fits the state."
+   },
+   "verdict": {
+    "confirmed": true,
+    "problems": [
+     {
+      "severity": "minor",
+      "file": "ui/admin.go",
+      "problem": "Wallet.Governance's new comment says it reads at most maxStateBytes \"as of a checkpoint\". In English \"as of\" means \"at the time of\", so the phrase reads oddly. The intended meaning is \"as it reads a checkpoint\". This is wording only and the code is correct.",
+      "evidence": "ui/admin.go lines 18-19 at 74318aa: \"// Governance fetches the node's read-only governance view. The wallet does not trust its node, so it\" / \"// reads at most maxStateBytes of it, as of a checkpoint, and refuses an answer that is not a success.\"",
+      "fix": "Change \"as of a checkpoint\" to \"as it reads a checkpoint\" (or \"as verifiedState reads a checkpoint\"). This is a comment-only edit inside the C12 commit's lines."
+     }
+    ],
+    "evidence": "I checked branch p2-ui at 74318aa (8 commits on 3c0f97c) against the code notes C7, C11, C12 (the Governance part), C15, C30, C65, C66 and C69 in review/phase2_code_notes.md and against the orchestrator's scope. I did not use the builder's report as the reference.\n\nScope and files: each note has its own commit, subject \"phase 2 C<n>: ...\", with an evidence body and the trailer. The commits touch only ui/admin.go (SignParameters, Governance and the deleted view types; SubmitParameters, SubmitReassignment and incomplete are untouched), ui/main.go, ui/wallet.go (a comment on LastPaymentBlockID, not Wallet.height), ledger/name_request.go (C66 only), their tests, and docs/reading-the-code.md. review/ is untouched.\n\nCorrectness:\n- C7: SignParameters refuses a draft whose Sequence is not the state's GovernanceSequence, whose PreviousParametersDigest is not state.Parameters.Digest(), or whose NewParameters fail Acceptable(len(checkpoint.Validators)). The message says \"draft it again\". This is everything ParameterChange.Valid checks apart from the votes, and DraftParameters uses the same participant count. The check runs before registeredName, signing and handOver.\n- C11: index answers http.NotFound unless URL.Path is exactly \"/\". Every redirect in the ui goes to \"/\" or \"/?...\" or another route, so none is affected.\n- C12: Governance refuses a status of 300 or more and decodes through io.LimitReader(maxStateBytes).\n- C15: Governance returns node.GovernanceView, and adminPageData holds node.ParametersView, []node.ParameterProposalView and []node.ReassignmentView. The field names match what admin.html uses, and grep finds no leftover use of the four deleted types.\n- C65: the field and its assignment are gone, and admin.html never used .PublicKey.\n- C66: the fee comparison now goes through the nil-safe request.fee(). Acceptable keeps NewKeyFee above 0, so a null fee always gets the \"new-key fee\" refusal.\n- C30 and C69: the comments are accurate, and the manual section \"One key, one machine\" exists at ui/USER_MANUAL.md:29.\n\nRevert tests, each in its own scratch copy under p2-scratch/verify-ui-2 to verify-ui-8:\n- verify-ui-2 (whole C7 check removed): TestParameterDraftIsSignedOnlyWhileItFitsTheState fails. All 3 bad drafts are submitted and 3 requests reach the node.\n- verify-ui-3, 4 and 5 (only the sequence, only the digest, or only the Acceptable condition removed): the test fails each time, on exactly that case, with 1 request sent. So each condition is covered on its own.\n- verify-ui-6 (C11 reverted): TestUnknownPathIsNotFound fails. /favicon.ico and /nowhere answer 200 and read the checkpoint twice.\n- verify-ui-7 (status check removed): TestGovernanceViewRefusesAFailedAnswer fails, and the 500 body is decoded (TotalPower 3, Quorum 3).\n- verify-ui-8 (C66 reverted): TestNameRequestWithANullFeeIsRefusedAgainstTheState panics in big.(*Rat).Cmp, called from NameRequestFitsState at name_request.go:213.\n\nAdversarial probe of the C12 bound in a scratch test, without -race: a node that sends a 200 MiB JSON string gets \"unexpected EOF\" after 0.36 s, so the read stops at 64 MiB. The builder's deviation (no committed test for the bound, because under -race reading past 64 MiB would run into the 5 s client timeout) is measured and has precedent: verifiedState's identical bound has no test either. I accept it.\n\nDocs: I checked every count with go test -list. The ledger package has 124 tests, step 5's command matches 4, step 21's 40 and step 22's 12. Of the guide's other -run commands, only the node one in step 13 matches a new test name (GovernanceView), and it runs ./node, so the ui test does not count there. Step 21's row naming Wallet.Governance and GovernanceView (step 13) is accurate. docs/governance.md \"Extending it\" step 5 is still true.\n\nGate, run myself on scratch copy verify-ui-1 of HEAD with go1.27.3 (logs in p2-scratch/verify-ui-logs/), all passing:\n- gofmt -l . printed nothing outside review/;\n- go vet ./... and go vet -C ui ./... pass;\n- go build ./... and go build -C ui -o /dev/null . pass;\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice (consensus 58.3 s then 55.7 s, node 65.2 s then 67.7 s);\n- the same with -C ui passed twice (38.0 s, 37.5 s);\n- the -count=3 Chaos|Restart|SignLog|Resume|CatchUp run of ./node/ passed (89.3 s).\n\nNaming follows the spelled-out rule, there is no dead code and no old-format path. The one problem is a minor comment wording."
+   },
+   "fix": {
+    "branchHead": "b5df259",
+    "fixed": [
+     "Minor, ui/admin.go: the comment on Wallet.Governance said the view is read \"as of a checkpoint\", which sounds like \"at the time of a checkpoint\". It now says the wallet reads at most maxStateBytes \"as verifiedState reads a checkpoint\". The C12 commit message already used that wording. Only the comment changed, so there is no new test. Commit b5df259: \"phase 2 ui: Governance's comment says it reads as verifiedState reads a checkpoint (review follow-up)\". No other comment, Go file or doc in the worktree has the phrase (checked with grep, review/ excluded)."
+    ],
+    "notFixed": [],
+    "suite": "Everything passed at b5df259, in worktree <scratch>/wt/p2-ui:\n- gofmt -l . printed nothing outside review/.\n- go vet ./..., go vet -C ui ./..., go build ./... and go build -C ui -o /dev/null . all passed.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice. Run 1: consensus 58.5 s, ledger 14.7 s, node 70.7 s. Run 2: consensus 56.3 s, ledger 14.0 s, node 66.6 s. cmd/demo, cmd/server and signing passed both times.\n- The same command with -C ui passed twice (39.7 s, then 38.4 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed (91.3 s).\nNo time limit was raised. The logs are in <scratch>/p2-scratch/ui-followup/."
+   },
+   "recheck": null
+  }
+ ],
+ "merge": "Built from 3c0f97c. node1 replayed onto 86f18fc (core merged) with guide-table conflicts resolved line by line (core's CertificateTally row kept, node1's renamed rows taken); ui replayed onto it with the wallet step's -run regex merged. Merge commit c798b3a: Wallet.Governance reads through node.MaxCheckpointBytes (node1 removed maxStateBytes); guide counts recounted with go test -list."
+}

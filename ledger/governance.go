@@ -10,7 +10,7 @@ import (
 // ParameterVote is one validator's signed approval of a proposed parameter change (its signature is
 // over the change's shared (NewParameters, PreviousParametersDigest, Sequence)).
 type ParameterVote struct {
-	Validator string // the validator's public key
+	Validator string // the validator's name; the validator set holds the key that verifies it
 	Signature string // over the (NewParameters, PreviousParametersDigest, Sequence) preimage, domain "parameter-vote"
 }
 
@@ -34,56 +34,45 @@ func parameterVoteFields(newParameters LedgerParameters, previousParametersDiges
 		[]byte(strconv.FormatInt(sequence, 10)))
 }
 
-// firstValidatorSet returns the first set in a variadic argument, or nil — so ProposeBlock/ApplyBlock
-// can take the validator set optionally (only a block carrying a ParameterChange needs it).
-func firstValidatorSet(sets []*consensus.ValidatorSet) *consensus.ValidatorSet {
-	if len(sets) > 0 {
-		return sets[0]
-	}
-	return nil
+// VerifyParameterVote reports whether `vote` is a valid signature by publicKey, the key the caller holds
+// for vote.Validator, approving (newParameters, previousParametersDigest, sequence) — used to check votes
+// as they are gathered into a certificate.
+func VerifyParameterVote(scheme signing.Scheme, networkID, publicKey string, newParameters LedgerParameters, previousParametersDigest [32]byte, sequence int64, vote ParameterVote) bool {
+	return signing.VerifyBase64(scheme, networkID, publicKey, signing.DomainParameterVote, vote.Signature, parameterVoteFields(newParameters, previousParametersDigest, sequence)...)
 }
 
-// VerifyParameterVote reports whether `vote` is a valid signature by its validator approving
-// (newParameters, previousParametersDigest, sequence) — used to filter votes as they are gossiped.
-func VerifyParameterVote(scheme signing.Scheme, networkID string, newParameters LedgerParameters, previousParametersDigest [32]byte, sequence int64, vote ParameterVote) bool {
-	return signing.VerifyBase64(scheme, networkID, vote.Validator, signing.DomainParameterVote, vote.Signature, parameterVoteFields(newParameters, previousParametersDigest, sequence)...)
-}
-
-// SignParameterVote is a validator's approval of `newParameters` replacing the parameters that hash
-// to `previousParametersDigest`, at governance `sequence`.
-func SignParameterVote(signer *signing.Signer, newParameters LedgerParameters, previousParametersDigest [32]byte, sequence int64) (ParameterVote, error) {
+// SignParameterVote is the approval, by the validator named validatorName whose key signer holds, of
+// `newParameters` replacing the parameters that hash to `previousParametersDigest`, at governance
+// `sequence`.
+func SignParameterVote(signer *signing.Signer, validatorName string, newParameters LedgerParameters, previousParametersDigest [32]byte, sequence int64) (ParameterVote, error) {
 	signature, err := signer.SignBase64(signing.DomainParameterVote, parameterVoteFields(newParameters, previousParametersDigest, sequence)...)
 	if err != nil {
 		return ParameterVote{}, err
 	}
-	return ParameterVote{Validator: signer.PublicKeyBase64(), Signature: signature}, nil
+	return ParameterVote{Validator: validatorName, Signature: signature}, nil
 }
 
 // Valid reports whether the change is ratified against `currentParameters` at `currentSequence`: it
 // amends exactly those parameters (digest match) at exactly this sequence (single-use replay guard),
-// the new parameters are a well-formed operating profile (non-negative cost, and a step timeout long
-// enough for the gossip fan-out at the current validator count — the timing coupling), and every vote
-// is a distinct current validator signing exactly these (NewParameters, PreviousParametersDigest,
-// Sequence), with combined power meeting the > ⅔ quorum.
-func (change ParameterChange) Valid(scheme signing.Scheme, networkID string, validators *consensus.ValidatorSet, currentParameters LedgerParameters, currentSequence int64) bool {
-	if validators == nil || change.Sequence != currentSequence || change.PreviousParametersDigest != currentParameters.Digest() {
+// the new parameters pass Acceptable for the current validator count (every bound LedgerParameters
+// lists, the timing coupling among them), and the votes make a > ⅔ certificate of the current set
+// (consensus.CertificateTally): each from a distinct current validator, signing under the key the set
+// holds for its name exactly these (NewParameters, PreviousParametersDigest, Sequence), with combined
+// power meeting the quorum. One bad vote makes the whole change invalid.
+func (parameterChange ParameterChange) Valid(scheme signing.Scheme, networkID string, validators *consensus.ValidatorSet, currentParameters LedgerParameters, currentSequence int64) bool {
+	if validators == nil || parameterChange.Sequence != currentSequence || parameterChange.PreviousParametersDigest != currentParameters.Digest() {
 		return false
 	}
-	if !change.NewParameters.Acceptable(len(validators.Validators())) {
-		return false // an ill-formed profile: negative cost, or a window too short for the fan-out
+	if !parameterChange.NewParameters.Acceptable(len(validators.Validators())) {
+		return false // a parameter outside its bounds, or a step timeout too short for the fan-out
 	}
-	fields := parameterVoteFields(change.NewParameters, change.PreviousParametersDigest, change.Sequence)
-	seen := make(map[string]bool)
-	var approvingPower int64
-	for _, vote := range change.Votes {
-		if !validators.Contains(vote.Validator) || seen[vote.Validator] {
-			return false // unknown validator, or one counted twice
+	tally := consensus.NewCertificateTally(validators)
+	for _, vote := range parameterChange.Votes {
+		if !tally.Add(vote.Validator, func(publicKey string) bool {
+			return VerifyParameterVote(scheme, networkID, publicKey, parameterChange.NewParameters, parameterChange.PreviousParametersDigest, parameterChange.Sequence, vote)
+		}) {
+			return false // a name outside the set, one counted twice, or a signature that does not verify
 		}
-		if !signing.VerifyBase64(scheme, networkID, vote.Validator, signing.DomainParameterVote, vote.Signature, fields...) {
-			return false
-		}
-		seen[vote.Validator] = true
-		approvingPower += validators.Power(vote.Validator)
 	}
-	return approvingPower >= validators.Quorum()
+	return tally.Reached()
 }

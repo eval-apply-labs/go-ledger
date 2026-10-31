@@ -1,0 +1,212 @@
+{
+ "slice": "S4",
+ "builder": {
+  "branchHead": "1fe818fb618da59b48729e638bb37015d1be2eea",
+  "commits": [
+   {
+    "hash": "0c0f436",
+    "subject": "phase 2 S4: GenesisHash and the effective network id"
+   },
+   {
+    "hash": "dd8a031",
+    "subject": "phase 2 S4: votes, commits and the driver name their value BlockHash"
+   },
+   {
+    "hash": "ccd2b27",
+    "subject": "phase 2 S4: the pin compares the full state digest, checked at intake (E38)"
+   },
+   {
+    "hash": "266e8f8",
+    "subject": "phase 2 S4: the block hash, signed proposals and the new checkpoint"
+   },
+   {
+    "hash": "950b1e8",
+    "subject": "phase 2 S4: the sign log is emptied once the snapshot is on disk"
+   },
+   {
+    "hash": "5fb09fe",
+    "subject": "phase 2 S4: a snapshot or sign log of another network is refused"
+   },
+   {
+    "hash": "1f6a626",
+    "subject": "phase 2 S4: the signature record's hooks, with stub bodies"
+   },
+   {
+    "hash": "e67549c",
+    "subject": "phase 2 S4: the effective network id, served and pinned (E20)"
+   },
+   {
+    "hash": "1fe818f",
+    "subject": "phase 2 S4: plainer ProposeBlock, logVote and wallet counter (review follow-up)"
+   }
+  ],
+  "summary": "I built slice S4 on branch p2-s4 in <scratch>/wt/p2-s4: 9 commits on 0dbb89a. Every commit builds and passes go vet in both modules, and the final commit passes the whole suite list.\n\nWhat changed:\n- **Genesis hash and network id.** New ledger/genesis.go: GenesisHash(networkName, genesis LedgerState, ValidatorRule) and NetworkID = name + \"/\" + hex. ledger.Chain gains GenesisHash, which block 1 builds on.\n- **Block hash.** New ledger/hash.go: ContentHash, SealedDigestOf, ValidatorsHash, BlockHashOf, BlockHash, Block.Header(), and a BlockHeader.BlockHash(stateDigest) helper. The block is now {Height, PreviousBlockHash, ValidatorsHash, Nonce, Content, StateDigest}, and BlockContent has AccountUpdates, VoteEvidence and ProposalEvidence.\n- **Block rules.** ApplyBlock checks the previous block hash (rule 2) and the signing set's hash (rule 3), and refuses any proposal evidence until S6. ProposeBlock writes the previous hash, the nonce and the set's hash.\n- **Votes, commits, driver.** Vote and Commit now carry BlockHash, and the driver works on block hashes (renamed from Digest).\n- **Signed proposals.** consensus.SignedProposal signs height, round, valid round, block hash and the proposer's name. consensus.ProposalEvidence exists as a type. ProposalMessage is {Proposal, Block}.\n- **Node.** It draws a nonce for each candidate block and keeps the last block's hash (the genesis hash at first) and header. Blocks, the relay key, the equivocation log and the sign log's refusal all go by block hash. onProposal follows the spec 4.11 order, so a copy whose block does not hash to the signed hash is not authentic and counts against nothing (E15). /hdls/proposal accepts bodies up to 2 MiB.\n- **Checkpoint.** It is now {State, LastBlock, Commit, Validators}. Checkpoint.Consistent checks the shape and the hashes before any signature, both in the node and in the wallet. The anchor counts only votes that belong to the commit. The snapshot holds only the last block's header.\n- **Payment pin (E38).** Rule 17 compares against the full state digest. Intake accepts a pin only for the next block and only to the committed state's digest, which the committed view now holds. /hdls/resolve answers from the view with that digest and the committed height.\n- **Sign log.** Once the snapshot of height h is on disk, the node writes an empty log for h + 1 (spec 6.9). saveSnapshot now returns its error, and after a failed write the old log stays.\n- **Earlier networks (spec 0.2).** The snapshot file is {NetworkID, Checkpoint}, the sign log records its NetworkID, and the pin is {networkId, validators}. Each file whose id is missing or different is refused with an error saying it belongs to an earlier network.\n- **Record hooks.** node/record.go has recordCommittedBlock, handleRecord and handleLifelongRecord with empty bodies; commit calls the first after the snapshot, and both routes are registered.\n- **Server, demo, wallet.** cmd/server and the demo sign with the effective network id, and /hdls/status serves it as networkId. The wallet pins the id at first use, refuses one that does not start with its -network name and \"/\", and signs and verifies with the pinned id.\n\nSize: 942 production lines added and 598 removed (177/174 of that is the mechanical rename commit); tests 1118 added and 386 removed.",
+  "tests": [
+   {
+    "name": "TestBlockHashLayout (ledger, golden)",
+    "failsWithoutChange": "On the parent the hash functions do not exist, so it does not compile. It rebuilds every preimage by hand, so any change to the layout fails it."
+   },
+   {
+    "name": "TestBlockHashCoversEveryPart (ledger)",
+    "failsWithoutChange": "Does not compile on the parent (no PreviousBlockHash, ValidatorsHash or Nonce). It checks that height, previous hash, each signer's name, key and power, nonce, state digest and every content field each change the hash."
+   },
+   {
+    "name": "TestApplyBlockRequiresThePreviousBlockHash (ledger)",
+    "failsWithoutChange": "Mutation that removes rule 2: FAIL."
+   },
+   {
+    "name": "TestApplyBlockRequiresTheSigningSetHash (ledger)",
+    "failsWithoutChange": "Mutation that removes rule 3: FAIL. With rule 3 removed, no other ledger test fails, so no existing refusal test was passing only because of the new rule."
+   },
+   {
+    "name": "TestApplyBlockRefusesProposalEvidence (ledger, extra)",
+    "failsWithoutChange": "Mutation that removes the refusal: FAIL."
+   },
+   {
+    "name": "TestPinUsesTheFullStateDigest (ledger; rewrites TestPreviousStateBindingPinsToHistory)",
+    "failsWithoutChange": "On the parent commit: FAIL (a payment pinned to the state digest is left out)."
+   },
+   {
+    "name": "TestNetworkIdBindsTheGenesis (ledger, golden)",
+    "failsWithoutChange": "On the parent the functions do not exist, so it does not compile. It rebuilds both preimages by hand and checks that name, parameter, balance, power, mode and threshold each change the id."
+   },
+   {
+    "name": "TestSignedProposalCoversEveryField (consensus, extra)",
+    "failsWithoutChange": "Mutation that drops the proposer from the signed fields: FAIL."
+   },
+   {
+    "name": "TestSwappedBodyIsNotAuthenticAndTheGenuineCopyStillCounts (node; replaces TestSwappedBodyCopyDoesNotTakeTheRound)",
+    "failsWithoutChange": "Mutation that removes step 6 (block hash equals signed hash): FAIL."
+   },
+   {
+    "name": "TestNonceOnlyDifferenceIsReportedAsEquivocation (node)",
+    "failsWithoutChange": "Mutation that compares state digests in the equivocation report: FAIL."
+   },
+   {
+    "name": "TestProposalIsSentOnlyOnceLogged (node, new case for two empty blocks with different nonces)",
+    "failsWithoutChange": "Mutation where logProposal compares state digests: FAIL."
+   },
+   {
+    "name": "TestCheckpointRecomputesTheBlockHash (node)",
+    "failsWithoutChange": "Mutations of Consistent without the block-hash check, or without the validators-hash check: FAIL."
+   },
+   {
+    "name": "TestPaddedCheckpointIsRefusedBeforeAnyPadIsVerified (node, counts signature checks)",
+    "failsWithoutChange": "Mutations of Consistent without the validators-hash check (padded set trusted), or anchorVouches counting any vote (23 checks): FAIL."
+   },
+   {
+    "name": "TestResolveServesTheStateDigest (node)",
+    "failsWithoutChange": "Mutation where resolve serves the last block hash, as the old Decided value would: FAIL."
+   },
+   {
+    "name": "TestIntakeRefusesAPinForALaterBlock (node)",
+    "failsWithoutChange": "On the parent commit: FAIL (a pin for a later block and a pin to the accounts digest are both admitted)."
+   },
+   {
+    "name": "TestSnapshotKeepsOnlyTheLastNonce (node)",
+    "failsWithoutChange": "On the parent there is no nonce, so it does not compile. Mutations of fastForward without lastBlockHash, or commit without the header: FAIL."
+   },
+   {
+    "name": "TestSignLogIsEmptiedAfterTheSnapshot (node)",
+    "failsWithoutChange": "On the parent commit: FAIL (the log still holds height 1 with its votes). Mutation that skips the emptying: FAIL."
+   },
+   {
+    "name": "TestSnapshotOfAnEarlierNetworkIsRefused, TestSignLogOfAnEarlierNetworkIsRefused (node, extra)",
+    "failsWithoutChange": "On the parent commit: FAIL (a Phase 1 or another network's sign log loads, and neither message says the file belongs to an earlier network)."
+   },
+   {
+    "name": "TestOpenRefusesSignLogThatDoesNotVerify (node, new case: a logged block that is not the one signed)",
+    "failsWithoutChange": "Mutation of loadSignLog without the block-hash check: FAIL."
+   },
+   {
+    "name": "TestProposalRouteTakesTwoMebibytes, TestStatusServesTheNetworkId (node, extra)",
+    "failsWithoutChange": "Mutations with a 1 MiB proposal route, or a status without networkId: FAIL."
+   },
+   {
+    "name": "TestWalletPinsTheNetworkIdOnFirstUse (ui)",
+    "failsWithoutChange": "Mutations where the wallet signs for its -network name, accepts any network, or skips Consistent: each FAIL."
+   },
+   {
+    "name": "TestLoadValidConfig network-id checks (cmd/server, rewritten)",
+    "failsWithoutChange": "Mutation where the server signs for the bare name: FAIL."
+   },
+   {
+    "name": "TestWalletPinHoldsNameKeyAndPower (ui, now also refuses the S3 bare list with names)",
+    "failsWithoutChange": "Exercises the new pin format and the earlier-network refusal. Not separately run against the parent: the test file uses the new walletPin type and does not compile there."
+   }
+  ],
+  "deviations": "1. BlockContent has no NameRequests field yet: NameRequest is S5's type, so S5 adds the field.\n2. /hdls/proposal now decodes up to 2 MiB (spec 4.11, 6.10, Q6). No slice listed this; I did it with ProposalMessage, using a maxBytes parameter on decode.\n3. anchorVouches counts only votes that belong to the commit (precommits for its height, round and block hash). Without that, a forged header covering pads let the genuine anchor votes vouch, and the pads were then verified, contrary to the \"before any pad is verified\" test.\n4. I added two exported helpers beyond the spec's function list: Checkpoint.Consistent (used by both the node and the wallet) and BlockHeader.BlockHash(stateDigest).\n5. The relay key uses the signed proposal's BlockHash, which onProposal has already checked equals ledger.BlockHash(block), instead of hashing the block again.\n6. In the server config, networkId is renamed networkName, since it now holds only the name. I added no canonical-name check, which is S8's genesis validation. The docs still say networkId (S11).\n7. The demo's -network flag is now the network name. There is no automated demo test (S8 adds TestDemoGenesisIsValid). A manual smoke test showed the demo serving village/2f12…, and a new wallet pinned it together with the founder.\n8. The file formats changed for the earlier-network refusal: savedSnapshot{NetworkID, Checkpoint} (S6 will add PendingProofs), and signLog.NetworkID. The pin follows spec 7.2. A bare-list pin, with or without names, is refused as belonging to an earlier network.\n9. The wallet's counter file (<keyfile>.state) now stores the key networkName instead of networkId, because it holds the -network name. The wallet builds a signer from the seed for each signature (about 0.36 ms), because the network id is only known after first use.\n10. loadSignLog also checks that each logged block hashes to its signed hash, and that the locked proposal is for the log's height.\n11. Tests rewritten because they relied on the removed PreviousStateDigest field or on blocks sharing a state digest:\n   - TestAccountsDigestTellsNilAmountFromZero now checks only the digests.\n   - TestForgedCopyCannotReplaceAStoredBlock now uses each round's genuine signature with the other round's block.\n   - TestSoleValidatorRestartRecommitsItsLockedBlock now makes the snapshot write fail, because a successful write now empties the sign log.\n   - The handNet test helper now proposes with a zero nonce, so one content gives one block.\n12. The record stubs have empty bodies, so the two routes answer 200 with an empty body until S7 fills them in.",
+  "suite": "All green on 1fe818f. Log: <scratch>/p2-scratch/s4/final-suite-1.log\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: pass.\n- go build ./... and go build -C ui -o /dev/null .: pass.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., two runs: both pass (consensus 55.6 s and 55.1 s, ledger 10.3 s and 10.5 s, node 55.2 s and 56.0 s).\n- The same with -C ui, two runs: both pass (30.3 s and 30.1 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: pass in 92.5 s.\n\nEvery commit builds and passes vet in both modules (checked per commit). The race timings match the base (consensus 56 s, node 53 s), so no time limit was raised. Mutation and parent-revert logs are in <scratch>/p2-scratch/s4/ (c4-mutations.log, c8-mutations.log, c9-mutations.log, revert-pin/, revert-c5/, revert-c6/).",
+  "openIssues": "- **Docs (S11).** docs/operating-a-network.md and ui/README.md still describe the networkId config key and wallet flag, and the old checkpoint shape. findings_20261027.md does not yet mark E15, E20 and E38 fixed.\n- **Proposal evidence (S6).** Proposal equivocation, including blocks that differ only in their nonce, is still only logged by reportEquivocation. ApplyBlock refuses any ProposalEvidence until S6.\n- **Record stubs (S7).** The two record routes answer 200 with an empty body until S7 fills them in.\n- **Wallet first use.** The wallet makes the /hdls/status request while holding its mutex, so a slow node can delay other wallet requests at first use. This happens once.\n- **Restart without a sign log.** A proposer restarted without its sign log now always builds a different candidate block, because the nonce is fresh. Only the existing re-gossip wait stops it signing a second proposal for a round it already proposed in. TestRestartedProposerDoesNotSignAgainstItself (log lost) still passes."
+ },
+ "check": {
+  "confirmed": true,
+  "problems": [
+   {
+    "severity": "minor",
+    "file": "node/node.go",
+    "problem": "Nothing tests that the node builds block 1 on Chain.GenesisHash. This is new S4 behaviour (spec 2.3, 6.2: `lastBlockHash: config.Chain.GenesisHash` in Open), and the shared rules require a test that fails without it. No node test uses a non-zero GenesisHash, so the behaviour is untested. S5, S6 and S10 all edit Open and startHeight.",
+    "evidence": "Mutation `lastBlockHash: [32]byte{}` in Open: the whole root suite passes (verify-S4-logs/mutations.log, open-ignores-genesis-hash). My probe TestVerifyBlockOneBuildsOnTheGenesisHash checks two things: a sole validator's block 1 carries PreviousBlockHash == GenesisHash, and an observer refuses a block 1 built on zero. It passes at head and fails under the mutation. File: <scratch>/p2-scratch/verify-S4-adv/node/zz_verify_s4_test.go",
+    "fix": "Add a node test with a non-zero Chain.GenesisHash: block 1's PreviousBlockHash equals it, and a block 1 on another previous hash is not taken. The probe above can be used as is."
+   },
+   {
+    "severity": "minor",
+    "file": "ui/trust.go",
+    "problem": "At first use, nothing tests the signature check under the served id (`checkpoint.Commit.Verify(..., networkID, signers)`). That check is what binds the pinned network id to an id the validators actually sign for (spec 7.2: 'verifies the checkpoint against them'). TestWalletPinsTheNetworkIdOnFirstUse says it checks the validators 'signed it for that id', but its other-network case serves the name 'othernet', so the name-prefix check refuses it before any signature is checked.",
+    "evidence": "Mutation `if false && !checkpoint.Commit.Verify(...)` at first use: the whole ui suite passes. The S3 parent has the same gap. My probe TestVerifyFirstUsePinsOnlyAnIdTheValidatorsSignFor has a node serve 'testnet/<another hash>' with a checkpoint signed for the real id. It passes at head. Under the mutation the wallet believes the state and pins the wrong id. File: <scratch>/p2-scratch/verify-S4-adv/ui/zz_verify_s4_test.go",
+    "fix": "Add that case to TestWalletPinsTheNetworkIdOnFirstUse: the right name with another genesis hash, and a checkpoint signed for the real id. Nothing may be pinned or believed."
+   },
+   {
+    "severity": "minor",
+    "file": "node/persist.go",
+    "problem": "Two checks S4 added have no test that fails without them. One is loadSignLog's height check on the locked proposal (deviation 10: `signedFor` checks Height for Locked as well as for Proposals). The other is loadPin's check that the pinned id starts with the -network name and '/' (ui/trust.go).",
+    "evidence": "Mutation of Locked without the height check: the whole root suite passes (locked-any-height). Mutation of loadPin without the prefix check: the whole ui suite passes (pin-any-network-name). Both probes pass at head and fail under their mutations: TestVerifyLockedProposalOfAnotherHeightIsRefused (verify-S4-adv/node/zz_verify_s4_test.go) and TestVerifyPinOfAnotherNetworkNameIsRefused (verify-S4-adv/ui/zz_verify_s4_test.go).",
+    "fix": "Add a Locked-for-height-2 case to TestOpenRefusesSignLogThatDoesNotVerify. Add an othernet pin case to TestWalletPinHoldsNameKeyAndPower. Alternatively, drop either check if the owner does not want it."
+   },
+   {
+    "severity": "minor",
+    "file": "node/persist.go",
+    "problem": "The writeAtomic comment is stale. It says 'Any error abandons the write and is returned: the snapshot ignores it (best-effort), the sign log does not.' Since 950b1e8, saveSnapshot returns the error and commit acts on it: it keeps the sign log after a failed write.",
+    "evidence": "node/persist.go lines 106-107, compared with saveSnapshot's `return err` and node.go:1055 `if node.saveSnapshot() == nil && node.signLog.Height == block.Height`.",
+    "fix": "Reword it, for example: 'the snapshot's caller logs it and keeps the sign log of the height; the sign log's caller refuses to release the vote'."
+   },
+   {
+    "severity": "minor",
+    "file": "ui/trust.go",
+    "problem": "verifiedState checks `checkpoint.State.NamesAscending()` and then `checkpoint.Consistent()`. The first step of Consistent is the same NamesAscending check, so the first call is redundant (minimal-code rule).",
+    "evidence": "ui/trust.go verifiedState, and node/messages.go Consistent: `... && state.NamesAscending() && ...`. TestWalletRefusesAStateOutOfNameOrder only needs a refusal.",
+    "fix": "Delete the separate NamesAscending check, and update the verifiedState comment."
+   },
+   {
+    "severity": "minor",
+    "file": "ui/wallet.go",
+    "problem": "readWalletState still accepts a counter file that has no network name ('a file without a network name predates it'). After 1fe818f renamed the key to networkName, every pre-S4 .state file has no name, so its counter is taken whatever its network. That keeps an old-format path, which the rules forbid. The impact is nil, because nextPaymentBlockID drops a counter that is far ahead.",
+    "evidence": "`savedState.NetworkName != \"\" && savedState.NetworkName != networkName` in readWalletState. A Phase 1 or S3 file {\"networkId\":\"village\",...} decodes with NetworkName \"\" and is accepted.",
+    "fix": "Compare `savedState.NetworkName != networkName` only, so a file without the name starts the counter afresh. That removes code, and starting afresh is correct on a new genesis."
+   },
+   {
+    "severity": "minor",
+    "file": "consensus/proposal.go",
+    "problem": "Two new receivers do not follow tonight's rule that a receiver is named after its type: `func (proposal SignedProposal)` (signFields, Verify) and `func (header BlockHeader) BlockHash` in ledger/hash.go. SignedProposal and BlockHeader are exported, so the names should be signedProposal and blockHeader.",
+    "evidence": "consensus/proposal.go and ledger/hash.go. Compare `validatorSet *ValidatorSet`, `ledgerState LedgerState` and `httpTransport *HTTPTransport`. The older `evidence VoteEvidence` predates S4.",
+    "fix": "Rename the receivers to signedProposal and blockHeader."
+   }
+  ],
+  "evidence": "I compared the branch with the spec, not with the builder's report. I read §0 (0.2 and R1-R11), §2.3, §3.5-3.6, §4.0-4.1, §4.10-4.14, §5.1-5.4, §6.1-6.10, §7.2, §10.2 S4, §12 and the appendix, and the whole diff 0dbb89a..1fe818f (9 commits, author eval-apply-labs, trailers correct, worktree clean).\n\nScope: every §10.2 S4 item is done and correct, and so is the orchestrator's earlier-network refusal for the snapshot, sign log and pin. Deviations 1-12 are justified. Deviation 3 (the anchor counts only the commit's own votes) is needed: without it a forged header that covers pads lets the real anchor votes vouch, and then 23 signature checks run. With it, 0 run. Nothing from a later slice is half-built.\n\nSuite, run by me on a copy of 1fe818f (<scratch>/p2-scratch/verify-S4-suite; logs in <scratch>/p2-scratch/verify-S4-logs/suite-run.log and suite-ui.log):\n- gofmt -l: no output (also on the worktree).\n- go vet and go build, both modules: pass.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., twice: pass (consensus 57.9/55.5 s, ledger 10.4/10.2 s, node 55.8/56.5 s).\n- The same with -C ui, twice: pass (29.8/28.3 s).\n- The chaos subset with -count=3: pass (94.5 s).\n- Every one of the 9 commits builds and vets in both modules (per-commit.log).\n\nMutations: 39 mutations in scratch copies (mutations.py, mutations.log). Every spec-listed S4 test and the builder's extra tests fail under their mutation:\n- block-hash layout, nonce and power;\n- rules 2 and 3, and the proposal-evidence refusal;\n- the E38 pin, both in ApplyBlock and in the two intake rules;\n- the genesis hash over the accounts digest instead of the state digest, and an unsorted genesis rule;\n- the proposer missing from the proposal signature;\n- step 6 removed; equivocation, logProposal or relay compared by state digest;\n- Consistent without the block hash or the set hash; the anchor counting any vote;\n- resolve serving the accounts digest;\n- fastForward, the header or the nonce left out;\n- the sign log kept, or emptied after a failed write;\n- the network-id refusals; the sign log without the block check;\n- the 1 MiB proposal route; status without networkId;\n- the wallet taking any network, skipping Consistent, or signing for the name; the server signing for the name.\n\nFour mutations survived; they are the test gaps in the problem list (GenesisHash wiring, locked height, first-use verify, pin name). Probes that close them are in <scratch>/p2-scratch/verify-S4-adv/node/zz_verify_s4_test.go and <scratch>/p2-scratch/verify-S4-adv/ui/zz_verify_s4_test.go. They pass at head and fail under their mutations.\n\nAdversarial probes, all passing at head:\n- A block carrying every content kind keeps its signed hash through JSON decode and a relay's re-encode. Its strings include `<&>`, U+2028/2029, U+FFFD and control characters; it has nil and empty slices and nil amounts.\n- A sign log holding a block with a payment reloads at Open.\n\nChecks by reasoning:\n- onProposal runs §4.11 in order, and only a taken proposal is relayed.\n- A flood of swapped-body copies costs no more than the existing flood of bogus signatures.\n- The committed view equals the live state at every event boundary, so admitPayment can use it.\n- Real Phase 1 and S3 snapshot and sign-log JSON decode cleanly and reach the 'earlier network' refusal. A bare-list pin is refused the same way.\n- The empty sign log is written only after a fsynced snapshot.\n- No blocker or major found.\n\nDemo smoke test on free ports 39431/39432:\n- /hdls/status serves networkId village/216c…;\n- resolve answers the committed height 7 and the state digest;\n- the wallet pinned the id and the founder;\n- the record routes answer 200 with an empty body;\n- the checkpoint keys are State, LastBlock, Commit and Validators.\n\nEnvironment note: the builder's smoke-test demo is still running (pid 975019 and wallet pid 975046, started 06:52, on 127.0.0.1:18080 and 18091). It writes /tmp/go_ledger_demo2585904321 every block. I left it alone."
+ },
+ "fix": {
+  "branchHead": "31cc9713083efadaaac8af8411cf27bed5fb4640",
+  "fixed": [
+   "2c0d0d2 phase 2 S4: test that block 1 builds on the genesis hash (review follow-up). Minor, node/node.go. New TestBlockOneBuildsOnTheGenesisHash in node/node_test.go uses a non-zero Chain.GenesisHash ({0xaa, 0xbb}). It checks that a sole validator's block 1 carries that hash as its PreviousBlockHash. It also checks that an observer refuses a block 1 built on a zero hash and takes one built on the genesis hash; the refused block is sent first so the round stays open. Mutation `lastBlockHash: [32]byte{}` in Open: all three checks FAIL. Passes at head.",
+   "cad3718 phase 2 S4: test the wallet's first-use signature check under the served id (review follow-up). Minor, ui/trust.go. TestWalletPinsTheNetworkIdOnFirstUse gains a node that serves testnet/<another genesis hash> (ledger.NetworkID(\"testnet\", [32]byte{2})) with a checkpoint its validators signed for the real id. Nothing is believed or pinned. Mutation `if false && !checkpoint.Commit.Verify(...)` at first use: FAIL, because the wallet believes the state and pins the wrong id. Passes at head.",
+   "36ff273 phase 2 S4: test the locked proposal's height and the pin's network name (review follow-up). Minor, node/persist.go and ui/trust.go. I kept both checks and tested them. TestOpenRefusesSignLogThatDoesNotVerify now writes each of its four proposal cases twice: as an own proposal and as the locked proposal. TestWalletPinHoldsNameKeyAndPower now also refuses an othernet pin in a wallet started for testnet; its failure message prints only the first 60 characters of the pin. Each mutation FAILS, and every test passes at head: the locked proposal without the height check; the locked proposal without its block-hash check (an extra mutation, also now covered); loadPin without the prefix check.",
+   "d871d75 phase 2 S4: the writeAtomic comment says what each caller does with an error (review follow-up). Minor, node/persist.go. The comment now says that a failed snapshot is logged and keeps the sign log of its height (see commit), that a failed sign log keeps the vote or proposal from being released, and that a failed backup mirror is ignored. Comment only.",
+   "6ae1ea7 phase 2 S4: the wallet checks name order once, in Consistent (review follow-up). Minor, ui/trust.go. I deleted the separate NamesAscending check in verifiedState, since Consistent's shape step runs the same check before the digest is taken. The refusal now reads \"the node's state is not in name order, or does not match its commit\". The comments of verifiedState and TestWalletRefusesAStateOutOfNameOrder now say this; Consistent compares the heights first, so the test's old wording 'before any other check' was no longer exact. No behaviour change: TestWalletRefusesAStateOutOfNameOrder still passes, and it still FAILS when Consistent drops NamesAscending (mutation consistent-without-name-order).",
+   "db7c6d6 phase 2 S4: the wallet's counter file must name its network (review follow-up). Minor, ui/wallet.go. readWalletState now compares `savedState.NetworkName != networkName` only. A file that names no network, as every pre-S4 .state file does, starts the counter afresh, so the old-format path is gone. I updated the walletState comment to match. TestBlockIDCounterRecoversFromBadHeight gains a case with an earlier network's file, {\"networkId\": \"othernet\", \"lastPaymentBlockID\": 20}. Before the fix the next payment names block 21 instead of 13: FAIL (log counter-before-fix.log). After the fix it passes.",
+   "31cc971 phase 2 S4: receivers named after their types, signedProposal and blockHeader (review follow-up). Minor, consensus/proposal.go and ledger/hash.go. `proposal SignedProposal` becomes `signedProposal` in signFields and Verify, and `header BlockHeader` becomes `blockHeader` in BlockHash. Rename only: both modules build, go vet passes, and the consensus and ledger tests pass. I checked every receiver S4 added; no other one breaks the rule. The SignProposal parameter `proposal` is a parameter, not a receiver, so it stays."
+  ],
+  "notFixed": [],
+  "suite": "The whole suite list passes on head 31cc971. Log: <scratch>/p2-scratch/s4-followup/final-suite.log\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: pass.\n- go build ./... and go build -C ui -o /dev/null .: pass.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., two runs: both pass. Consensus 59.1 s and 57.6 s, ledger 10.7 s and 9.9 s, node 55.6 s in both runs.\n- The same with -C ui, two runs: both pass, 30.2 s each.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: passes in 92.7 s.\n\nThe timings match the builder's runs, so I raised no time limit. Each of the 7 new commits builds, passes go vet in both modules and is gofmt-clean on its own (<scratch>/p2-scratch/s4-followup/per-commit.log). Mutation verdicts are in <scratch>/p2-scratch/s4-followup/mutations.log, with each mutation's diff and test output next to it (mut-<name>.diff and mut-<name>.log in the same directory). The worktree is clean.\n\nThe builder's demo process from its smoke test (pid 975019, ./demo -listen 127.0.0.1:18080 -ui) is still running at about 1.6% CPU. It is not mine, so I left it alone."
+ },
+ "secondCheck": null
+}

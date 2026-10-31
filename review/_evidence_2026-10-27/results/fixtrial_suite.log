@@ -1,0 +1,15 @@
+--- FAIL: TestVerifyC12PartialSeizureMintsThroughNode (40.83s)
+    zz_verify_c12_test.go:90: chain did not advance
+--- FAIL: TestVerifyC13RestartDoesNotRecover (16.01s)
+    zz_verify_c13_test.go:38: setup: change not enacted
+FAIL
+FAIL	github.com/eval-apply-labs/go-ledger/node	93.785s
+?   	github.com/eval-apply-labs/go-ledger/cmd/demo	[no test files]
+?   	github.com/eval-apply-labs/go-ledger/cmd/keygen	[no test files]
+ok  	github.com/eval-apply-labs/go-ledger/cmd/server	0.011s
+ok  	github.com/eval-apply-labs/go-ledger/consensus	1.910s
+ok  	github.com/eval-apply-labs/go-ledger/signing	0.009s
+FAIL
+exit=1
+ok  	github.com/eval-apply-labs/go-ledger/ui	4.412s
+ui exit=0

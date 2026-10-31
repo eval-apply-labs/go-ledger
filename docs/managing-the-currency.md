@@ -1,5 +1,7 @@
 # Managing the currency
 
+Area: **general**: monetary policy spans the whole system.
+
 > Monetary policy for a community running this ledger. The mechanics (fees burn, the treasury is
 > minted by a ⅔ vote) are enforced by the code; the *policy* — and its honest limits — is the
 > community's. This distils the design philosophy the currency was built around.
@@ -14,13 +16,13 @@ policy, and it is a deliberate choice made in the open by supermajority.
 
 ## What "the money supply" is
 
-Every account holds an exact balance (arbitrary-precision rationals — no floating-point drift, no
-rounding leaks). The **total supply** is just the sum of all balances. You can read it at any time
+Every account holds an exact balance (a whole number of 0.00000001 units — no floating-point drift,
+no rounding leaks). The **total supply** is just the sum of all balances. You can read it at any time
 from a node: `GET /hdls/accounts` returns every account and its amount; add them up.
 
 ## Where the supply comes from: genesis
 
-The genesis accounts *are* the entire starting money supply. Whoever writes the genesis config decides
+The genesis accounts *are* the entire starting money supply. Whoever writes the genesis file decides
 who begins with what, and that total is the supply until governance changes it. Choose it on purpose —
 there is no mining, no faucet, no automatic issuance to dilute it later.
 
@@ -35,22 +37,33 @@ does not mint). So:
   move value or burn it.
 - Every payment shrinks the total supply by one fee. With activity, the supply **slowly declines**.
   That deflationary bias is deliberate — the fee is both a spam cost and a supply sink.
+- Every registration, key change and bank change burns one **new-key fee** from whoever requests it.
 
-The only other thing that removes money is **slashing**: a validator caught double-signing has its
-balance confiscated (and is ejected from the set). That is rare and adversarial, but it too reduces
-supply.
+One more rule removes money: a block in which one payer's payments together overdraw it destroys
+the balance that payer had before the block and cancels its payments; money paid to it in that
+block still lands (`ledger.ProcessPayments`). Every intake point refuses a payment that
+would overdraw its payer, so honest nodes never build such a block (see
+[security.md](security.md#fixed-by-construction)).
 
-## The only way to create money: a ⅔-voted reassignment
+Nothing else removes money on its own. A validator caught double-signing is **frozen**, not fined:
+its name leaves the validator set and its balance stays where it is. A holder can freeze their own
+name too, and the ⅔ can freeze any name. A freeze only stops the money moving; deciding where it
+goes is a separate, public ⅔ vote (below).
 
-Balance reassignment (see [governance.md](governance.md)) is the **sole** mechanism that can increase a
-balance — i.e. the sole source of new supply. The minted amount is **created out of nothing**: it is
-not taken from any other account, so it is genuinely new money. It is deliberately hard to use:
+## The only way to create money: the ⅔ name action
 
-- It requires a **> ⅔ stake supermajority** of the current validators. A minority (≤ ⅓) **cannot**
+The ⅔ name action (see [governance.md](governance.md)) is the **sole** mechanism that can set a
+balance outside a payment — i.e. the sole source of new supply. The minted amount is **created out of
+nothing**: it is not taken from any other account, so it is genuinely new money. It is deliberately
+hard to use:
+
+- It requires a **> ⅔ supermajority** of the current validators' power. A minority (≤ ⅓) **cannot**
   create money, full stop.
-- It is visible: the change is a certificate carried in a block, and the new balance shows up on-chain
-  for anyone to see and sum.
-- It is bounded to the balance it amends (it can't be replayed) and cannot drive an account negative.
+- It is visible: the change is a certificate carried in a block, the new balance shows up on-chain
+  for anyone to see and sum, and the signature record of each node that committed that block keeps
+  the certificate for good.
+- It is bounded to the balance it amends (it can't be replayed), cannot drive an account negative, and
+  cannot raise a balance above the largest balance the network allows (`maxAccountBalance`).
 
 **The treasury pattern.** In practice a community designates one account as its **treasury** and mints
 into *that* — then spends it deliberately on grants, public works, paying contributors, or simply
@@ -58,6 +71,10 @@ replenishing what fees have burned. The treasury turns "create money out of noth
 act into a standing instrument of policy: the balance is on-chain and auditable, every top-up is a
 ⅔-ratified certificate, and outflows are ordinary signed payments from the treasury account. Nothing
 in the code privileges such an account — it's a convention — but it's the natural home for the mint.
+Keep it **undelegated**: where seats follow stake, a delegated balance is voting power, and a
+delegated treasury could hand its validator the quorum. A name the ⅔ create backs no one, and so does
+a genesis account with an empty `delegate`; an account update sets a delegation, or clears it with
+`-`.
 
 So inflation is not something that *happens to* this currency — it is something the community must
 *choose*, by supermajority, in the open.
@@ -68,12 +85,15 @@ Because minting is gated behind a ⅔ vote, "preventing inflation" is really abo
 lever**:
 
 1. **Guard the supermajority.** The only way money is ever created is ⅔ of validator power agreeing to
-   it. Keep that threshold meaningful: don't let voting power concentrate. Voting power follows
-   **delegation** — an account holder's stake counts toward the validator it delegates to (its "bank")
-   — so who controls monetary policy is exactly who holds delegated stake. Watch for one bank
-   accumulating enough delegated stake to approach ⅓ (a veto) or, worse, ⅔ (unilateral minting).
-   Account holders re-delegating is how the community keeps that honest.
-2. **Make reassignment rare and principled.** Agree, as a community, on what a mint is *for* — a grant
+   it. Keep that threshold meaningful: don't let voting power concentrate. In dynamic mode (a
+   genesis with a `validatorThreshold`), voting power follows **delegation** — an account holder's
+   stake counts toward the validator name it delegates to — so who controls monetary policy is
+   exactly who holds delegated stake. Watch for one bank accumulating enough delegated stake to
+   approach ⅓ (a veto) or, worse, ⅔ (unilateral minting). Account holders re-delegating is how the
+   community keeps that honest. In static mode (a genesis that lists its validators), the genesis
+   fixes each validator's power and delegation moves none: only a new genesis adds a validator or
+   changes a power.
+2. **Make minting rare and principled.** Agree, as a community, on what a mint is *for* — a grant
    to a newcomer, a correction, replenishing burned fees — and treat anything else as out of bounds.
    The software won't stop a ⅔ majority; a social convention is what keeps it from being abused.
 3. **Publish the supply.** Sum `GET /hdls/accounts` on a schedule and post it. A mint is on-chain and
@@ -81,12 +101,17 @@ lever**:
 4. **Tune the fee thoughtfully.** The fee is governed (also a ⅔ vote). A higher fee burns supply faster
    (more deflation, and it discourages small payments); a lower fee weakens the sink. It is your
    deflation dial.
+5. **Set the caps on purpose.** `maxPaymentAmount` bounds what one payment, a thief's included, can
+   move; `maxAccountBalance` bounds what one name can hold, and what one mint can raise it to. Both
+   are ⅔-governed. Keep the largest payment at or above the fee, or no payment can pass.
 
 ## Monetary policy: the line to toe
 
 Put the two flows together and you have the whole policy. Over any period:
 
-    net supply change  =  treasury mints (⅔ votes)  −  fees burned  −  slashes
+    net supply change  =  treasury mints (⅔ votes)  −  fees burned  −  ⅔ reductions  −  overdraw bans
+
+The last term is zero while every node is honest (above).
 
 The goal is usually **not** zero — but be precise about *what* you are targeting, because money-supply
 growth and price inflation are not the same thing. Prices move with the supply *relative to real
@@ -223,7 +248,7 @@ A few ways communities bootstrap it (any mix works):
 
 You do not even need the internet to run this ledger. The consensus assumes nothing about how *fast*
 messages travel — only that the head nodes exchange each round's votes before the exchange window
-closes — so the window can be anything, including a whole day. And the window is a governed parameter
+closes — so the window can be anything up to a whole day. And the window is a governed parameter
 (a ⅔ vote), so a community can set its tempo to match its connectivity: seconds on a live shared
 network, hours or a day when the link is a nightly courier — or, if you truly want, **avian carriers**.
 A block still commits, the ledger stays global and auditable, and only the finality slows to the beat
@@ -241,17 +266,20 @@ isn't) doing.
 
 | lever | who controls it | effect on supply |
 |---|---|---|
-| genesis balances | whoever writes the genesis config | sets the starting supply |
+| genesis balances | whoever writes the genesis file | sets the starting supply |
 | transaction fee | governed, > ⅔ vote | burns each payment — the deflation dial |
-| balance reassignment (the treasury tap) | governed, > ⅔ vote | the **only** way to mint — creates supply out of nothing (or reduces a balance) |
-| slashing | automatic, on proven equivocation | removes a double-signer's balance |
-| delegation | each account holder | decides who holds the votes above |
+| new-key fee | governed, > ⅔ vote | burns each registration, key change and bank change |
+| ⅔ name action (the treasury tap) | governed, > ⅔ vote | the **only** way to mint — creates supply out of nothing (or reduces a balance) |
+| caps (largest payment, largest balance) | governed, > ⅔ vote | none directly; they bound what one payment moves and one name holds |
+| the freeze | the holder, a double-sign, or a > ⅔ vote | none: it stops a name's money moving until the ⅔ decide |
+| delegation | each account holder | in dynamic mode, decides who holds the votes above; in static mode, none (the genesis fixes the powers) |
 
 ## A steward's checklist
 
 - Publish the total supply regularly (sum of `GET /hdls/accounts`).
-- Keep a written convention for when a reassignment (mint) is acceptable.
-- Watch delegated-stake concentration — no bank should quietly approach a ⅓ veto or a ⅔ majority.
+- Keep a written convention for when a ⅔ name action that mints is acceptable.
+- In dynamic mode, watch delegated-stake concentration — no bank should quietly approach a ⅓ veto or
+  a ⅔ majority.
 - Review the fee against how fast supply is burning, and adjust by vote if it drifts.
 - Remember the guarantee the code gives you: **no minority can create money, and no payment can.**
 
@@ -271,33 +299,39 @@ system can — but "when it is abused, can anyone *tell*?" That is where this in
 different: every mint, seizure, parameter change, and validator sits on a public, auditable ledger. It
 cannot make abuse impossible; it makes abuse **legible**, and hands ordinary people the book to check.
 
-**Privacy is cash, not cryptography here — the prepaid key.** You don't need confidential-transaction
-wizardry to have private money. Anyone can create an account (it's just a fresh keypair), fund it, and
-spend from it without ever tying it to their name: a *prepaid public key*, used like cash or a gift
-card — easy to hold, easy to understand, and the everyday privacy answer. The tradeoff is honest: it is
-pseudonymity, not secrecy — the *flows* are public, only the *identity* behind a key is not — so it is
-private the way cash is private, not the way a numbered vault is. Which is exactly why the freedom to
-make such accounts is a civil-liberties bellwether: watch what a government does to it.
+**Privacy is cash, not cryptography here — the hash name.** You don't need confidential-transaction
+wizardry to have private money. A holder registers a name at a bank, which co-signs it and becomes its
+bank of record (a genesis name, or one the ⅔ create, may have none), but a name need not be yours: a
+wallet can register the *hash name* of its own key (`k-` and 24 more characters), fund it, and spend
+from it without tying it to a person — used like cash or a prepaid card. The tradeoff is honest: it is
+pseudonymity, not secrecy — the *flows* and the bank of record are public, and the bank that co-signed
+knows who came to it — so it is private the way cash is private, not the way a numbered vault is.
+Which is exactly why the freedom to hold such names is a civil-liberties bellwether: watch what a
+government does to it.
 
 **The smells of misuse.** Because the ledger is transparent, a state that captures or abuses it leaves
 tracks. A national deployment should be watched for these — they are the nose that tells you the
 instrument is being turned against the people it was meant to serve:
 
-- **Anonymous accounts get squeezed** — prepaid-key accounts are restricted, or every account is forced
-  to carry a registered identity. The cash-like option disappearing is the surveillance state arriving.
-- **Money moves without a mandate** — mints or reassignments that don't match an authorising democratic
+- **Anonymous names get squeezed** — banks refuse to co-sign hash names, or must file a person's
+  identity behind every name they co-sign. Every name a holder registers gets a bank of record; a bank
+  that may no longer keep a customer's identity to itself is the cash-like option disappearing, and the
+  surveillance state arriving.
+- **Money moves without a mandate** — mints or claw-backs that don't match an authorising democratic
   vote: unsubstantiated cash grabs, or supply created faster than the public record justifies. Cross-
   check the mint certificates against the votes; a gap is the smell.
 - **The books get harder to read** — public read access to the account set or the total supply is
   restricted, the codebase goes closed or bloats past auditing, or the source of truth is obscured.
   Disabling the transparency is disabling the only real defence.
 - **You can't get in as a node** — those who want to run a validator / head node are refused, stalled,
-  priced out by a punitive stake threshold, or otherwise gated out of the main net. The barrier can be
-  political *or* economic (see "the validator-entry bar" below); either way, a shrinking or hand-picked
-  validator set is capture in progress.
-- **Stake concentrates** — delegation pools into a few hands until a small group nears a ⅓ veto or ⅔
-  control. This is visible on-chain; a healthy currency keeps its power distribution wide.
-- **Seizures get personal** — the reassignment power is used against *specific named accounts*
+  priced out by a punitive stake threshold, or otherwise gated out of the main net. No vote moves that
+  bar: the genesis writes it, as the stake threshold in dynamic mode or the list of validators in
+  static mode, so watch whoever writes a new genesis. The barrier can be political *or* economic (see
+  "the validator-entry bar" below); either way, a shrinking or hand-picked validator set is capture in
+  progress.
+- **Stake concentrates** — in dynamic mode, delegation pools into a few hands until a small group nears
+  a ⅓ veto or ⅔ control. This is visible on-chain; a healthy currency keeps its power distribution wide.
+- **Seizures get personal** — the ⅔ name action is used against *specific named accounts*
   (dissidents, journalists, opponents) rather than for general policy. On an open ledger a targeted
   zeroing is plainly visible — which is the point.
 - **Soft censorship** — an account is never formally frozen; its payments simply never make it into a
@@ -307,16 +341,23 @@ instrument is being turned against the people it was meant to serve:
   lockstep, forever. Unanimity that never wavers smells of coercion, not consensus.
 - **Changes skip daylight** — mints, seizures, and parameter changes are executed with no public notice
   and no window to contest them (a healthy national deployment would announce and delay the big ones).
-  Speed and secrecy around monetary power is itself the warning.
+  One step cannot wait: money suspected stolen must be frozen before its holder hears of it, or it is
+  gone. But a freeze only holds the money; deciding where it goes is the seizure, and that belongs in
+  public, with a window to contest. Speed and secrecy around monetary power beyond that freeze is
+  itself the warning. (The freeze exists: a holder freezes their own name at once, for free, and the ⅔
+  can freeze any name; neither moves money. Moving the money is a separate ⅔ name action, whose votes
+  are collected off the network; announce it once it has enacted.)
 - **The fee is weaponised** — the transaction fee is set punitively to tax or exclude particular people
   or activity, rather than tuned as honest monetary policy.
 - **Exit is blocked** — holding or trading alternative currencies is forbidden and there is no way to
   cash out. A currency that traps you is relying on the trap, not on being good.
 
-One thing you needn't smell for: the ledger is **historyless** — it carries the current committed state,
-not a rewritable archive of the past — so there is no history to quietly re-write, and no "emergency"
+One thing you needn't smell for: the ledger keeps **no payment history** (a payment is public as it
+travels and in its block, but no node keeps it after the next block) — it carries the current
+committed state and a record of who signed each block, every governance certificate included, not a
+rewritable archive of payments — so there is no history to quietly re-write, and no "emergency"
 retroactive rule change to fear. The only way to falsify what happened is to reinject a wholly
-fabricated state, which severs the state-digest continuity in plain sight. Tampering with the past here
+fabricated state, which breaks the chain of signed block hashes in plain sight. Tampering with the past here
 isn't subtle; it is a blatant break or it is nothing. (And splitting wealth across sock-puppet accounts
 buys no extra power — stake is stake whether it sits in one key or a hundred, so sybils don't move the
 needle; only *real* concentration does, which is the smell above.)
@@ -334,9 +375,9 @@ to expect rather than be ambushed by.
   double-spend for free and made the ledger openly auditable — is the first casualty. *Friction:* the day
   you shard, trust moves from "I can see all of it" to "I trust the proofs and the shard-holders."
 - **Full transparency.** *Fits small:* on one broadcast domain it dissolves partitions and double-spends
-  and grounds audit-by-reading. *Costs big:* it becomes a surveillance graph, and prepaid-key
+  and grounds audit-by-reading. *Costs big:* it becomes a surveillance graph, and hash-name
   pseudonymity is porous to a resourced analyst who pins the ramps and clusters the flows. *Hold it
-  together:* prepaid keys give real cash-like privacy against casual eyes; genuine privacy against a
+  together:* hash names give real cash-like privacy against casual eyes; genuine privacy against a
   hostile state needs confidential transactions (ZK) — which fight the very auditability transparency
   gave you. Your best feature and your worst liability are the same feature.
 - **BFT liveness — progress needs > ⅔ online, messages eventually delivered.** *Fits small:* co-located
@@ -347,31 +388,35 @@ to expect rather than be ambushed by.
   consistency with liveness, and at scale someone can attack the liveness on purpose.
 - **Self-custody — you hold your own key.** *Fits small:* you chose it, you understand it, the loss is
   yours to price. *Costs big:* fatal — a whole population cannot hold keys safely; loss, theft, and
-  coercion become mass problems. *Hold it together:* you can't, without bolting on recovery and custodial
-  options (trusted parties — fine, but a whole adjacent system, not a tweak). This is the assumption that
-  most cleanly does *not* survive contact with scale.
-- **Historyless state — the ledger is "now," not an archive.** *Fits small:* simple, light, tamper-
-  evident (no past to rewrite). *Costs big:* institutions, courts, and regulators want a record —
-  forensics, dispute evidence, audit trails over time — and a critical bug has no rollback. *Hold it
+  coercion become mass problems. *Hold it together:* only with institutional recovery, which this design
+  has in its smallest form: a holder freezes a stolen name at once, the ⅔ give it a new key (its
+  bank can vouch for the holder, off the chain), and the money comes back by a ⅔ claw-back, when it
+  can. That makes the banks trusted parties, and at scale it is a whole adjacent system, not a
+  tweak. This is the assumption that most cleanly does *not* survive contact with scale.
+- **No payment history — the ledger is "now," plus who signed.** Each node keeps a signature record:
+  who signed each block, for `retainBlocks` heights, and every governance certificate and double-sign
+  proof for good. It never keeps payments. *Fits small:* simple, light, tamper-evident, and the ⅔
+  answer for their votes. *Costs big:* institutions, courts, and regulators want a record of payments
+  — forensics, dispute evidence, audit trails over time — and a critical bug has no rollback. *Hold it
   together:* you can run archive nodes off to the side (an opt-in **history node** that observes the
-  committed block stream — each block carries its ⅔ commit certificate, so the record is verifiable
-  and tamper-evident — and retains the state-transition trail the lean validators discard; it is the
-  natural home for the misuse-watching below, and is on the roadmap in `TODO.md`), but that rebuilds
-  the permanent surveillance record you were avoiding. The ephemerality that protects you is also the
-  paper trail a large institution will demand and not find.
+  committed block stream, each block with its ⅔ commit certificate, and retains the payments the lean
+  validators discard; it is the natural home for the misuse-watching below, and is on the roadmap in
+  `TODO.md`), but that rebuilds the permanent surveillance record you were avoiding. The ephemerality
+  that protects you is also the paper trail a large institution will demand and not find.
 - **One global chain — a single total order.** *Fits small:* one definitive ledger, clean objective
   finality, no ambiguity about "the" state. *Costs big:* throughput-capped; national volume forces
   sharding or an L2 that fractures the single-ledger simplicity. *Hold it together:* the node-signed
   **receipt** gives instant provisional settlement (commerce doesn't feel the lag, like a card
   authorisation) while final settlement lands in the block — but sustained volume still needs a scaling
   layer, and every layer is a piece of the "hold it in one head" auditability you spend.
-- **The validator-entry bar (stake to validate).** *Fits small:* a low human bar — the people who would
-  validate are known, and a little stake at risk is enough skin in the game. *Costs big:* the bar becomes
-  a centralisation dial — set it high and only state-approved or custodial giants qualify; set it low and
-  validators have too little to lose. *Hold it together:* balance it so someone able to stand behind a
-  node can self-custody and run their own without a custodian, while betraying the role still costs
-  something. One knob doing two fighting jobs — accountability and openness — that at scale can't fully
-  satisfy both.
+- **The validator-entry bar (stake to validate).** In dynamic mode it is the genesis's
+  `validatorThreshold`, which no vote changes: it is set once per genesis (a static genesis lists its
+  validators instead). *Fits small:* a low human bar — the people who would validate are known, and a
+  little stake at risk is enough skin in the game. *Costs big:* the bar becomes a centralisation dial —
+  set it high and only state-approved or custodial giants qualify; set it low and validators have too
+  little to lose. *Hold it together:* balance it so someone able to stand behind a node can self-custody
+  and run their own without a custodian, while betraying the role still costs something. One knob doing
+  two fighting jobs — accountability and openness — that at scale can't fully satisfy both.
 - **⅔ governance + delegated-stake validators.** *Fits small:* a community override among people who know
   each other, where capture is socially obvious and reversible. *Costs big:* the identical power is
   confiscation and debasement, and delegated stake means concentration *is* monetary capture. *Hold it
@@ -379,7 +424,7 @@ to expect rather than be ambushed by.
   add constitutional limits — things even a supermajority cannot do — which this design does not have. At
   village scale the supermajority can be sovereign; at national scale it must be *bounded*, and that
   bounding is unbuilt.
-- **The 4k-line, one-head-auditable codebase.** *Fits small:* the entire trust model — you trust it
+- **The 10,000-line, one-head-auditable codebase.** *Fits small:* the entire trust model — you trust it
   because you (or someone you trust) can read all of it. *Costs big:* sharding, privacy, custody, and
   high-throughput networking each add code until no one person holds the whole picture; trust migrates to
   formal proofs, repeated independent audits, and a track record. Making it national-grade dissolves the

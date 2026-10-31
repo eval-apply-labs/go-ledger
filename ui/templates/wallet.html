@@ -19,7 +19,12 @@
  td.amt, th.amt { text-align: right; font-variant-numeric: tabular-nums; }
  .msg { background: #e8f5e9; border: 1px solid #a5d6a7; padding: 0.5rem 0.75rem; border-radius: 6px; }
  .err { background: #fdecea; border: 1px solid #f5c6cb; padding: 0.5rem 0.75rem; border-radius: 6px; }
+ .warn { background: #fff8e1; border: 1px solid #ffe082; padding: 0.5rem 0.75rem; border-radius: 6px; }
  .muted { color: #888; font-size: 0.85rem; }
+ .review { border-color: #ffe082; background: #fffdf5; }
+ button.danger { background: #c62828; }
+ button.small { margin-top: 0; padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+ summary { cursor: pointer; color: #555; }
 </style>
 </head>
 <body>
@@ -28,44 +33,98 @@
  {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
 
  <div class="card">
+   {{if .Name}}
    <div class="muted">your balance (block {{.Height}})</div>
    <div class="balance">{{.Balance}}</div>
-   <div class="muted" style="margin-top:0.5rem;">your account{{if .Name}} — <strong>{{.Name}}</strong>{{end}}</div>
-   <div class="key">{{.PublicKey}}</div>
+   <div class="muted" style="margin-top:0.5rem;">your name: <strong>{{.Name}}</strong></div>
+   {{else if .Becomes}}
+   <div>not registered yet: <strong>{{.Becomes}}</strong> becomes yours at block {{.BecomesAt}}.</div>
+   {{else if .Verified}}
+   <div><strong>not registered</strong>: this key is not the key of any name on the ledger. Register it at your bank, on the <a href="/requests">Requests</a> page.</div>
+   {{if .LastName}}<p class="warn">This wallet held the name <strong>{{.LastName}}</strong>. That name now has another key. If you did not sell it or move it, contact your bank.</p>{{end}}
+   {{else}}
+   <div><strong>No verified state</strong>: this page cannot show your name or balance.</div>
+   {{end}}
+   <div class="muted" style="margin-top:0.5rem;">your key: <span class="key">{{.Fingerprint}}</span>
+     <button type="button" class="small" data-key="{{.PublicKey}}" onclick="navigator.clipboard.writeText(this.dataset.key)">copy my full key</button></div>
+   {{if .Frozen}}<p class="err">Your name is frozen. Only a ⅔ vote of the banks can unfreeze it, with a new key. Contact your bank.</p>{{end}}
+   {{if .PendingChange}}<p class="warn">A {{.PendingChange}} on your name takes effect at block {{.PendingAt}}. If you did not ask for it, freeze your name now.</p>{{end}}
+   {{if .FreezeStatus}}<p class="warn">{{.FreezeStatus}}</p>{{end}}
+   {{if and .FreezeName (not .Frozen)}}
+   <form method="post" action="/freeze"><button type="submit" class="danger">Freeze {{.FreezeName}}</button></form>
+   {{end}}
  </div>
+
+ {{if .ConfirmFreeze}}
+ <div class="card review">
+   {{if .FreezeName}}
+   <h2>Freeze {{.FreezeName}}?</h2>
+   <p>A frozen name neither pays nor is paid, and its pending change is cancelled. Only a ⅔ vote of the
+   banks can unfreeze it, with a new key. Freeze it if someone else may hold your key.</p>
+   <form method="post" action="/freeze">
+     <input type="hidden" name="step" value="confirm">
+     <button type="submit" class="danger">Sign and send the freeze</button> <a href="/">cancel</a>
+   </form>
+   {{else}}
+   <p>This wallet holds no name to freeze.</p>
+   {{end}}
+ </div>
+ {{end}}
+
+ {{with .Review}}
+ <div class="card review">
+   <h2>Check the payee before you sign</h2>
+   <ul>
+     <li>pay <strong>{{.Amount}}</strong> to <strong>{{.To}}</strong></li>
+     <li>{{.To}}'s bank of record: <strong>{{if .Bank}}{{.Bank}}{{else}}none{{end}}</strong></li>
+   </ul>
+   <p class="muted">Names can look alike. If this is not the bank you expect for {{.To}}, do not pay.</p>
+   <form method="post" action="/send">
+     <input type="hidden" name="step" value="confirm">
+     <input type="hidden" name="to" value="{{.To}}">
+     <input type="hidden" name="amount" value="{{.Amount}}">
+     <button type="submit">Sign and send</button> <a href="/">cancel</a>
+   </form>
+ </div>
+ {{end}}
 
  <div class="card">
    <h2>Send a payment</h2>
    <form method="post" action="/send">
-     <label for="to">recipient (name or public key)</label>
-     <input type="text" id="to" name="to" placeholder="a registered name like 'alice', or a public key" required>
+     <label for="to">recipient (a name)</label>
+     <input type="text" id="to" name="to" placeholder="a name like 'alice'" required>
      <label for="amount">amount</label>
      <input type="text" id="amount" name="amount" placeholder="e.g. 10.00" required>
-     <button type="submit">Send</button>
+     <button type="submit">Review payment</button>
    </form>
  </div>
 
  <div class="card">
-   <h2>Register a name</h2>
-   <p class="muted">Claim a unique name so people can pay you by name instead of your key.</p>
-   <form method="post" action="/register">
-     <label for="name">name</label>
-     <input type="text" id="name" name="name" placeholder="e.g. alice" required>
-     <label for="description">description (optional)</label>
+   <h2>Description, delegation and address</h2>
+   <p class="muted">Describe yourself, choose the validator your balance backs as stake, or, for a
+   validator, publish the address its peers reach it at. Leave a field blank to keep it as it is, or
+   write - to clear it.</p>
+   <form method="post" action="/update">
+     <label for="description">description</label>
      <input type="text" id="description" name="description" placeholder="e.g. Alice's bakery">
-     <button type="submit">Register</button>
+     <label for="delegate">delegate your stake to (a validator's name; your own to back yourself)</label>
+     <input type="text" id="delegate" name="delegate" placeholder="e.g. {{if .Name}}{{.Name}}{{else}}bank-a{{end}}">
+     <label for="address">address (a validator's gossip URL)</label>
+     <input type="text" id="address" name="address" placeholder="e.g. http://10.0.0.2:8080">
+     <button type="submit">Update</button>
    </form>
  </div>
 
  <div class="card">
    <h2>Accounts on the ledger</h2>
    <table>
-     <thead><tr><th>name</th><th>public key</th><th class="amt">balance</th></tr></thead>
+     <thead><tr><th>name</th><th>bank of record</th><th>key</th><th class="amt">balance</th></tr></thead>
      <tbody>
      {{range .Accounts}}
-       <tr><td>{{.Name}}</td><td class="key">{{.PublicKey}}</td><td class="amt">{{.Amount}}</td></tr>
+       <tr><td>{{.Name}}{{if .Frozen}} <strong>(frozen)</strong>{{end}}</td><td>{{.Bank}}</td>
+         <td><details><summary>fingerprint</summary><span class="key">{{.Fingerprint}}</span></details></td><td class="amt">{{.Amount}}</td></tr>
      {{else}}
-       <tr><td colspan="3" class="muted">no accounts (is the node reachable?)</td></tr>
+       <tr><td colspan="4" class="muted">no accounts (is the node reachable?)</td></tr>
      {{end}}
      </tbody>
    </table>
@@ -73,6 +132,7 @@
 
  <p class="muted">Your key is generated and stored locally in your wallet file; your private key
  never leaves this machine. Payments are signed here and only the signed payment is sent.</p>
- <p class="muted"><a href="/admin">Admin / governance →</a> — vote on network parameters (fee + timing) and balance reassignments.</p>
+ <p class="muted"><a href="/requests">Requests →</a> — register a name, change your key or your bank; a bank's desk co-signs here.</p>
+ <p class="muted"><a href="/admin">Admin / governance →</a> — vote on network parameters and ⅔ name actions.</p>
 </body>
 </html>

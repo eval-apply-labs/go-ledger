@@ -1,126 +1,156 @@
 # Security model
 
-`go_ledger` is a Go port of the Java Hypernode ledger (see the [README](../README.md#origins)),
-hardened as it was ported: its threat model was driven by review, and the fixes from four rounds are
-recorded in [`findings.md`](../findings.md). This document states the threat model, what the design
-fixes by construction, and what a deployment is still responsible for.
+Area: **general**: the threat model spans all four areas. `go_ledger` is a Go port of the Java
+Hypernode ledger (see the [README](../README.md#origins)), hardened as it was ported. The review
+rounds are in [`findings.md`](../findings.md) and [`findings_20261027.md`](../findings_20261027.md).
+This doc states the threat model, what the design fixes by construction, the limits of the freeze
+and of the banks, and what a deployment is still responsible for.
 
 ## Threat model and target
 
-The initial target is a **small, known-identity, high-trust community** running its own local
-currency on a handful of machines (e.g. 8 laptops on an isolated intranet). That shapes the model:
+The target is a **small, known-identity, high-trust community** running its own currency on a
+handful of machines, for example 8 laptops on an isolated intranet.
 
 - Participants are known and socially accountable; the adversary is not an anonymous global
-  attacker with unbounded resources.
-- Value is low-to-moderate; the network is small and largely co-located.
-- The realistic threats are *bugs that corrupt the ledger with no attacker*, *a single dishonest
-  or compromised validator*, and *unreliable hardware* (laptops sleeping, rebooting, dropping off).
+  attacker.
+- Value is low to moderate; the network is small and mostly in one place.
+- The realistic threats are bugs that corrupt the ledger with no attacker, one dishonest or
+  compromised validator, anyone on the LAN, a stolen key, operator mistakes, and unreliable
+  hardware (laptops sleeping, rebooting, dropping off).
 
-The design still aims to be Byzantine-fault-tolerant up to < ⅓ of stake, so it degrades gracefully
-as a deployment grows beyond that trust envelope.
+The design still aims to tolerate Byzantine validators holding under ⅓ of the power.
 
 ## Fixed by construction
 
-Each of these was a concrete audit finding; here it is structurally impossible rather than patched.
+- **Supply integrity (B1, B2).** `ledger.ProcessPayments` moves value only for a payment of at
+  least the transaction cost, between two names that exist. A negative payment and a payment from
+  nobody, both of which minted money, cannot be represented. Money is exact (`big.Rat`).
+- **No signature reuse across purposes or networks (C1, C6, C7).** Every signature is scoped to a
+  domain and bound to the network id by a length-prefixed preimage. `signing.Signer`, the only
+  signing API the node and the wallet use, has no "sign raw bytes" call, and the node has no
+  signing route. See [signature.md](signature.md#what-every-signature-binds).
+- **Every change needs its name's current key.** Payments, account updates and name requests name
+  their signer, and every node checks the signature under that name's key in the state.
+- **Malleability cannot double-spend.** A message's id hashes its signed content, never its
+  signature, so a second valid signature over the same payment is the same payment, in the pools,
+  in gossip and in `ProcessPayments`.
+- **One ML-DSA implementation is a consensus rule.** Two nodes that disagree on a signature's
+  validity can fork. Every node uses Go's `crypto/mldsa`, verifies only exact sizes and the one
+  canonical base64 spelling, and every node runs the same release. A port to another language must
+  verify exactly as `crypto/mldsa` does.
+- **No fork while under ⅓ is Byzantine (A1, A2, A4).** Finalisation needs a > ⅔ quorum. Two such
+  quorums share an honest validator, who never precommits two blocks in one round, and the lock
+  carries that across rounds, so two conflicting commits cannot form (see
+  [consensus.md](consensus.md#the-rule)). The commit covers the applied state. The argument assumes
+  an honest validator remembers what it signed, across restarts too, which is what its sign log is
+  for. A double-sign freezes the name. Voting power saturates at 2^40 per validator, so the
+  thresholds treat all validators above it as equal.
+- **SHA-256 everywhere (C5).**
+- **Replay protection without a spent-set.** Every payment, update and name request signs the one
+  block that may carry it (`BlockID`) and the network id. Each height occurs once, so a message
+  applies at most once. The optional pin (`PreviousStateDigest`) also binds a payment to the full
+  state digest of the state its block builds on; intake takes a pin only for the next block.
+- **An honest payer cannot trip the overdraw ban.** A block whose payments together overdraw their
+  payer destroys the payer's balance. Every intake point refuses a payment, or a request fee, that
+  with the payer's pooled payments and fees would pass its balance, and the pools are re-checked
+  after each commit or catch-up. So a committed overdraw means a cloned key or a modified node.
+- **Race-free node.** One goroutine owns all node state; the tests run under `-race`.
+- **Bounded input.** Request bodies are read up to 1 MiB (2 MiB for a proposal), a peer's
+  checkpoint up to 64 MiB, which holds about 23,000 accounts: a larger network cannot catch up or
+  join by checkpoint until the bound is raised (see [api.md](api.md#one-open-port)). Amounts are
+  checked as text before they become numbers, so a few bytes cannot become a huge number.
+  Signatures of the wrong size are refused before any work.
+- **Caps.** `maxPaymentAmount` bounds what one payment moves, and `maxAccountBalance` what a payment
+  or the ⅔ can raise a balance to. They are policy, voted by the ⅔ (see
+  [governance.md](governance.md#the-parameters)).
 
-- **Supply integrity (B1/B2).** `ledger.ProcessPayments` moves value only for a payment whose
-  amount is at least the transaction cost (so strictly positive) from an account that exists. A
-  negative-amount "payment" and a payment from a non-existent account — both of which could mint
-  money — cannot be represented. Money is exact (`big.Rat`), no floating point.
+## The network id
 
-- **No cross-protocol signature reuse (C1/C6/C7).** Every signature is scoped to a `Domain` and
-  bound to a network via a canonical, length-prefixed preimage, and there is no "sign arbitrary
-  bytes" API and no blind signing oracle. A signature made as one kind of statement cannot be
-  replayed as another, across networks, or with shifted field boundaries. (The audited anti-pattern:
-  one unscoped key signing `:`-joined strings, plus a raw signing endpoint.)
+The effective network id is the network's name, a `/`, and the hex of the genesis hash, which
+covers the genesis state, its parameters and its validator rule (E20). Every signature binds it,
+so a new genesis that changes anything does not accept the old network's payments, certificates or
+votes. A new genesis with **identical** contents is the same network, and replaying it lets anyone
+freeze the banks with their own old votes: the old and the new precommits for one height and round
+sign different block hashes (new nonces) under the same key and id, and the old commits stay in
+every node's signature record. So every new genesis takes a new `networkName`. See
+[operating-a-network.md](operating-a-network.md#starting-a-new-network).
 
-- **Account changes require the owner's signature.** An account-attribute/delegation change is only
-  applied if it carries a valid signature by the account owner. (The audited flaw: applying these
-  with no signature check, enabling stake capture.)
+## The freeze and its limits
 
-- **Signature malleability can't double-spend.** A payment's identity is a hash of its signed
-  *content* (`ledger.PaymentID`), never its signature bytes, so a malleated copy — a second valid
-  encoding of the same signature, which some Ed25519 verifiers accept — dedups to the same payment
-  at the mempool, at gossip, and in the ledger core (`ProcessPayments` collapses duplicate content
-  before applying). A payer is debited once even if a block carries the payment twice under two
-  signatures. This is the Bitcoin transaction-malleability lesson: never key identity on a signature.
+A name is frozen by its holder (free, at once), by a double-sign, or by the ⅔. A frozen name
+neither pays nor is paid and leaves the validator set until the ⅔ re-key it.
 
-- **One Ed25519 implementation is a consensus rule.** Ed25519 libraries disagree on edge cases
-  (non-canonical scalars, small-order points, cofactor — see *"Taming the Many EdDSAs"*, 2020), so
-  two nodes running different implementations could disagree on a signature's validity and fork.
-  Every node here uses the same Go `crypto/ed25519`; a port to another language must pin identical
-  validation rules (e.g. ZIP-215). This is the analogue of Bitcoin's OpenSSL-DER near-fork. The
-  scheme is likewise a whole-network choice fixed at genesis (behind the `signing.Scheme` interface),
-  **but not locked forever**: a community can migrate — e.g. to the post-quantum ML-DSA scheme parked
-  in `signing/mldsa.go` — by exporting a faithful snapshot of the agreed ledger and reseeding a fresh
-  network under the new scheme (a planned outage of a couple of hours, not a hard fork). Crypto
-  agility is therefore a governance decision, not a dead end. See `docs/operating-a-network.md`.
+- The double-sign freeze handles double-signing by validators holding **under a third** of the
+  power: a block carries evidence only while the frozen names stay under a third. At a third or
+  more, recovery is a new genesis with new keys and a new network id.
+- Losing the largest validator must still leave more than ⅔ of the rest online, or the chain stops.
+- A holder's own freeze has no cap. A bank holding a third or more that freezes itself hands the
+  chain to the rest. Nodes that lag then need a snapshot from a node you trust (see
+  [operating-a-network.md](operating-a-network.md#rejoining-after-a-restart)), and wallets that
+  pinned it need a new list.
+- The last seated name cannot freeze itself, and no ⅔ action may freeze it: a block that seats no
+  name could never be followed. So the last bank has no emergency brake.
 
-- **No consensus fork under ≤ ⅓ Byzantine (A1/A2/A4).** Finalisation needs a > ⅔ stake quorum whose
-  intersection guarantees no two conflicting blocks can both commit; the committed digest is the
-  digest of the applied state; equivocation yields a durable, slashable proof. See
-  [consensus.md](consensus.md).
+## Banks and their co-signatures
 
-- **SHA-256, not MD5 (C5).** All content hashing uses SHA-256.
+A name registered at a bank has that bank as its bank of record; a genesis name, or one the ⅔
+create, may have none. A bank uses one key, the one it votes with, for its votes and its
+co-signatures, so freezing a leaked bank key stops both at once.
 
-- **Replay protection without a spent-set.** A payment is signed over its target block (`BlockID`,
-  and the network id, in the domain-separated preimage) and is included *only* in the block whose
-  height equals it. Since each block number occurs once, a payment applies at most once, and a
-  resubmitted already-cleared payment names a past block and is rejected — no persistent nonce/spent
-  set to maintain. (A stronger, fork-resistant binding to the previous block hash is available as a
-  future option for users who don't trust their reference node; the base guard suffices under the
-  ⅔ no-fork consensus.)
+- A key change needs the holder's key, its bank's co-signature and the new key's proof, and it
+  waits `changeDelayBlocks` (about a day). In that time the holder sees it as a pending change and
+  can freeze the name, which cancels it. A bank change needs the holder and the new bank only, so
+  no bank can hold its customer hostage.
+- Freezing a bank clears every pending change it co-signed: its customers' key changes, and bank
+  changes to it. Honest customers file again; the fee is not refunded.
+- A wallet sees the network through one node. A bank that colludes with a thief can hide a pending
+  change from its customer if the customer's wallet reads the bank's node. The wallet refuses a
+  state older than one it verified, reports a freeze that did not land, and the bank's desk lists
+  its customers' pending changes. Reading a second node is not built.
+- Anyone can register any free name, a hash name included; the ⅔ name action undoes a squat. Names
+  can look alike (`rn` and `m`, `1` and `l`), so the wallet shows the payee's bank of record before
+  it signs a payment.
 
-- **An honest user cannot trip the overdraw ban.** The ledger's deliberate rule for a block whose
-  payments overdraw the payer is harsh: the payer is banned and its remaining balance destroyed
-  (supply can only shrink, never mint). Every intake point therefore refuses — with no receipt — a
-  payment whose amount plus the payer's already-queued outgoing exceeds its committed balance, at
-  the client endpoint and the gossip ingress alike, and the pending pool is re-checked after every
-  commit. An honest node can neither hold nor propose an overdrawing payment set, so a committed
-  overdraw implies a misused/cloned key or a proposer running modified code — exactly the parties
-  the ban is meant for.
+## The signature record
 
-- **Race-free node.** All node state is owned by one goroutine; inputs arrive as events. Verified
-  under Go's `-race` detector. (The audited flaw: shared unsynchronised state mutated from multiple
-  threads.)
+Each node keeps who signed each block for `retainBlocks` heights, and every governance certificate
+and double-sign proof for the life of the chain. It never keeps payments, updates, name requests,
+nonces or state digests. The block hash mixes in the proposer's random nonce, so the record cannot
+be matched against public balances to walk the history back.
 
-- **Bounded request bodies.** The HTTP API caps request size, avoiding the unbounded-JSON DoS the
-  audit found on the spend path.
+In dynamic mode a seat's power is floor(stake), so most busy blocks change the set, and the record
+shows each seat's stake per height. Static mode is not affected. This stays as it is (spec §12 Q21,
+decided 2026-10-31). Every balance is public at the time through `GET /hdls/accounts`, so what the
+record adds is the history of each seat's stake over the heights it keeps: an observer who polled a
+node then has it anyway, and a later one can rebuild it. The alternative, power = floor(stake /
+threshold), would hide it but weigh votes coarsely. Where that history matters, use static mode.
+
+The record routes are public on purpose and unauthenticated. A request with `from` reads at most
+two unit files of 100 heights: in static mode about 3.7 MB with 4 validators and 14 MB with 21; in
+dynamic mode, where most entries carry the set, about 5.8 MB and 26 MB. A request without `from`
+also lists the record folder, about 6,000 files at the default retention. See
+[api.md](api.md#the-record-routes).
 
 ## The deployment is responsible for
 
-The code cannot enforce these; an operator must:
+- **Keeping private keys private.** Keys are made by `keygen` or the wallet on the machine that
+  holds them, and never sent. Never put a private key on a network endpoint.
+- **Keeping the network off the public internet.** The node API has no TLS, no authentication and
+  no rate limit. Signatures make votes and blocks trustworthy whoever relays them, but anyone who
+  reaches the port can call any route as often as they like. Use an isolated LAN or a VPN.
+- **Provisioning for liveness.** Finalisation needs > ⅔ of the power online. On flaky hardware, put
+  enough power on the machines you can keep awake. A partition that leaves no side above ⅔ stalls;
+  it cannot fork or mint, and it recovers once the partition lifts, since nodes running a height
+  re-send its votes.
+- **Persistence, the sign log and backups.** A validator must set `snapshotPath`, keep its sign log,
+  run its key on one node only (see [signature.md](signature.md#the-sign-log)), and never restart
+  from an old backup. Keep an off-machine export of the state too. See
+  [operating-a-network.md](operating-a-network.md#rejoining-after-a-restart).
+- **A clean new genesis.** A new `networkName`, and no snapshot, sign log or record files of the old
+  network.
 
-- **Keep private keys private.** Keys are generated locally by `keygen` and never transmitted.
-  Never put a private key on a network endpoint. The `keygen` output is yours to guard.
-- **Keep the network off the public internet** unless you have added transport security and access
-  control. On an isolated LAN the node API is reachable only by the machines on it; do not
-  port-forward it. There is currently no TLS or peer authentication at the transport layer beyond
-  the per-message signatures — a peer is trusted to relay, not to be honest, and the signatures are
-  what make votes/blocks trustworthy regardless of who relayed them.
-- **Provision validators for liveness.** Finalisation needs > ⅔ of stake online and agreeing. On
-  flaky hardware, concentrate enough stake on the machines you can keep awake (disable laptop sleep)
-  that they alone hold quorum, and let unreliable machines be light participants. This trades some
-  decentralisation for liveness — an explicit, appropriate choice at this scale. A network partition
-  that leaves *no* side above quorum-any (an even 2|2 split) stalls — it cannot fork or mint, only
-  wait — but it **self-heals** once the partition lifts: each node periodically re-gossips the
-  current height's votes, so the merged network re-exchanges the frozen votes, reaches quorum, and
-  advances (see the round driver and `Node.reGossipLoop`). Both the freeze-then-recover behaviour
-  and majority progress under loss are exercised by the adversarial harness (`node/chaos_test.go`,
-  `consensus/sim_test.go`).
-- **Enable persistence, and keep an off-machine backup.** A node with `snapshotPath` set writes its
-  committed state to disk after every block and reloads it on restart, so a single node — or the
-  whole co-located network after a simultaneous outage — recovers without needing a peer; a node
-  that was behind then catches up via `bootstrap` (onboarding sync, verified against the validator
-  set — see [consensus.md](consensus.md)). Snapshots are per-node, so a disk failure loses that
-  one node's copy (it re-syncs from peers). For real value, also keep a periodic off-machine export
-  (`GET /hdls/accounts`) in case of correlated disk loss.
+## Status
 
-## Status of this rewrite
-
-This is new code. The pure layers (money, signing, consensus) are covered by tests including the
-adversarial cases above, and the node is race-tested. The operational layers once deferred —
-onboarding/rejoin sync, snapshot persistence, straggler catch-up — are implemented and tested (see
-[consensus.md](consensus.md)). It has **not** had an independent third-party audit, and the
-adversarial consensus harness in `TODO.md` is the main missing test tier; both are needed before
-any deployment holding real value. Treat it as testnet-grade.
+This is new code. The pure layers are tested, the adversarial cases included, and the node runs
+under `-race` with a chaos suite. It has **not** had an independent human audit, which is needed
+before any deployment holds real value. Treat it as testnet-grade.

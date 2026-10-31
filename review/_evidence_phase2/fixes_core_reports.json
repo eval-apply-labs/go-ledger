@@ -1,0 +1,159 @@
+{
+ "run": "core",
+ "notes": "C18, C24 to C29, C32, C34, C38, C49 to C52, C56, C71 to C73",
+ "results": [
+  {
+   "slice": "core",
+   "report": {
+    "branchHead": "be3210ba0c18eed6903f822ab1a54e17b8d5ee98",
+    "commits": [
+     {
+      "hash": "740cc40",
+      "subject": "phase 2 C18: consensus's package comment names the round driver it holds"
+     },
+     {
+      "hash": "d9e38fd",
+      "subject": "phase 2 C24: parameters.go's comments name TimingConsistent and the ten parameters"
+     },
+     {
+      "hash": "5cbfcf3",
+      "subject": "phase 2 C25: ParameterChange.Valid's comments say Acceptable checks every bound"
+     },
+     {
+      "hash": "cd48c29",
+      "subject": "phase 2 C26: ProposerAt's comment says the walk is in name order"
+     },
+     {
+      "hash": "af7f026",
+      "subject": "phase 2 C27: ProcessPayments' comment says rule 17 refuses first"
+     },
+     {
+      "hash": "14d575a",
+      "subject": "phase 2 C28: keygen's comment says a key is a name's key, not its identity"
+     },
+     {
+      "hash": "137f2ca",
+      "subject": "phase 2 C29: load's key-check comments say the checks only choose the message"
+     },
+     {
+      "hash": "85093ff",
+      "subject": "phase 2 C38: contentError's comment says steps C to H"
+     },
+     {
+      "hash": "88020cb",
+      "subject": "phase 2 C71: hashFields' comment names its four callers"
+     },
+     {
+      "hash": "3b2b3da",
+      "subject": "phase 2 C72: ParseAmount's comment names the genesis file and name requests"
+     },
+     {
+      "hash": "4559898",
+      "subject": "phase 2 C73: the ledger package comment lists name requests and evidence"
+     },
+     {
+      "hash": "3d082af",
+      "subject": "phase 2 C50: the power comments describe the genesis file and the stake path"
+     },
+     {
+      "hash": "6b70eba",
+      "subject": "phase 2 C32: delete VoteSet.PowerFor, which nothing calls"
+     },
+     {
+      "hash": "1c29601",
+      "subject": "phase 2 C51: drop two checks in the driver that are always true"
+     },
+     {
+      "hash": "827aa83",
+      "subject": "phase 2 C52: the driver checks its own re-gossiped vote once"
+     },
+     {
+      "hash": "8a18d98",
+      "subject": "phase 2 C56: name the cap's power powerIgnoringFreezes, as its source is named"
+     },
+     {
+      "hash": "3849cb8",
+      "subject": "phase 2 C49: hash the pre-block state only for a pinned payment"
+     },
+     {
+      "hash": "be3210b",
+      "subject": "phase 2 C34: the > ⅔ certificate rule is written once, in CertificateTally"
+     }
+    ],
+    "summary": "All 18 notes are fixed on p2-core (worktree <scratch>/wt/p2-core), one commit per note. Every commit vets and builds, its tests included; I checked each one from a scratch copy. The final commit passes the whole check list.\n\nComment-only notes:\n- C18: the package comment now says the round driver is in package consensus. The guide's step 2 sentence that called the comment out of date is updated.\n- C24 (parameters.go): the comments name TimingConsistent, list the ten parameters, and say \"step timeout\" where they said \"window\". They also say the block interval is only bounded.\n- C25: ParameterChange.Valid's comments now say Acceptable checks every bound.\n- C26: ProposerAt's comment says the walk is in name order.\n- C27: ProcessPayments' code is unchanged. Its comment now says rule 17 refuses those payments first, so the filters are a second line of defence, and that the genesis file and Acceptable set the cost.\n- C28 (keygen) and C29 (two comments in cmd/server load): fixed. The early key checks stay.\n- C38: contentError's comment says steps C to H.\n- C50 (three power comments), C71 (hashFields), C72 (ParseAmount) and C73 (ledger package comment): fixed.\n\nCode notes:\n- C32: VoteSet.PowerFor is deleted.\n- C51: the \"if !driver.decided\" around the skip rule and \"|| driver.decided\" in evaluate are gone.\n- C52: count now reports whether VoteSet.Add verified the vote: err is nil or ErrEquivocation. ReceiveVote marks its own vote cast on that result, with no Verify of its own.\n- C56: the local variable and the parameter are renamed powerIgnoringFreezes.\n- C49: contentError and ProposeBlock compute the pre-block state digest only when the first payment carrying a PreviousStateDigest appears. This is 3 plain lines in each, and paymentError's comment says so.\n\nC34: a new type, consensus.CertificateTally, in consensus/commit.go beside Commit:\n- NewCertificateTally creates it.\n- Add(name, verifies func(publicKey string) bool) counts a signer only if its name is in the set and has not counted yet, and the callback verifies the signature under the key the set holds for that name. The callback is not called for a repeated name or a name outside the set.\n- Power and Reached (power >= Quorum) give the result.\n- Commit.Verify, ParameterChange.Valid and Reassignment.Valid stop at the first signer that does not count, so they stay all-or-nothing. Commit.Verify keeps its vote type, height, round and block hash check.\n- The two Valid methods now verify through VerifyParameterVote and VerifyReassignmentVote, as the wallet does.\n- The wallet's SubmitParameters and SubmitReassignment use Add as a filter, in the order the votes were pasted, exactly as before. Their incomplete() messages are unchanged.\n- No existing test was edited, and the consensus, ledger, wallet and node certificate/checkpoint suites pass.\n\nThe guide (docs/reading-the-code.md) changes only where my changes touch it:\n- step 2 gains a CertificateTally row, a line saying a commit is all-or-nothing, and runs 18 tests (was 16);\n- step 8 says 124 ledger tests (was 123);\n- step 9 says 20 driver tests (was 18);\n- the governance flow table names CertificateTally.Add.\n\nFiles changed: cmd/keygen/main.go, cmd/server/config.go, consensus/{commit,consensus_test,driver,driver_test,errors,validator,voteset}.go, ledger/{amount,block,governance,ledger,parameters,payment,prevbind_test,reassignment,validators}.go, ui/admin.go, docs/reading-the-code.md. I did not touch ledger/genesis.go, signing/, node/ or review/.",
+    "tests": [
+     {
+      "name": "consensus TestDriverChecksItsOwnReGossipedVoteOnce (C52)",
+      "failsWithoutChange": "Yes. Run against the parent commit's driver.go in a scratch copy, its own re-gossiped vote costs 2 signature checks (want 1)."
+     },
+     {
+      "name": "consensus TestDriverResumeSkipsAVoteThatDoesNotVerify (C52)",
+      "failsWithoutChange": "Yes. On the parent, Resume marks a forged vote in the driver's own name as cast, so the driver never prevotes the proposal."
+     },
+     {
+      "name": "ledger TestOnlyAPinnedPaymentHashesThePreBlockState (C49)",
+      "failsWithoutChange": "Yes. On the parent's block.go, pinning the payment adds 5 allocations to proposing and 4 to applying (both versions hash the state anyway). With the change it adds 16,112 and 16,110, which is one digest of 2,003 accounts (16,093). The threshold is half a digest."
+     },
+     {
+      "name": "consensus TestCertificateTallyCountsEachNameOnceUnderTheSetsKey (C34)",
+      "failsWithoutChange": "It does not compile without the helper. Of six weakened copies of the helper in a scratch tree, it fails all six: repeats counted, outsiders checked, signature ignored, quorum strict (>), a commit that skips a bad vote, a name spent on a bad vote."
+     },
+     {
+      "name": "consensus TestCommitWithOneBadVoteDoesNotVerify (C34)",
+      "failsWithoutChange": "It passes on the parent, as it should, because the rule must not change. Against the weakened helpers it fails the repeats-counted, signature-ignored, quorum-strict and commit-skips-a-bad-vote copies. It is the only test that catches a Commit.Verify that skips a bad vote instead of failing."
+     },
+     {
+      "name": "C32, C51, C56 (removals and a rename) and the 12 comment-only notes",
+      "failsWithoutChange": "No new test, as the rules allow. The existing consensus and ledger suites pass under -race after each of the three code commits."
+     }
+    ],
+    "deviations": "1. C52 also changes Resume. Resume gates on count, so it now marks as cast only a vote in its own name that verifies under the key the set holds for it. Before, it marked any own vote of a known type. Nothing changes in the node:\n   - loadSignLog checks every logged vote under the node's key, which is the set's key whenever the driver can sign (with any other key, seatedSigner gives a nil signer).\n   - countable checks every re-gossiped vote under the set's key.\n\n   I chose this over adding code to keep the old behaviour, because it matches what ReceiveVote does. TestDriverResumeSkipsAVoteThatDoesNotVerify pins it, and Resume's comment says so.\n\n2. C52 also changes ReceiveVote for direct callers. A vote the vote set does not verify (a name outside the set, a bad signature) now returns nil without running evaluate. Before, it ran evaluate, which could retry a vote whose earlier signing had failed. The node never passes such a vote, and timeouts still retry. The doc comment says so.\n\n3. C34 is a small type with four parts (NewCertificateTally, Add, Power, Reached), not a single plain function. The certificate checks stop at the first bad signer, while the wallet keeps the good ones and skips the rest. One function would need a mode flag. A filter-only function would also lose the early stop, so a commit padded with bad votes would cost one signature check per vote. The quorum comparison is written once, but each of the three certificate checks still has its own two-line loop that returns false. Production code is about 22 lines longer, 15 of them comments, where the note estimated about 15 lines fewer.\n\n4. C56: the local variable and the parameter are now named powerIgnoringFreezes, the same as the function. That shadows the function inside ProposeBlock and withinOneThirdCap, which is legal Go. Neither function calls powerIgnoringFreezes after the name is declared.\n\n5. Guide edits beyond the strict letter of \"fix false sentences\": a CertificateTally row in step 2, a line there saying a commit is all-or-nothing, and CertificateTally.Add in the governance flow table (step 9). All three describe C34.\n\n6. The commits are in the order I worked (comments first, then code), not in note order. Each subject names its note.",
+    "suite": "All passed on be3210b, run in that worktree with GOTOOLCHAIN=auto (go1.27.3):\n- gofmt -l . gave no output outside review/.\n- go vet ./... and go vet -C ui ./... passed.\n- go build ./... and go build -C ui -o /dev/null . passed.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice (consensus about 60 s, node about 69 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -C ui -race -count=1 ./... passed twice.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed (90.5 s).\n\nI raised no time limit. Logs are in <scratch>/p2-scratch/core-final-logs/. Every intermediate commit was also checked with go vet ./..., go vet -C ui ./... and the ui build, from a scratch copy.",
+    "openIssues": "For the owner:\n1. C52 / Resume: should Resume keep marking as cast an own vote that does not verify, as it did before? Doing so would be the conservative choice against double-signing if the node ever fed it unchecked votes. Today the node checks every vote before Resume sees one, so the two choices behave the same in production. Restoring the old behaviour is about 2 lines (gate on the vote type instead of count's result) plus dropping TestDriverResumeSkipsAVoteThatDoesNotVerify.\n2. C34: CertificateTally makes the rule single-sourced but not shorter. Please check that the shape (Add with a per-signer callback, then Reached) reads plainly enough, since this is safety code.\n3. Merge: C34 edits ui/admin.go's SubmitParameters and SubmitReassignment, and the C1 to C6 run edits other ui files (trust.go, wallet.go, main.go). There is no overlap in admin.go that I know of. The node notes run (C37) may also touch tallyVoters in node/governance.go, which this run did not change.\n4. Not done, as out of scope: C48 (Proposal.Valid is always true) is near the driver code I touched but was not assigned."
+   },
+   "verdict": {
+    "confirmed": true,
+    "problems": [
+     {
+      "severity": "major",
+      "file": "ledger/governance_test.go, ledger/reassignment_test.go (code in ledger/governance.go:72, ledger/reassignment.go:172)",
+      "problem": "The all-or-nothing half of the certificate rule (one bad vote makes the whole certificate invalid; spec 4.8 rule 1, 4.9; the C34 brief says node's pendingParameterChange relies on it) is now enforced by a separate early 'return false' in each caller, and only Commit.Verify's copy is tested (TestCommitWithOneBadVoteDoesNotVerify). Nothing tests it for ParameterChange.Valid or Reassignment.Valid. The code is correct today, and the gap already existed at 25b222e, but C34 rewrote exactly these lines, and the run that fixes the node notes (C37) works on the pools that rely on it.",
+      "evidence": "In a scratch copy of be3210b I changed `return false // a name outside the set, ...` to `continue` in ParameterChange.Valid: go test ./ledger, the whole ./node suite and the ui suite all pass. The same change in Reassignment.Valid also passes ./ledger, ./node and ui. The same change at the parent 25b222e (both returns in the old loop) also passes ./ledger, so the gap already existed. The existing 'forged' cases in TestParameterChangeRequiresTwoThirds and TestReassignmentRequiresTwoThirds have only 2 good votes of the 3 the quorum needs, so they fail for lack of quorum either way.",
+      "fix": "Add one case to each of TestParameterChangeRequiresTwoThirds and TestReassignmentRequiresTwoThirds (or a new small test): good votes from v0, v1 and v2 (a full quorum) plus one bad vote (a name outside the set such as v9, a repeated v0, or the misattributed vote already in the test) must make Valid return false. That is about 10 lines of tests, and no production change."
+     },
+     {
+      "severity": "minor",
+      "file": "cmd/server/config.go",
+      "problem": "C29 left two comment problems. (1) It deleted the sentence that ended 'i.e. a silent non-participant that looks up', which the comment at line 113 points back to with 'the same silent non-participant', so that phrase now refers to nothing. (2) The second half of the new sentence has no verb: 'and the comparison with the key the seed derives any other publicKey, but as a pair that does not belong together', which is hard for a non-expert reader to parse.",
+      "evidence": "The parent 25b222e has 'a silent non-participant' at line 64, and line 114 says 'the same silent non-participant'. At be3210b only line 113 is left: 'another keygen run would name a key this node never signs for — the same silent non-participant.' The new comment is lines 62 to 64.",
+      "fix": "At line 113, say 'a node that serves HTTP but never signs: a silent non-participant' instead of 'the same silent non-participant'. Reword lines 62 to 64, for example: 'The three key checks below only give a clearer message. Without them, NewSigner would still refuse a seed of the wrong length, and the comparison below would still refuse any publicKey other than the one the seed derives, with the less precise message that the pair does not belong together.'"
+     },
+     {
+      "severity": "minor",
+      "file": "cmd/keygen/main.go, ledger/validators.go",
+      "problem": "Two comments edited by C28 and C50 were not re-wrapped. keygen's third comment line is 127 characters, and a line of SetFor's comment is 117. The comments around them wrap at about 100, and these are two of only eight comment lines over 110 characters in the repo.",
+      "evidence": "Counting comment lines over 110 characters across the repo's tracked .go files gives 8. The added lines in the diff include keygen at 127 ('key, which is the 32-byte seed ... never transmitted -- the') and SetFor at 117 ('genesis file gives it. Dynamic mode: ... (a frozen'). The parent's keygen comment had at most 100 characters per line.",
+      "fix": "Re-wrap the two comment paragraphs at about 100 columns. The wording stays the same."
+     }
+    ],
+    "evidence": "I read notes C18, C24 to C29, C32, C34, C38, C48 to C52, C56 and C71 to C73 in review/phase2_code_notes.md, and spec 4.8, 4.9 and 4.13. I diffed 25b222e..be3210b: 18 commits, one per note, each touching only its note's files, all with the Co-Authored-By trailer. I vetted two intermediate commits (6b70eba, 8a18d98) on their own, and both pass.\n\nThe full check list, run myself in scratch copy p2-scratch/verify-core-1 with go1.27.3: gofmt -l prints nothing outside review/; go vet ./..., go vet -C ui ./..., go build ./... and the ui build pass; GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passes twice (consensus 54 s and 59 s, node 67 s and 68 s); the ui suite passes twice (38 s); the -count=3 Chaos|Restart|SignLog|Resume|CatchUp node run passes (90.5 s). Logs are in p2-scratch/verify-core-logs/.\n\nEach new test fails when its change is reverted:\n- C52: with driver.go from 1c29601, TestDriverChecksItsOwnReGossipedVoteOnce fails (2 signature checks, want 1) and TestDriverResumeSkipsAVoteThatDoesNotVerify fails (the resumed driver does not prevote).\n- C49: with block.go from 8a18d98, TestOnlyAPinnedPaymentHashesThePreBlockState fails ('a pin adds 5 allocations ... want about one digest (16093)'). At the head it passes 5 times out of 5 under -race, and no ledger test calls t.Parallel.\n\nC34:\n- VerifyParameterVote and VerifyReassignmentVote use the same domain and the same fields as the old inline VerifyBase64 calls. The checks run in the same order (in the set, not counted already, then the signature), and a nil set behaves as before.\n- Helper mutants: dropping the counted check fails TestCommitDuplicateVoterRejected and both new tests; making the quorum strict (>) fails 9 consensus tests.\n- A wallet mutant that stops at the first bad vote fails the existing TestReassignmentVotesAreCollectedOffNode.\n- A ParameterChange.Valid or Reassignment.Valid that skips bad votes passes every suite (problem 1). The same holds at the parent.\n- My own test, a commit padded with 50 forged votes, costs 2 signature checks; an empty name is not counted and costs no check.\n\nC51: applyOneRule returns at its top when decided, and the decide loop returns whenever it sets decided, so both removed checks were always true.\n\nC52: in VoteSet.Add, every nil or ErrEquivocation return comes after the signature check. For the Resume deviation, the node only passes Resume votes that already verified, either under its own key (loadSignLog) or under the set's key (countable); seatedSigner gives a nil signer when those keys differ, so the change cannot lead to a double-sign.\n\nC49: stateDigestHex has no other reader, and a hex digest is never empty, so the empty string is a safe marker for 'not computed yet'.\n\nComments: the ten parameters match the struct; TimingConsistent's body uses BlockIntervalMs only in its bounds; the four hashFields callers, the SetFor int64 cap, the genesis call to Acceptable and ProposerAt's walk in name order all match the code; rule 17 does refuse a nil or below-cost amount and a missing payer or payee. The guide's run commands give 18, 124 and 20 tests, as the guide now says. grep finds no PowerFor, powerBeforeFreezes or timingConsistent outside review/.\n\nNot counted as problems: the C56 shadowing (the note asked for that name, and the builder flagged it), the CertificateTally type instead of a plain function (justified by the early stop), and the change to Resume (safe, and flagged for the owner)."
+   },
+   "fix": {
+    "branchHead": "0d098500b8c4ab898bd760454fd680a0a3e2b580",
+    "fixed": [
+     "Major, no test that one bad vote voids a parameter change or a name action (63e9647, 'phase 2 core: test that one bad vote voids a parameter change or a name action (review follow-up)'). I added one case to each of TestParameterChangeRequiresTwoThirds (ledger/governance_test.go) and TestReassignmentRequiresTwoThirds (ledger/reassignment_test.go). Each case is a full quorum (v0, v1, v2) with the misattributed vote already in the test placed in front of it, and Valid must return false. Production code is unchanged. Proof: I made a scratch copy (<scratch>/p2-scratch/core-followup/tree) and changed the early 'return false' to 'continue' in ParameterChange.Valid. TestParameterChangeRequiresTwoThirds then fails at governance_test.go:84. The same change in Reassignment.Valid makes TestReassignmentRequiresTwoThirds fail at reassignment_test.go:88. Both pass on the real code. These are cases inside existing tests, not new test functions, so the guide's test counts stay right.",
+     "Minor, cmd/server/config.go comments (fbf2b15, 'phase 2 core: load's key comments read as sentences again (review follow-up)'). Lines 62 to 64 now read: 'Without them, NewSigner would still refuse a seed of the wrong length, and the comparison further down would still refuse any publicKey other than the one the seed derives, with the less precise message that the pair does not belong together.' The dangling 'the same silent non-participant' now says what it means: 'The node would serve HTTP but never sign: a silent non-participant.' Comments only.",
+     "Minor, unwrapped comment lines (0d09850, 'phase 2 core: re-wrap keygen's and SetFor's comments at 100 columns (review follow-up)'). I re-wrapped the cmd/keygen/main.go package comment and the static/dynamic paragraph of SetFor's comment in ledger/validators.go. Every changed line is now at most 102 characters, and the wording is unchanged. The repo now has 6 comment lines over 110 characters, down from 8."
+    ],
+    "notFixed": [],
+    "suite": "Everything passed on 0d09850, run in worktree <scratch>/wt/p2-core with GOTOOLCHAIN=auto (go1.27.3):\n- gofmt -l . printed nothing outside review/.\n- go vet ./... and go vet -C ui ./... passed.\n- go build ./... and go build -C ui -o /dev/null . passed.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice (consensus took about 55 to 58 s, node about 67 s, ledger about 15 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -C ui -race -count=1 ./... passed twice (about 35 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed (88.9 s).\n\nI raised no time limit. The logs are in <scratch>/p2-scratch/core-followup-logs/."
+   },
+   "recheck": {
+    "confirmed": true,
+    "problems": [],
+    "evidence": "I checked p2-core at 0d09850. I did not commit or edit anything in the worktree, and `git status` there is clean.\n\n**The earlier major is fixed.** It was that no test showed one bad vote makes a parameter change or a name action invalid. Commit 63e9647 adds a case to each of two existing tests:\n- `TestParameterChangeRequiresTwoThirds` (ledger/governance_test.go:80-85)\n- `TestReassignmentRequiresTwoThirds` (ledger/reassignment_test.go:84-89)\n\nEach case is a full quorum (v0, v1, v2) with the misattributed vote placed in front. Production code is not changed.\n\nI checked each case myself in two scratch copies of HEAD, in <scratch>/p2-scratch/verify-core-r2a and verify-core-r2b:\n- In `ParameterChange.Valid` (governance.go:74), I changed the early `return false` to `continue`. `TestParameterChangeRequiresTwoThirds` then fails at governance_test.go:84 with \"a change with a full quorum and one bad vote was ratified\".\n- I made the same change in `Reassignment.Valid` (reassignment.go:172). `TestReassignmentRequiresTwoThirds` then fails at reassignment_test.go:88.\n- Both tests pass on the real code.\n\nEach padded certificate is otherwise the same as one the test already finds valid. So the bad vote is the only reason it is rejected, and the test fails for the right reason. The spec references are right: §4.8 rule 1 says \"each verifying under V's key\", and §4.9 says the votes \"are distinct names in V verifying under V's keys\".\n\n**The two minor fixes are right too.**\n- The cmd/server/config.go comments read as full sentences now, and they are true. NewSigner refuses a seed of the wrong length, and the string comparison `signer.PublicKeyBase64() != configFile.PublicKey` refuses any other publicKey or another spelling of it.\n- The keygen and SetFor paragraphs are re-wrapped with the same wording. No comment line in the branch diff is over 105 characters. The only long added lines are code and test lines, as elsewhere in the codebase.\n\n**The full check again, more briefly.** I read `git diff 25b222e..HEAD` for all 21 commits.\n\nC34: `CertificateTally.Add` keeps the old rule:\n- the name must be in the set (`Contains`) and not counted yet;\n- the signature must verify under `validatorSet.PublicKey(name)`;\n- the signer's power is added, and `Reached` is power >= `Quorum`.\n\nAll three certificate checks still stop at the first vote that does not count. The wallet keeps the same filter order and the same `incomplete()` messages. `VerifyParameterVote` and `VerifyReassignmentVote` check exactly what the deleted inline `VerifyBase64` calls checked: the same domain and the same fields.\n\nC52: `count` returns true only when `err` is nil or `ErrEquivocation`. `VoteSet.Add` checks the signature before either result, so `count` returning true means the signature verified.\n\nC49: `digestHex` never returns \"\", so the lazy `stateDigestHex` is computed once, at the first pinned payment. `powerBeforeFreezes`, `PowerFor` and `timingConsistent` appear nowhere outside review/.\n\nThe guide's test counts match `go test -list`: step 2 runs 18, the ledger package has 124, and step 9 runs 20.\n\nThe builder's open question about Resume (deviation 1, whether a logged own vote that does not verify should still count as cast) is still the owner's to decide. It was raised in the earlier round, and the follow-up did not change it.\n\n**I ran the whole check list myself** in the worktree with GOTOOLCHAIN=auto (go1.27.3):\n- `gofmt -l .` printed nothing outside review/.\n- `go vet ./...` and `go vet -C ui ./...` passed.\n- `go build ./...` and `go build -C ui -o /dev/null .` passed.\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./...` passed twice: consensus about 55 s, node about 67 s, ledger about 15 s.\n- `GOLEDGER_CHAOS_SLACK=4 go test -C ui -race -count=1 ./...` passed twice: about 34 to 37 s.\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/` passed in 90.8 s.\n\nThe logs are in <scratch>/p2-scratch/verify-core-logs/r2/."
+   }
+  }
+ ],
+ "merge": "Built from 25b222e; replayed onto ef9a17c (C1 to C6 merged) without a conflict, head 44578a3."
+}

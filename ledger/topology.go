@@ -9,7 +9,7 @@ import "math"
 // lives here (in the committed-state layer) where governance can check a timing profile against it.
 // Faithful to the original Hypernode setGroupParameters (throws replaced by clamps); maxPeers <= 0
 // (or a tiny network) degenerates to one dimension = all-to-all.
-func GroupParameters(participants, maxPeers int) (groupSize, dim int) {
+func GroupParameters(participants, maxPeers int) (groupSize, dimension int) {
 	if participants <= 0 {
 		return 0, 0
 	}
@@ -19,23 +19,23 @@ func GroupParameters(participants, maxPeers int) (groupSize, dim int) {
 	if participants > 1_000_000_000 {
 		participants = 1_000_000_000
 	}
-	exp := 1
+	exponent := 1
 	connections := (participants - 1) * 3
 	for maxPeers < connections {
-		exp++
-		newConnections := exp * int(math.Ceil(math.Pow(float64(participants), 1.0/float64(exp))-1))
+		exponent++
+		newConnections := exponent * int(math.Ceil(math.Pow(float64(participants), 1.0/float64(exponent))-1))
 		if newConnections >= connections { // past the asymptote — more dimensions stop helping
-			exp--
+			exponent--
 			break
 		}
 		connections = newConnections
-		if exp > 60 {
+		if exponent > 60 {
 			break
 		}
 	}
-	groupSize = int(math.Ceil(math.Pow(float64(participants), 1.0/float64(exp))))
+	groupSize = int(math.Ceil(math.Pow(float64(participants), 1.0/float64(exponent))))
 	if groupSize < 2 {
 		groupSize = 2
 	}
-	return groupSize, exp
+	return groupSize, exponent
 }

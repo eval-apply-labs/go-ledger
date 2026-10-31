@@ -1,0 +1,78 @@
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (15.96101582s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083631662109992-15_961s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (15.96s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.91s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.90s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (6.592522334s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083642062500189-6_593s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (6.59s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (16.59784895s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083658661075613-16_598s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (16.60s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (10.654266917s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083669315817418-10_654s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (10.66s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (4.275226078s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083673592590911-4_275s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (4.28s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.90s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (5.949117517s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083681442268609-5_949s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (5.95s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (15.97594545s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083697418713629-15_976s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (15.98s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (3.95s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (6.250105948s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083707616555804-6_25s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (6.25s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.90s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.89s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (5.97628535s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083717381615968-5_976s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (5.98s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (18.64075335s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083736022770961-18_641s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (18.64s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.88s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.90s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (15.974351876s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083755778748628-15_974s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (15.97s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (16.602949578s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083772382154940-16_603s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (16.60s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.88s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (18.94334415s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083793203210351-18_943s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (18.94s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (4.244764161s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083797448591731-4_245s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (4.25s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (3.63s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.87s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.88s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.87s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+    replay_test.go:35: SLOW/FAILED run (15.647458282s): trace written to <scratch>/flake-suite-logs/traces/trace-1793083822347478228-15_647s.log
+--- PASS: TestPaymentGossipReceiptAndReplay (15.65s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.88s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (1.87s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/node	210.413s
+EXIT=0

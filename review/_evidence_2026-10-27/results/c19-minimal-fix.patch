@@ -1,0 +1,88 @@
+--- a/node/node.go	2026-10-27 07:43:01.004787442 +0000
++++ b/node/node.go	2026-10-27 07:43:01.032789083 +0000
+@@ -3,6 +3,7 @@
+ import (
+ 	"errors"
+ 	"math/big"
++	"sync/atomic"
+ 	"time"
+ 
+ 	"github.com/eval-apply-labs/go-ledger/consensus"
+@@ -108,6 +109,8 @@
+ 	heightVotes        map[string]consensus.Vote // votes seen at the current height, re-gossiped periodically (see reGossipLoop)
+ 	heightProposals    map[int32]ProposalMsg     // authentic proposals seen at the current height, by round (first wins, like the driver)
+ 
++	anchor atomic.Pointer[[]ledger.Account] // last committed/adopted accounts, published for the catch-up goroutine
++
+ 	heightVals     *consensus.ValidatorSet // the set governing the height in progress
+ 	lastCommitVals *consensus.ValidatorSet // the set that signed lastCommit (served in checkpoints)
+ 
+@@ -145,6 +148,7 @@
+ 		reassignmentProposals: map[string]*ledger.Reassignment{},
+ 	}
+ 	n.loadSnapshot()
++	n.publishAnchor()
+ 	return n
+ }
+ 
+@@ -349,8 +353,12 @@
+ 	n.heightVotes = map[string]consensus.Vote{} // votes from the abandoned height no longer apply
+ 	n.heightProposals = map[int32]ProposalMsg{} // likewise its proposals
+ 	n.resolvePeersFromState()                   // adopt the peer addresses published in the synced state
++	n.publishAnchor()
+ }
+ 
++// publishAnchor makes the current committed accounts the trust anchor read by bestCheckpoint.
++func (n *Node) publishAnchor() { accts := n.accounts; n.anchor.Store(&accts) }
++
+ // catchUp lets a RUNNING node that fell behind (missed a commit window) fast-forward to a peer's
+ // later verified checkpoint and resume consensus at the new height, instead of staying stuck. Stale
+ // timers/messages from the abandoned height are dropped by their height/round guards.
+@@ -385,11 +393,13 @@
+ // the BFT "skipping" rule: it lets a node safely adopt a checkpoint whose validator set grew while
+ // it was away, without trusting the serving peer. (Full rotation past the anchor would need a chain
+ // of checkpoints; for incremental growth the anchor overlaps the signing set — the real case here.)
++func (n *Node) selfConsistent(cp Checkpoint) bool {
++	return cp.Commit.Verify(n.cfg.Scheme, n.cfg.NetworkID, n.checkpointSigners(cp)) &&
++		(ledger.LedgerState{Accounts: cp.Accounts, Parameters: cp.Parameters, GovernanceSequence: cp.GovernanceSequence}).Digest() == cp.Commit.BlockDigest
++}
++
+ func (n *Node) verifyCheckpoint(cp Checkpoint, anchor []ledger.Account) bool {
+-	if !cp.Commit.Verify(n.cfg.Scheme, n.cfg.NetworkID, n.checkpointSigners(cp)) {
+-		return false
+-	}
+-	if (ledger.LedgerState{Accounts: cp.Accounts, Parameters: cp.Parameters, GovernanceSequence: cp.GovernanceSequence}).Digest() != cp.Commit.BlockDigest {
++	if !n.selfConsistent(cp) {
+ 		return false
+ 	}
+ 	trusted := n.validatorsFor(anchor)
+@@ -653,6 +663,7 @@
+ 		}
+ 	}
+ 	n.saveSnapshot()
++	n.publishAnchor()
+ 	n.height++
+ 	n.mem.dropBelow(n.height) // stale payments (their block has passed) can never replay
+ 	// Re-establish the intake invariant against the NEW balances: a commit can shrink a payer's
+--- a/node/persist.go	2026-10-27 07:43:01.004787442 +0000
++++ b/node/persist.go	2026-10-27 07:43:01.032789083 +0000
+@@ -28,7 +28,7 @@
+ 	if cp.Commit.Height+1 <= n.height {
+ 		return
+ 	}
+-	if !n.verifyCheckpoint(cp, n.accounts) { // anchor = genesis at this point (set in New)
++	if !n.selfConsistent(cp) { // our own disk (or an operator-seeded trusted checkpoint): no genesis-overlap test
+ 		return
+ 	}
+ 	n.fastForward(cp)
+--- a/node/sync.go	2026-10-27 07:43:01.004787442 +0000
++++ b/node/sync.go	2026-10-27 07:43:01.032789083 +0000
+@@ -95,7 +95,7 @@
+ 		}
+ 		// Anchor trust on genesis here (immutable → race-free in this goroutine); adopt re-verifies
+ 		// against the live state in the loop before it takes effect.
+-		if !n.verifyCheckpoint(cp, n.cfg.Genesis) {
++		if !n.verifyCheckpoint(cp, *n.anchor.Load()) {
+ 			continue // invalid quorum, digest mismatch, or no trusted validator vouches for the set
+ 		}
+ 		if !found || cp.Commit.Height > best.Commit.Height {

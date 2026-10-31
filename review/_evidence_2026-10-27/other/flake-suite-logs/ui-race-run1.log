@@ -1,0 +1,46 @@
+=== RUN   TestPBKDF2SHA256Vectors
+--- PASS: TestPBKDF2SHA256Vectors (0.03s)
+=== RUN   TestSealedKeyRoundTrip
+--- PASS: TestSealedKeyRoundTrip (7.47s)
+=== RUN   TestKeyFileRoundTrip
+warning: no terminal to set a passphrase — the wallet key is stored UNENCRYPTED. Set GOLEDGER_WALLET_PASSPHRASE to seal it.
+--- PASS: TestKeyFileRoundTrip (7.77s)
+=== RUN   TestCSRFGuard
+=== RUN   TestCSRFGuard/cross-site_fetch
+=== RUN   TestCSRFGuard/same-site_(another_local_port)
+=== RUN   TestCSRFGuard/foreign_Origin,_no_Sec-Fetch-Site
+=== RUN   TestCSRFGuard/same-origin_form_post
+=== RUN   TestCSRFGuard/no_browser_headers_(curl_/_local_operator)
+=== RUN   TestCSRFGuard/cross-site_GET_(read-only,_harmless)
+--- PASS: TestCSRFGuard (0.00s)
+    --- PASS: TestCSRFGuard/cross-site_fetch (0.00s)
+    --- PASS: TestCSRFGuard/same-site_(another_local_port) (0.00s)
+    --- PASS: TestCSRFGuard/foreign_Origin,_no_Sec-Fetch-Site (0.00s)
+    --- PASS: TestCSRFGuard/same-origin_form_post (0.00s)
+    --- PASS: TestCSRFGuard/no_browser_headers_(curl_/_local_operator) (0.00s)
+    --- PASS: TestCSRFGuard/cross-site_GET_(read-only,_harmless) (0.00s)
+=== RUN   TestMutatingHandlersAreGuarded
+--- PASS: TestMutatingHandlersAreGuarded (0.00s)
+=== RUN   TestReceiptFromValidatorVerifies
+warning: no terminal to set a passphrase — the wallet key is stored UNENCRYPTED. Set GOLEDGER_WALLET_PASSPHRASE to seal it.
+--- PASS: TestReceiptFromValidatorVerifies (0.02s)
+=== RUN   TestReceiptFromNonValidatorNotVerified
+warning: no terminal to set a passphrase — the wallet key is stored UNENCRYPTED. Set GOLEDGER_WALLET_PASSPHRASE to seal it.
+--- PASS: TestReceiptFromNonValidatorNotVerified (0.02s)
+=== RUN   TestReceiptOverDifferentPaymentNotVerified
+warning: no terminal to set a passphrase — the wallet key is stored UNENCRYPTED. Set GOLEDGER_WALLET_PASSPHRASE to seal it.
+--- PASS: TestReceiptOverDifferentPaymentNotVerified (0.01s)
+=== RUN   TestReceiptWithBadSignatureNotVerified
+warning: no terminal to set a passphrase — the wallet key is stored UNENCRYPTED. Set GOLEDGER_WALLET_PASSPHRASE to seal it.
+--- PASS: TestReceiptWithBadSignatureNotVerified (0.01s)
+=== RUN   TestLooksLikePublicKeyTrimsAndValidates
+--- PASS: TestLooksLikePublicKeyTrimsAndValidates (0.00s)
+=== RUN   TestPaymentBlockIDGuardSurvivesReload
+warning: no terminal to set a passphrase — the wallet key is stored UNENCRYPTED. Set GOLEDGER_WALLET_PASSPHRASE to seal it.
+--- PASS: TestPaymentBlockIDGuardSurvivesReload (0.01s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/ui	16.382s
+
+real	0m20.025s
+user	0m21.362s
+sys	0m1.124s

@@ -1,0 +1,10224 @@
+{
+ "renames": [
+  {
+   "key": "node/admission_test.go:109:2",
+   "old": "F",
+   "new": "fillerKey"
+  },
+  {
+   "key": "node/admission_test.go:109:5",
+   "old": "H",
+   "new": "honestKey"
+  },
+  {
+   "key": "node/admission_test.go:111:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/admission_test.go:121:2",
+   "old": "pay",
+   "new": "signedPayment"
+  },
+  {
+   "key": "node/admission_test.go:121:38",
+   "old": "to",
+   "new": "recipient"
+  },
+  {
+   "key": "node/admission_test.go:122:3",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/admission_test.go:20:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/admission_test.go:38:2",
+   "old": "a",
+   "new": "founder"
+  },
+  {
+   "key": "node/admission_test.go:39:2",
+   "old": "b",
+   "new": "newcomer"
+  },
+  {
+   "key": "node/admission_test.go:43:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/admission_test.go:55:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/admission_test.go:75:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/bounds_test.go:10:12",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "node/bounds_test.go:17:2",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/malleability_test.go:12:2",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/malleability_test.go:14:2",
+   "old": "p1",
+   "new": "original"
+  },
+  {
+   "key": "node/malleability_test.go:14:6",
+   "old": "p2",
+   "new": "malleated"
+  },
+  {
+   "key": "node/mempool.go:102:7",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/mempool.go:104:9",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/mempool.go:116:17",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/mempool.go:23:2",
+   "old": "maxComment",
+   "new": "maxCommentLength"
+  },
+  {
+   "key": "node/mempool.go:26:26",
+   "old": "maxComment",
+   "new": "maxCommentLength"
+  },
+  {
+   "key": "node/mempool.go:33:23",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/mempool.go:33:7",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/mempool.go:37:2",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/mempool.go:49:7",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/mempool.go:54:28",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/mempool.go:54:7",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/mempool.go:57:7",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/mempool.go:59:9",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/mempool.go:73:7",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/mempool.go:76:9",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/mempool.go:81:10",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/messages.go:21:6",
+   "old": "MsgType",
+   "new": "MessageType"
+  },
+  {
+   "key": "node/messages.go:24:2",
+   "old": "MsgProposal",
+   "new": "MessageProposal"
+  },
+  {
+   "key": "node/messages.go:25:2",
+   "old": "MsgVote",
+   "new": "MessageVote"
+  },
+  {
+   "key": "node/messages.go:26:2",
+   "old": "MsgPayment",
+   "new": "MessagePayment"
+  },
+  {
+   "key": "node/messages.go:27:2",
+   "old": "MsgUpdate",
+   "new": "MessageUpdate"
+  },
+  {
+   "key": "node/messages.go:28:2",
+   "old": "MsgParameterVote",
+   "new": "MessageParameterVote"
+  },
+  {
+   "key": "node/messages.go:29:2",
+   "old": "MsgReassignmentVote",
+   "new": "MessageReassignmentVote"
+  },
+  {
+   "key": "node/messages.go:36:6",
+   "old": "ProposalMsg",
+   "new": "ProposalMessage"
+  },
+  {
+   "key": "node/messages.go:57:43",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/messages.go:58:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "node/messages.go:69:62",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/messages.go:89:25",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/node.go:106:2",
+   "old": "mem",
+   "new": "mempool"
+  },
+  {
+   "key": "node/node.go:119:2",
+   "old": "heightVals",
+   "new": "heightValidators"
+  },
+  {
+   "key": "node/node.go:120:2",
+   "old": "lastCommitVals",
+   "new": "lastCommitValidators"
+  },
+  {
+   "key": "node/node.go:123:2",
+   "old": "paramProposals",
+   "new": "parameterProposals"
+  },
+  {
+   "key": "node/node.go:125:2",
+   "old": "sign",
+   "new": "signLog"
+  },
+  {
+   "key": "node/node.go:137:11",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/node.go:138:2",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:176:10",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/node.go:177:2",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:188:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:207:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:215:31",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/node.go:215:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:216:27",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:216:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:217:30",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/node.go:217:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:223:29",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/node.go:223:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:235:29",
+   "old": "u",
+   "new": "update"
+  },
+  {
+   "key": "node/node.go:235:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:239:36",
+   "old": "c",
+   "new": "parameterChange"
+  },
+  {
+   "key": "node/node.go:239:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:245:39",
+   "old": "r",
+   "new": "reassignment"
+  },
+  {
+   "key": "node/node.go:245:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:250:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:251:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "node/node.go:254:7",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/node.go:263:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:264:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "node/node.go:274:24",
+   "old": "e",
+   "new": "event"
+  },
+  {
+   "key": "node/node.go:274:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:281:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:287:8",
+   "old": "e",
+   "new": "event"
+  },
+  {
+   "key": "node/node.go:293:23",
+   "old": "e",
+   "new": "event"
+  },
+  {
+   "key": "node/node.go:293:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:347:7",
+   "old": "lastVals",
+   "new": "lastValidators"
+  },
+  {
+   "key": "node/node.go:379:22",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/node.go:379:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:394:28",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/node.go:394:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:413:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:424:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:435:24",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/node.go:435:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:44:2",
+   "old": "evStart",
+   "new": "eventStart"
+  },
+  {
+   "key": "node/node.go:453:34",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/node.go:453:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:45:2",
+   "old": "evNextHeight",
+   "new": "eventNextHeight"
+  },
+  {
+   "key": "node/node.go:467:33",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/node.go:467:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:46:2",
+   "old": "evProposal",
+   "new": "eventProposal"
+  },
+  {
+   "key": "node/node.go:47:2",
+   "old": "evVote",
+   "new": "eventVote"
+  },
+  {
+   "key": "node/node.go:482:31",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/node.go:482:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:489:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:48:2",
+   "old": "evTimeout",
+   "new": "eventTimeout"
+  },
+  {
+   "key": "node/node.go:493:9",
+   "old": "ev",
+   "new": "evidence"
+  },
+  {
+   "key": "node/node.go:49:2",
+   "old": "evPayment",
+   "new": "eventPayment"
+  },
+  {
+   "key": "node/node.go:503:37",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:503:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:507:9",
+   "old": "c",
+   "new": "committedVote"
+  },
+  {
+   "key": "node/node.go:508:6",
+   "old": "ev",
+   "new": "evidence"
+  },
+  {
+   "key": "node/node.go:50:2",
+   "old": "evUpdate",
+   "new": "eventUpdate"
+  },
+  {
+   "key": "node/node.go:517:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:51:2",
+   "old": "evParameterVote",
+   "new": "eventParameterVote"
+  },
+  {
+   "key": "node/node.go:521:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/node.go:522:6",
+   "old": "out",
+   "new": "carried"
+  },
+  {
+   "key": "node/node.go:523:16",
+   "old": "ev",
+   "new": "evidence"
+  },
+  {
+   "key": "node/node.go:52:2",
+   "old": "evReassignmentVote",
+   "new": "eventReassignmentVote"
+  },
+  {
+   "key": "node/node.go:53:2",
+   "old": "evQuery",
+   "new": "eventQuery"
+  },
+  {
+   "key": "node/node.go:548:29",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/node.go:548:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:54:2",
+   "old": "evGovernanceQuery",
+   "new": "eventGovernanceQuery"
+  },
+  {
+   "key": "node/node.go:55:2",
+   "old": "evRegossip",
+   "new": "eventRegossip"
+  },
+  {
+   "key": "node/node.go:56:2",
+   "old": "evAdopt",
+   "new": "eventAdopt"
+  },
+  {
+   "key": "node/node.go:57:2",
+   "old": "evCatchUp",
+   "new": "eventCatchUp"
+  },
+  {
+   "key": "node/node.go:591:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:619:10",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:622:10",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/node.go:629:6",
+   "old": "own",
+   "new": "ownVotes"
+  },
+  {
+   "key": "node/node.go:630:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:635:6",
+   "old": "held",
+   "new": "heldProposals"
+  },
+  {
+   "key": "node/node.go:636:9",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/node.go:643:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:656:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:66:2",
+   "old": "paramChange",
+   "new": "parameterChange"
+  },
+  {
+   "key": "node/node.go:697:27",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/node.go:697:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:701:11",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/node.go:72:2",
+   "old": "govQuery",
+   "new": "governanceQuery"
+  },
+  {
+   "key": "node/node.go:737:41",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/node.go:737:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:738:2",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/node.go:750:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:757:24",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "node/node.go:757:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:758:9",
+   "old": "a",
+   "new": "rawAction"
+  },
+  {
+   "key": "node/node.go:759:10",
+   "old": "act",
+   "new": "action"
+  },
+  {
+   "key": "node/node.go:761:4",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "node/node.go:761:9",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/node.go:775:4",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:790:26",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:790:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:803:29",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:803:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:808:12",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/node.go:809:9",
+   "old": "ok",
+   "new": "conflictFound"
+  },
+  {
+   "key": "node/node.go:826:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:830:9",
+   "old": "v",
+   "new": "heldVote"
+  },
+  {
+   "key": "node/node.go:831:3",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:845:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:846:9",
+   "old": "v",
+   "new": "committedVote"
+  },
+  {
+   "key": "node/node.go:847:3",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/node.go:850:5",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/node.go:858:33",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/node.go:858:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:859:8",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/node.go:870:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:874:5",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/node.go:874:8",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/node.go:883:16",
+   "old": "arm",
+   "new": "armTimeout"
+  },
+  {
+   "key": "node/node.go:883:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:884:2",
+   "old": "d",
+   "new": "delay"
+  },
+  {
+   "key": "node/node.go:893:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:905:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:912:23",
+   "old": "act",
+   "new": "decision"
+  },
+  {
+   "key": "node/node.go:912:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node.go:913:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "node/node.go:913:7",
+   "old": "ok",
+   "new": "valid"
+  },
+  {
+   "key": "node/node.go:91:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/node_test.go:110:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/node_test.go:116:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/node_test.go:119:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/node_test.go:123:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/node_test.go:130:6",
+   "old": "snaps",
+   "new": "snapshots"
+  },
+  {
+   "key": "node/node_test.go:134:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/node_test.go:135:4",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/node_test.go:14:10",
+   "old": "s",
+   "new": "literal"
+  },
+  {
+   "key": "node/node_test.go:14:6",
+   "old": "rat",
+   "new": "rational"
+  },
+  {
+   "key": "node/node_test.go:152:9",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/node_test.go:15:2",
+   "old": "r",
+   "new": "value"
+  },
+  {
+   "key": "node/node_test.go:15:5",
+   "old": "ok",
+   "new": "parsed"
+  },
+  {
+   "key": "node/node_test.go:162:14",
+   "old": "snaps",
+   "new": "snapshots"
+  },
+  {
+   "key": "node/node_test.go:163:2",
+   "old": "out",
+   "new": "result"
+  },
+  {
+   "key": "node/node_test.go:164:9",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/node_test.go:25:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "node/node_test.go:31:24",
+   "old": "key",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/node_test.go:31:36",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/node_test.go:31:7",
+   "old": "b",
+   "new": "bus"
+  },
+  {
+   "key": "node/node_test.go:37:38",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/node_test.go:37:7",
+   "old": "b",
+   "new": "bus"
+  },
+  {
+   "key": "node/node_test.go:40:6",
+   "old": "k",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/node_test.go:40:9",
+   "old": "v",
+   "new": "node"
+  },
+  {
+   "key": "node/node_test.go:44:6",
+   "old": "k",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/node_test.go:44:9",
+   "old": "nd",
+   "new": "target"
+  },
+  {
+   "key": "node/node_test.go:48:3",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/node_test.go:62:14",
+   "old": "accts",
+   "new": "accounts"
+  },
+  {
+   "key": "node/node_test.go:62:38",
+   "old": "pk",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/node_test.go:63:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "node/node_test.go:74:8",
+   "old": "n",
+   "new": "nodeCount"
+  },
+  {
+   "key": "node/node_test.go:76:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/node_test.go:78:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/node_test.go:85:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/node_test.go:90:2",
+   "old": "bob",
+   "new": "bobPublicKey"
+  },
+  {
+   "key": "node/node_test.go:96:2",
+   "old": "b",
+   "new": "bus"
+  },
+  {
+   "key": "node/node_test.go:99:3",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/overdraw_guard_test.go:103:2",
+   "old": "m",
+   "new": "mempool"
+  },
+  {
+   "key": "node/overdraw_guard_test.go:104:2",
+   "old": "bigPay",
+   "new": "bigPayment"
+  },
+  {
+   "key": "node/overdraw_guard_test.go:105:2",
+   "old": "smallPay",
+   "new": "smallPayment"
+  },
+  {
+   "key": "node/overdraw_guard_test.go:22:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/overdraw_guard_test.go:32:2",
+   "old": "pay",
+   "new": "signedPayment"
+  },
+  {
+   "key": "node/overdraw_guard_test.go:33:3",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/overdraw_guard_test.go:75:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/overdraw_guard_test.go:85:3",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/proposal_relay_test.go:102:9",
+   "old": "r",
+   "new": "round"
+  },
+  {
+   "key": "node/proposal_relay_test.go:103:3",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/proposal_relay_test.go:120:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/proposal_relay_test.go:122:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/proposal_relay_test.go:122:6",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/proposal_relay_test.go:129:10",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/proposal_relay_test.go:149:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/proposal_relay_test.go:151:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/proposal_relay_test.go:151:6",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/proposal_relay_test.go:159:9",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/proposal_relay_test.go:168:2",
+   "old": "out",
+   "new": "logOutput"
+  },
+  {
+   "key": "node/proposal_relay_test.go:179:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/proposal_relay_test.go:181:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/proposal_relay_test.go:181:6",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/proposal_relay_test.go:191:5",
+   "old": "pv",
+   "new": "prevotes"
+  },
+  {
+   "key": "node/proposal_relay_test.go:205:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/proposal_relay_test.go:210:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/proposal_relay_test.go:23:10",
+   "old": "network",
+   "new": "networkID"
+  },
+  {
+   "key": "node/proposal_relay_test.go:28:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/proposal_relay_test.go:79:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/proposal_relay_test.go:81:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/proposal_relay_test.go:94:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/proposal_relay_test.go:96:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/proposal_relay_test.go:96:6",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/proposal_relay_test.go:99:3",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/relay.go:13:22",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/relay.go:13:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/relay.go:14:2",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/relay.go:23:13",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/relay.go:23:6",
+   "old": "msgKey",
+   "new": "messageKey"
+  },
+  {
+   "key": "node/replay_test.go:101:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:110:2",
+   "old": "resp2",
+   "new": "replayResponse"
+  },
+  {
+   "key": "node/replay_test.go:117:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:136:10",
+   "old": "network",
+   "new": "networkID"
+  },
+  {
+   "key": "node/replay_test.go:138:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/replay_test.go:143:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/replay_test.go:149:2",
+   "old": "b",
+   "new": "bus"
+  },
+  {
+   "key": "node/replay_test.go:156:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/replay_test.go:159:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:162:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:166:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:170:18",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/replay_test.go:172:11",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:185:6",
+   "old": "cur",
+   "new": "highestHeight"
+  },
+  {
+   "key": "node/replay_test.go:186:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:187:6",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/replay_test.go:191:6",
+   "old": "H",
+   "new": "attackHeight"
+  },
+  {
+   "key": "node/replay_test.go:192:6",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/replay_test.go:197:2",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/replay_test.go:198:2",
+   "old": "prev",
+   "new": "currentState"
+  },
+  {
+   "key": "node/replay_test.go:199:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "node/replay_test.go:203:2",
+   "old": "byz",
+   "new": "byzantineProposal"
+  },
+  {
+   "key": "node/replay_test.go:20:8",
+   "old": "n",
+   "new": "nodeCount"
+  },
+  {
+   "key": "node/replay_test.go:216:12",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:224:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:22:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/replay_test.go:24:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/replay_test.go:28:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/replay_test.go:49:10",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/replay_test.go:62:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:66:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/replay_test.go:75:2",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/replay_test.go:76:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/replay_test.go:80:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "node/updatepool.go:75:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/validators.go:14:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/validators.go:33:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "node/validators.go:37:11",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/validators.go:37:6",
+   "old": "cur",
+   "new": "total"
+  },
+  {
+   "key": "node/validators.go:43:6",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/validators.go:44:12",
+   "old": "s",
+   "new": "nodeStake"
+  },
+  {
+   "key": "node/validators.go:44:6",
+   "old": "node",
+   "new": "validatorNode"
+  },
+  {
+   "key": "node/validators_test.go:21:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/votes_test.go:17:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/votes_test.go:20:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/votes_test.go:20:6",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/votes_test.go:29:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/votes_test.go:43:6",
+   "old": "d",
+   "new": "digestByte"
+  },
+  {
+   "key": "node/votes_test.go:44:3",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/votes_test.go:60:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/window_test.go:107:27",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/window_test.go:107:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:107:74",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "node/window_test.go:110:4",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/window_test.go:117:26",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/window_test.go:117:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:119:2",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/window_test.go:135:9",
+   "old": "validators",
+   "new": "validatorCount"
+  },
+  {
+   "key": "node/window_test.go:137:4",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/window_test.go:139:4",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/window_test.go:139:8",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/window_test.go:142:4",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/window_test.go:151:7",
+   "old": "pv",
+   "new": "prevotes"
+  },
+  {
+   "key": "node/window_test.go:165:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/window_test.go:168:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/window_test.go:168:6",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/window_test.go:174:5",
+   "old": "pv",
+   "new": "prevotes"
+  },
+  {
+   "key": "node/window_test.go:177:2",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/window_test.go:179:5",
+   "old": "pv",
+   "new": "prevotes"
+  },
+  {
+   "key": "node/window_test.go:189:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/window_test.go:195:2",
+   "old": "ndAhead",
+   "new": "nodeAhead"
+  },
+  {
+   "key": "node/window_test.go:196:2",
+   "old": "ndBehind",
+   "new": "nodeBehind"
+  },
+  {
+   "key": "node/window_test.go:19:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/window_test.go:200:2",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/window_test.go:203:2",
+   "old": "one",
+   "new": "proposerPrecommit"
+  },
+  {
+   "key": "node/window_test.go:212:9",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/window_test.go:229:3",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/window_test.go:235:3",
+   "old": "ndAhead",
+   "new": "nodeAhead"
+  },
+  {
+   "key": "node/window_test.go:236:3",
+   "old": "ndBehind",
+   "new": "nodeBehind"
+  },
+  {
+   "key": "node/window_test.go:237:3",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/window_test.go:244:5",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/window_test.go:24:31",
+   "old": "validators",
+   "new": "validatorCount"
+  },
+  {
+   "key": "node/window_test.go:255:10",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/window_test.go:25:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/window_test.go:26:6",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/window_test.go:28:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/window_test.go:32:3",
+   "old": "k",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/window_test.go:43:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:44:2",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/window_test.go:45:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/window_test.go:54:19",
+   "old": "key",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/window_test.go:54:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:57:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:68:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:70:3",
+   "old": "ok",
+   "new": "proposesNone"
+  },
+  {
+   "key": "node/window_test.go:83:31",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/window_test.go:83:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:92:28",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/window_test.go:92:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:94:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "node/window_test.go:98:58",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "node/window_test.go:98:7",
+   "old": "h",
+   "new": "handNet"
+  },
+  {
+   "key": "node/window_test.go:99:2",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/persist.go:23:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/persist.go:34:6",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/persist.go:52:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/persist.go:56:6",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/persist.go:79:3",
+   "old": "tmp",
+   "new": "temporaryBackupPath"
+  },
+  {
+   "key": "node/persist.go:92:24",
+   "old": "tmp",
+   "new": "temporaryPath"
+  },
+  {
+   "key": "node/persist.go:93:2",
+   "old": "f",
+   "new": "temporaryFile"
+  },
+  {
+   "key": "node/persist.go:111:2",
+   "old": "dir",
+   "new": "directory"
+  },
+  {
+   "key": "node/persist.go:133:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/persist.go:136:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/persist.go:145:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/persist.go:160:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/persist.go:160:28",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/persist.go:178:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/persist.go:178:24",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/persist.go:178:42",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/persist.go:202:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/persist.go:213:6",
+   "old": "log",
+   "new": "loadedSignLog"
+  },
+  {
+   "key": "node/persist.go:223:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/persist.go:229:9",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/sync.go:16:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/sync.go:17:11",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/sync.go:29:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/sync.go:30:5",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/sync.go:30:9",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/sync.go:33:19",
+   "old": "ok",
+   "new": "isPeerProvider"
+  },
+  {
+   "key": "node/sync.go:43:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/sync.go:45:5",
+   "old": "d",
+   "new": "fiveBlockIntervals"
+  },
+  {
+   "key": "node/sync.go:55:7",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/sync.go:55:11",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/sync.go:71:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/sync.go:85:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/sync.go:96:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/sync.go:102:3",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/sync.go:127:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "node/sync.go:135:6",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/governance.go:35:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/governance.go:60:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/governance.go:136:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/governance.go:224:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/reassignment.go:37:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/reassignment.go:58:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/reassignment.go:89:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/topology.go:20:2",
+   "old": "n",
+   "new": "participantCount"
+  },
+  {
+   "key": "node/topology.go:21:2",
+   "old": "idx",
+   "new": "selfIndex"
+  },
+  {
+   "key": "node/topology.go:22:9",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/topology.go:31:2",
+   "old": "k",
+   "new": "groupSize"
+  },
+  {
+   "key": "node/topology.go:31:5",
+   "old": "dim",
+   "new": "dimensions"
+  },
+  {
+   "key": "node/topology.go:33:3",
+   "old": "out",
+   "new": "neighbors"
+  },
+  {
+   "key": "node/topology.go:41:2",
+   "old": "coord",
+   "new": "selfCoordinates"
+  },
+  {
+   "key": "node/topology.go:43:6",
+   "old": "out",
+   "new": "neighbors"
+  },
+  {
+   "key": "node/topology.go:44:6",
+   "old": "d",
+   "new": "dimension"
+  },
+  {
+   "key": "node/topology.go:45:7",
+   "old": "v",
+   "new": "coordinateValue"
+  },
+  {
+   "key": "node/topology.go:49:4",
+   "old": "c",
+   "new": "neighborCoordinates"
+  },
+  {
+   "key": "node/topology.go:63:6",
+   "old": "toCoord",
+   "new": "indexToCoordinates"
+  },
+  {
+   "key": "node/topology.go:63:14",
+   "old": "idx",
+   "new": "index"
+  },
+  {
+   "key": "node/topology.go:63:19",
+   "old": "k",
+   "new": "groupSize"
+  },
+  {
+   "key": "node/topology.go:63:22",
+   "old": "dim",
+   "new": "dimensions"
+  },
+  {
+   "key": "node/topology.go:64:2",
+   "old": "c",
+   "new": "coordinates"
+  },
+  {
+   "key": "node/topology.go:65:6",
+   "old": "d",
+   "new": "dimension"
+  },
+  {
+   "key": "node/topology.go:72:6",
+   "old": "fromCoord",
+   "new": "coordinatesToIndex"
+  },
+  {
+   "key": "node/topology.go:72:16",
+   "old": "c",
+   "new": "coordinates"
+  },
+  {
+   "key": "node/topology.go:72:25",
+   "old": "k",
+   "new": "groupSize"
+  },
+  {
+   "key": "node/topology.go:73:2",
+   "old": "idx",
+   "new": "index"
+  },
+  {
+   "key": "node/topology.go:73:7",
+   "old": "mul",
+   "new": "multiplier"
+  },
+  {
+   "key": "node/topology.go:74:6",
+   "old": "d",
+   "new": "dimension"
+  },
+  {
+   "key": "node/peerdns.go:15:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/peerdns.go:38:7",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/httptransport.go:21:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "node/httptransport.go:36:7",
+   "old": "t",
+   "new": "httpTransport"
+  },
+  {
+   "key": "node/httptransport.go:44:7",
+   "old": "t",
+   "new": "httpTransport"
+  },
+  {
+   "key": "node/httptransport.go:51:7",
+   "old": "t",
+   "new": "httpTransport"
+  },
+  {
+   "key": "node/httptransport.go:51:48",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/httptransport.go:74:2",
+   "old": "b",
+   "new": "encodedBody"
+  },
+  {
+   "key": "node/httptransport.go:83:7",
+   "old": "t",
+   "new": "httpTransport"
+  },
+  {
+   "key": "node/httptransport.go:83:30",
+   "old": "url",
+   "new": "endpointURL"
+  },
+  {
+   "key": "node/httptransport.go:84:2",
+   "old": "ctx",
+   "new": "requestContext"
+  },
+  {
+   "key": "node/httptransport.go:86:2",
+   "old": "req",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:91:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "node/httptransport.go:103:16",
+   "old": "n",
+   "new": "node"
+  },
+  {
+   "key": "node/httptransport.go:106:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:107:2",
+   "old": "mux",
+   "new": "router"
+  },
+  {
+   "key": "node/httptransport.go:126:2",
+   "old": "snap",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/httptransport.go:131:6",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/httptransport.go:140:6",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/httptransport.go:152:6",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/httptransport.go:221:6",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/httptransport.go:245:2",
+   "old": "snap",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/httptransport.go:279:8",
+   "old": "key",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/httptransport.go:289:2",
+   "old": "snap",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/httptransport.go:306:13",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:306:36",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:306:53",
+   "old": "v",
+   "new": "destination"
+  },
+  {
+   "key": "node/httptransport.go:312:2",
+   "old": "dec",
+   "new": "decoder"
+  },
+  {
+   "key": "node/httptransport.go:320:16",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:320:39",
+   "old": "v",
+   "new": "value"
+  },
+  {
+   "key": "node/httptransport.go:125:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:125:35",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:125:58",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:130:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:130:33",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:130:56",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:139:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:139:29",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:139:52",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:151:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:151:38",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:151:61",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:171:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:171:38",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:171:61",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:188:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:188:38",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:188:61",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:201:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:201:41",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:201:64",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:212:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:212:35",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:212:58",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:220:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:220:28",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:220:51",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:244:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:244:31",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:244:54",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:252:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:252:33",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:252:56",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/httptransport.go:274:7",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/httptransport.go:274:32",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/httptransport.go:274:55",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/persist_test.go:21:2",
+   "old": "snap",
+   "new": "snapshotPath"
+  },
+  {
+   "key": "node/persist_test.go:23:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/persist_test.go:25:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/persist_test.go:29:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/persist_test.go:37:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/persist_test.go:43:3",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/persist_test.go:58:2",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/persist_test.go:72:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/persist_test.go:73:2",
+   "old": "x",
+   "new": "successorSigner"
+  },
+  {
+   "key": "node/persist_test.go:74:2",
+   "old": "A",
+   "new": "founderKey"
+  },
+  {
+   "key": "node/persist_test.go:74:5",
+   "old": "X",
+   "new": "successorKey"
+  },
+  {
+   "key": "node/persist_test.go:76:2",
+   "old": "dir",
+   "new": "snapshotDirectory"
+  },
+  {
+   "key": "node/persist_test.go:77:17",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/persist_test.go:84:2",
+   "old": "b",
+   "new": "messageBus"
+  },
+  {
+   "key": "node/persist_test.go:85:2",
+   "old": "nA",
+   "new": "founderNode"
+  },
+  {
+   "key": "node/persist_test.go:85:6",
+   "old": "nX",
+   "new": "successorNode"
+  },
+  {
+   "key": "node/persist_test.go:89:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/persist_test.go:102:5",
+   "old": "got",
+   "new": "successorBalance"
+  },
+  {
+   "key": "node/persist_test.go:111:2",
+   "old": "a",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/persist_test.go:112:2",
+   "old": "A",
+   "new": "validatorKey"
+  },
+  {
+   "key": "node/persist_test.go:113:2",
+   "old": "set",
+   "new": "validators"
+  },
+  {
+   "key": "node/persist_test.go:114:2",
+   "old": "snap",
+   "new": "snapshotPath"
+  },
+  {
+   "key": "node/persist_test.go:115:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/persist_test.go:125:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/persist_test.go:134:5",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/persist_test.go:150:2",
+   "old": "a",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/persist_test.go:151:2",
+   "old": "A",
+   "new": "validatorKey"
+  },
+  {
+   "key": "node/persist_test.go:152:2",
+   "old": "snap",
+   "new": "snapshotPath"
+  },
+  {
+   "key": "node/persist_test.go:153:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/persist_test.go:167:5",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/persist_test.go:181:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/persist_test.go:181:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "node/persist_test.go:185:2",
+   "old": "a",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/persist_test.go:186:2",
+   "old": "A",
+   "new": "validatorKey"
+  },
+  {
+   "key": "node/persist_test.go:187:2",
+   "old": "snap",
+   "new": "snapshotPath"
+  },
+  {
+   "key": "node/persist_test.go:188:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/persist_test.go:207:9",
+   "old": "c",
+   "new": "testCase"
+  },
+  {
+   "key": "node/persist_test.go:212:3",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/persist_test.go:230:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/persist_test.go:231:2",
+   "old": "b",
+   "new": "selfSigner"
+  },
+  {
+   "key": "node/persist_test.go:232:2",
+   "old": "A",
+   "new": "founderKey"
+  },
+  {
+   "key": "node/persist_test.go:232:5",
+   "old": "B",
+   "new": "selfKey"
+  },
+  {
+   "key": "node/persist_test.go:233:2",
+   "old": "set",
+   "new": "validators"
+  },
+  {
+   "key": "node/persist_test.go:235:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/persist_test.go:237:51",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/persist_test.go:237:74",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/persist_test.go:241:3",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/persist_test.go:249:3",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/persist_test.go:250:3",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/catchup_test.go:20:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/catchup_test.go:21:2",
+   "old": "b",
+   "new": "stragglerSigner"
+  },
+  {
+   "key": "node/catchup_test.go:22:2",
+   "old": "A",
+   "new": "founderKey"
+  },
+  {
+   "key": "node/catchup_test.go:22:5",
+   "old": "B",
+   "new": "stragglerKey"
+  },
+  {
+   "key": "node/catchup_test.go:23:2",
+   "old": "set",
+   "new": "validators"
+  },
+  {
+   "key": "node/catchup_test.go:24:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/catchup_test.go:27:2",
+   "old": "nd",
+   "new": "straggler"
+  },
+  {
+   "key": "node/catchup_test.go:39:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/catchup_test.go:54:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/catchup_test.go:55:2",
+   "old": "b",
+   "new": "stragglerSigner"
+  },
+  {
+   "key": "node/catchup_test.go:56:2",
+   "old": "A",
+   "new": "founderKey"
+  },
+  {
+   "key": "node/catchup_test.go:56:5",
+   "old": "B",
+   "new": "stragglerKey"
+  },
+  {
+   "key": "node/catchup_test.go:57:2",
+   "old": "set",
+   "new": "validators"
+  },
+  {
+   "key": "node/catchup_test.go:59:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/catchup_test.go:62:56",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/catchup_test.go:62:79",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/catchup_test.go:71:53",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/catchup_test.go:71:76",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/catchup_test.go:79:2",
+   "old": "nd",
+   "new": "straggler"
+  },
+  {
+   "key": "node/catchup_test.go:85:8",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/catchup_test.go:98:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "node/catchup_test.go:99:2",
+   "old": "msgs",
+   "new": "messages"
+  },
+  {
+   "key": "node/catchup_test.go:102:7",
+   "old": "r",
+   "new": "recordingTransport"
+  },
+  {
+   "key": "node/catchup_test.go:102:53",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/catchup_test.go:108:7",
+   "old": "r",
+   "new": "recordingTransport"
+  },
+  {
+   "key": "node/catchup_test.go:108:35",
+   "old": "t",
+   "new": "messageType"
+  },
+  {
+   "key": "node/catchup_test.go:111:2",
+   "old": "n",
+   "new": "count"
+  },
+  {
+   "key": "node/catchup_test.go:112:9",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/catchup_test.go:120:7",
+   "old": "r",
+   "new": "recordingTransport"
+  },
+  {
+   "key": "node/catchup_test.go:123:6",
+   "old": "out",
+   "new": "sentProposals"
+  },
+  {
+   "key": "node/catchup_test.go:124:9",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/catchup_test.go:132:7",
+   "old": "r",
+   "new": "recordingTransport"
+  },
+  {
+   "key": "node/catchup_test.go:135:9",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/catchup_test.go:137:4",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/catchup_test.go:145:7",
+   "old": "r",
+   "new": "recordingTransport"
+  },
+  {
+   "key": "node/catchup_test.go:145:36",
+   "old": "key",
+   "new": "validatorKey"
+  },
+  {
+   "key": "node/catchup_test.go:145:75",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "node/catchup_test.go:148:6",
+   "old": "out",
+   "new": "sentVotes"
+  },
+  {
+   "key": "node/catchup_test.go:149:9",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/catchup_test.go:150:6",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/catchup_test.go:163:2",
+   "old": "s1",
+   "new": "firstSigner"
+  },
+  {
+   "key": "node/catchup_test.go:164:2",
+   "old": "s2",
+   "new": "secondSigner"
+  },
+  {
+   "key": "node/catchup_test.go:166:2",
+   "old": "set",
+   "new": "validators"
+  },
+  {
+   "key": "node/catchup_test.go:167:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/catchup_test.go:169:2",
+   "old": "P",
+   "new": "payerKey"
+  },
+  {
+   "key": "node/catchup_test.go:171:2",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/catchup_test.go:172:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/catchup_test.go:181:3",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/catchup_test.go:189:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/catchup_test.go:197:5",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/catchup_test.go:206:2",
+   "old": "f",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/catchup_test.go:207:2",
+   "old": "x",
+   "new": "successorSigner"
+  },
+  {
+   "key": "node/catchup_test.go:208:2",
+   "old": "F",
+   "new": "founderKey"
+  },
+  {
+   "key": "node/catchup_test.go:208:5",
+   "old": "X",
+   "new": "successorKey"
+  },
+  {
+   "key": "node/catchup_test.go:210:2",
+   "old": "b",
+   "new": "messageBus"
+  },
+  {
+   "key": "node/catchup_test.go:211:2",
+   "old": "mk",
+   "new": "newNodeOnBus"
+  },
+  {
+   "key": "node/catchup_test.go:211:13",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/catchup_test.go:212:3",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/catchup_test.go:220:2",
+   "old": "nF",
+   "new": "founderNode"
+  },
+  {
+   "key": "node/catchup_test.go:220:6",
+   "old": "nX",
+   "new": "successorNode"
+  },
+  {
+   "key": "node/catchup_test.go:222:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/catchup_test.go:237:2",
+   "old": "srv",
+   "new": "server"
+  },
+  {
+   "key": "node/catchup_test.go:239:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/catchup_test.go:239:6",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/sync_test.go:24:5",
+   "old": "v",
+   "new": "slackSetting"
+  },
+  {
+   "key": "node/sync_test.go:25:6",
+   "old": "n",
+   "new": "slackFactor"
+  },
+  {
+   "key": "node/sync_test.go:32:51",
+   "old": "cond",
+   "new": "condition"
+  },
+  {
+   "key": "node/sync_test.go:32:69",
+   "old": "msg",
+   "new": "failureMessage"
+  },
+  {
+   "key": "node/sync_test.go:50:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/sync_test.go:52:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/sync_test.go:58:2",
+   "old": "aCfg",
+   "new": "founderConfig"
+  },
+  {
+   "key": "node/sync_test.go:63:2",
+   "old": "aNode",
+   "new": "founderNode"
+  },
+  {
+   "key": "node/sync_test.go:64:2",
+   "old": "aServer",
+   "new": "founderServer"
+  },
+  {
+   "key": "node/sync_test.go:67:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/sync_test.go:76:3",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/sync_test.go:81:2",
+   "old": "b",
+   "new": "joinerSigner"
+  },
+  {
+   "key": "node/sync_test.go:82:2",
+   "old": "bCfg",
+   "new": "joinerConfig"
+  },
+  {
+   "key": "node/sync_test.go:87:2",
+   "old": "bNode",
+   "new": "joinerNode"
+  },
+  {
+   "key": "node/sync_test.go:93:3",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/sync_test.go:102:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/sync_test.go:104:2",
+   "old": "aVals",
+   "new": "founderValidatorSet"
+  },
+  {
+   "key": "node/sync_test.go:108:2",
+   "old": "aNode",
+   "new": "founderNode"
+  },
+  {
+   "key": "node/sync_test.go:112:2",
+   "old": "aServer",
+   "new": "founderServer"
+  },
+  {
+   "key": "node/sync_test.go:114:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/sync_test.go:123:2",
+   "old": "bVals",
+   "new": "otherValidatorSet"
+  },
+  {
+   "key": "node/sync_test.go:124:2",
+   "old": "b",
+   "new": "joinerSigner"
+  },
+  {
+   "key": "node/sync_test.go:125:2",
+   "old": "bNode",
+   "new": "joinerNode"
+  },
+  {
+   "key": "node/sync_test.go:135:2",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/sync_test.go:147:51",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/sync_test.go:147:74",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/governance_test.go:32:2",
+   "old": "snap",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/governance_test.go:132:2",
+   "old": "v1",
+   "new": "remainingSigner"
+  },
+  {
+   "key": "node/governance_test.go:133:2",
+   "old": "v2",
+   "new": "granteeSigner"
+  },
+  {
+   "key": "node/governance_test.go:134:2",
+   "old": "v3",
+   "new": "departingSigner"
+  },
+  {
+   "key": "node/governance_test.go:135:2",
+   "old": "k1",
+   "new": "remainingKey"
+  },
+  {
+   "key": "node/governance_test.go:135:6",
+   "old": "k2",
+   "new": "granteeKey"
+  },
+  {
+   "key": "node/governance_test.go:135:10",
+   "old": "k3",
+   "new": "departingKey"
+  },
+  {
+   "key": "node/topology_test.go:14:14",
+   "old": "n",
+   "new": "count"
+  },
+  {
+   "key": "node/topology_test.go:24:5",
+   "old": "got",
+   "new": "neighborCount"
+  },
+  {
+   "key": "node/topology_test.go:31:8",
+   "old": "dim",
+   "new": "dimensions"
+  },
+  {
+   "key": "node/topology_test.go:35:8",
+   "old": "dim",
+   "new": "dimensions"
+  },
+  {
+   "key": "node/topology_test.go:43:9",
+   "old": "n",
+   "new": "nodeCount"
+  },
+  {
+   "key": "node/topology_test.go:46:3",
+   "old": "adj",
+   "new": "neighborsByKey"
+  },
+  {
+   "key": "node/topology_test.go:48:10",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/topology_test.go:49:4",
+   "old": "nb",
+   "new": "neighbors"
+  },
+  {
+   "key": "node/topology_test.go:62:4",
+   "old": "cur",
+   "new": "current"
+  },
+  {
+   "key": "node/topology_test.go:64:11",
+   "old": "nb",
+   "new": "neighbor"
+  },
+  {
+   "key": "node/topology_test.go:80:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "node/topology_test.go:85:7",
+   "old": "b",
+   "new": "hyperBus"
+  },
+  {
+   "key": "node/topology_test.go:85:43",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/topology_test.go:88:9",
+   "old": "k",
+   "new": "neighborKey"
+  },
+  {
+   "key": "node/topology_test.go:89:6",
+   "old": "nd",
+   "new": "neighbor"
+  },
+  {
+   "key": "node/topology_test.go:94:9",
+   "old": "nd",
+   "new": "target"
+  },
+  {
+   "key": "node/topology_test.go:95:3",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/topology_test.go:112:8",
+   "old": "n",
+   "new": "nodeCount"
+  },
+  {
+   "key": "node/topology_test.go:114:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/topology_test.go:116:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/topology_test.go:120:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/topology_test.go:122:9",
+   "old": "v",
+   "new": "validator"
+  },
+  {
+   "key": "node/topology_test.go:127:2",
+   "old": "bus",
+   "new": "hypercubeBus"
+  },
+  {
+   "key": "node/topology_test.go:129:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/topology_test.go:142:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/topology_test.go:146:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/topology_test.go:155:7",
+   "old": "snaps",
+   "new": "snapshots"
+  },
+  {
+   "key": "node/topology_test.go:156:3",
+   "old": "ok",
+   "new": "allAdvanced"
+  },
+  {
+   "key": "node/topology_test.go:157:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/topology_test.go:158:4",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/topology_test.go:166:11",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/peerdns_test.go:95:40",
+   "old": "n",
+   "new": "validatorCount"
+  },
+  {
+   "key": "node/peerdns_test.go:104:3",
+   "old": "key",
+   "new": "publicKey"
+  },
+  {
+   "key": "node/peerdns_test.go:117:10",
+   "old": "url",
+   "new": "nodeURL"
+  },
+  {
+   "key": "node/peerdns_test.go:129:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/peerdns_test.go:143:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/http_test.go:22:8",
+   "old": "n",
+   "new": "nodeCount"
+  },
+  {
+   "key": "node/http_test.go:24:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/http_test.go:26:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/http_test.go:30:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/http_test.go:34:2",
+   "old": "bob",
+   "new": "bobKey"
+  },
+  {
+   "key": "node/http_test.go:45:3",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/http_test.go:53:10",
+   "old": "s",
+   "new": "server"
+  },
+  {
+   "key": "node/http_test.go:67:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/http_test.go:70:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/http_test.go:73:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/http_test.go:77:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/http_test.go:83:6",
+   "old": "snaps",
+   "new": "snapshots"
+  },
+  {
+   "key": "node/http_test.go:87:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/http_test.go:88:4",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/http_test.go:104:9",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/http_test.go:109:5",
+   "old": "got",
+   "new": "bobBalance"
+  },
+  {
+   "key": "node/http_test.go:118:2",
+   "old": "v",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/http_test.go:125:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/http_test.go:137:2",
+   "old": "get",
+   "new": "resolve"
+  },
+  {
+   "key": "node/http_test.go:138:3",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "node/http_test.go:143:7",
+   "old": "rec",
+   "new": "record"
+  },
+  {
+   "key": "node/http_test.go:148:10",
+   "old": "rec",
+   "new": "record"
+  },
+  {
+   "key": "node/http_test.go:154:5",
+   "old": "snap",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/http_test.go:176:2",
+   "old": "v",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/http_test.go:179:6",
+   "old": "cand",
+   "new": "candidate"
+  },
+  {
+   "key": "node/http_test.go:186:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/http_test.go:202:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "node/http_test.go:207:6",
+   "old": "rec",
+   "new": "record"
+  },
+  {
+   "key": "node/http_test.go:218:2",
+   "old": "v",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/http_test.go:219:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/onboarding_test.go:13:63",
+   "old": "set",
+   "new": "validators"
+  },
+  {
+   "key": "node/onboarding_test.go:16:9",
+   "old": "v",
+   "new": "validator"
+  },
+  {
+   "key": "node/onboarding_test.go:31:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/onboarding_test.go:32:2",
+   "old": "b",
+   "new": "newcomerOneSigner"
+  },
+  {
+   "key": "node/onboarding_test.go:33:2",
+   "old": "c",
+   "new": "newcomerTwoSigner"
+  },
+  {
+   "key": "node/onboarding_test.go:34:2",
+   "old": "A",
+   "new": "founderKey"
+  },
+  {
+   "key": "node/onboarding_test.go:34:5",
+   "old": "B",
+   "new": "newcomerOneKey"
+  },
+  {
+   "key": "node/onboarding_test.go:34:8",
+   "old": "C",
+   "new": "newcomerTwoKey"
+  },
+  {
+   "key": "node/onboarding_test.go:38:2",
+   "old": "nd",
+   "new": "joiner"
+  },
+  {
+   "key": "node/onboarding_test.go:51:2",
+   "old": "cp",
+   "new": "grownCheckpoint"
+  },
+  {
+   "key": "node/onboarding_test.go:61:2",
+   "old": "x1",
+   "new": "strangerOneSigner"
+  },
+  {
+   "key": "node/onboarding_test.go:62:2",
+   "old": "x2",
+   "new": "strangerTwoSigner"
+  },
+  {
+   "key": "node/onboarding_test.go:63:2",
+   "old": "x3",
+   "new": "strangerThreeSigner"
+  },
+  {
+   "key": "node/onboarding_test.go:64:2",
+   "old": "X1",
+   "new": "strangerOneKey"
+  },
+  {
+   "key": "node/onboarding_test.go:64:6",
+   "old": "X2",
+   "new": "strangerTwoKey"
+  },
+  {
+   "key": "node/onboarding_test.go:64:10",
+   "old": "X3",
+   "new": "strangerThreeKey"
+  },
+  {
+   "key": "node/onboarding_test.go:71:2",
+   "old": "scp",
+   "new": "strangerCheckpoint"
+  },
+  {
+   "key": "node/evidence_test.go:13:29",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/evidence_test.go:13:68",
+   "old": "key",
+   "new": "validatorKey"
+  },
+  {
+   "key": "node/evidence_test.go:14:2",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/evidence_test.go:18:9",
+   "old": "ev",
+   "new": "evidence"
+  },
+  {
+   "key": "node/evidence_test.go:30:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/evidence_test.go:36:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/evidence_test.go:36:6",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/evidence_test.go:37:2",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/evidence_test.go:41:3",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/evidence_test.go:59:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/evidence_test.go:62:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/evidence_test.go:62:6",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/evidence_test.go:63:9",
+   "old": "d",
+   "new": "digestByte"
+  },
+  {
+   "key": "node/evidence_test.go:64:3",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/evidence_test.go:69:6",
+   "old": "signers",
+   "new": "signingValidators"
+  },
+  {
+   "key": "node/evidence_test.go:75:2",
+   "old": "keys",
+   "new": "signersByKey"
+  },
+  {
+   "key": "node/evidence_test.go:76:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/evidence_test.go:79:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/backup_test.go:17:2",
+   "old": "dir",
+   "new": "directory"
+  },
+  {
+   "key": "node/backup_test.go:18:2",
+   "old": "snap",
+   "new": "snapshotPath"
+  },
+  {
+   "key": "node/backup_test.go:20:2",
+   "old": "a",
+   "new": "founderSigner"
+  },
+  {
+   "key": "node/backup_test.go:21:2",
+   "old": "A",
+   "new": "founderKey"
+  },
+  {
+   "key": "node/backup_test.go:22:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/backup_test.go:25:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/backup_test.go:38:7",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/backup_unix_test.go:41:2",
+   "old": "v",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/backup_unix_test.go:42:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "consensus/commit.go:26:7",
+   "old": "c",
+   "new": "commit"
+  },
+  {
+   "key": "consensus/commit.go:26:65",
+   "old": "vals",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/commit.go:29:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/commit.go:46:7",
+   "old": "c",
+   "new": "commit"
+  },
+  {
+   "key": "consensus/commit.go:47:2",
+   "old": "out",
+   "new": "voters"
+  },
+  {
+   "key": "consensus/commit.go:48:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/evidence.go:11:7",
+   "old": "e",
+   "new": "evidence"
+  },
+  {
+   "key": "consensus/evidence.go:26:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/evidence.go:27:6",
+   "old": "out",
+   "new": "evidence"
+  },
+  {
+   "key": "consensus/evidence.go:28:9",
+   "old": "vs",
+   "new": "prevoteSet"
+  },
+  {
+   "key": "consensus/evidence.go:31:9",
+   "old": "vs",
+   "new": "precommitSet"
+  },
+  {
+   "key": "consensus/validator.go:34:22",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "consensus/validator.go:35:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/validator.go:36:9",
+   "old": "v",
+   "new": "validator"
+  },
+  {
+   "key": "consensus/validator.go:43:9",
+   "old": "dup",
+   "new": "duplicate"
+  },
+  {
+   "key": "consensus/validator.go:57:7",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/validator.go:63:7",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/validator.go:68:7",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/validator.go:71:7",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/validator.go:71:31",
+   "old": "pubKey",
+   "new": "publicKey"
+  },
+  {
+   "key": "consensus/validator.go:77:7",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/validator.go:82:6",
+   "old": "buf",
+   "new": "buffer"
+  },
+  {
+   "key": "consensus/validator.go:85:2",
+   "old": "h",
+   "new": "hasher"
+  },
+  {
+   "key": "consensus/validator.go:88:6",
+   "old": "cum",
+   "new": "cumulativePower"
+  },
+  {
+   "key": "consensus/validator.go:89:9",
+   "old": "v",
+   "new": "validator"
+  },
+  {
+   "key": "consensus/validator.go:99:7",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/validator.go:99:34",
+   "old": "pubKey",
+   "new": "publicKey"
+  },
+  {
+   "key": "consensus/validator.go:100:5",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "consensus/validator.go:105:7",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/vote.go:19:7",
+   "old": "t",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/vote.go:41:7",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/vote.go:54:39",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/vote.go:55:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "consensus/vote.go:64:7",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/voteset.go:24:2",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/voteset.go:25:2",
+   "old": "vals",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/voteset.go:33:17",
+   "old": "vals",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/voteset.go:33:64",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/voteset.go:46:7",
+   "old": "s",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/voteset.go:46:64",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/voteset.go:59:5",
+   "old": "prev",
+   "new": "previous"
+  },
+  {
+   "key": "consensus/voteset.go:59:11",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "consensus/voteset.go:77:7",
+   "old": "s",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/voteset.go:78:2",
+   "old": "q",
+   "new": "quorum"
+  },
+  {
+   "key": "consensus/voteset.go:79:6",
+   "old": "d",
+   "new": "digest"
+  },
+  {
+   "key": "consensus/voteset.go:79:9",
+   "old": "p",
+   "new": "power"
+  },
+  {
+   "key": "consensus/voteset.go:88:7",
+   "old": "s",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/voteset.go:90:9",
+   "old": "p",
+   "new": "power"
+  },
+  {
+   "key": "consensus/voteset.go:97:7",
+   "old": "s",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/voteset.go:97:28",
+   "old": "d",
+   "new": "digest"
+  },
+  {
+   "key": "consensus/voteset.go:101:7",
+   "old": "s",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/voteset.go:104:7",
+   "old": "s",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/voteset.go:104:32",
+   "old": "d",
+   "new": "digest"
+  },
+  {
+   "key": "consensus/voteset.go:107:7",
+   "old": "s",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/voteset.go:113:7",
+   "old": "s",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/voteset.go:117:2",
+   "old": "d",
+   "new": "digest"
+  },
+  {
+   "key": "consensus/voteset.go:117:5",
+   "old": "ok",
+   "new": "hasMajority"
+  },
+  {
+   "key": "consensus/voteset.go:122:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/driver.go:59:6",
+   "old": "ActProposal",
+   "new": "ActionProposal"
+  },
+  {
+   "key": "consensus/driver.go:66:6",
+   "old": "ActBroadcastVote",
+   "new": "ActionBroadcastVote"
+  },
+  {
+   "key": "consensus/driver.go:69:6",
+   "old": "ActSchedule",
+   "new": "ActionSchedule"
+  },
+  {
+   "key": "consensus/driver.go:77:6",
+   "old": "ActDecided",
+   "new": "ActionDecided"
+  },
+  {
+   "key": "consensus/driver.go:94:2",
+   "old": "vals",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver.go:118:2",
+   "old": "schedPrevoteTO",
+   "new": "scheduledPrevoteTimeout"
+  },
+  {
+   "key": "consensus/driver.go:119:2",
+   "old": "schedPrecommitTO",
+   "new": "scheduledPrecommitTimeout"
+  },
+  {
+   "key": "consensus/driver.go:127:40",
+   "old": "vals",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver.go:145:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:146:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:147:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:154:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:159:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:165:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:175:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:192:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:210:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:230:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:239:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:248:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:279:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:291:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:308:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:329:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:342:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:358:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:370:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:474:7",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver.go:165:29",
+   "old": "log",
+   "new": "signLog"
+  },
+  {
+   "key": "consensus/driver.go:175:25",
+   "old": "own",
+   "new": "ownVotes"
+  },
+  {
+   "key": "consensus/driver.go:176:9",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/driver.go:177:9",
+   "old": "ok",
+   "new": "held"
+  },
+  {
+   "key": "consensus/driver.go:181:2",
+   "old": "r",
+   "new": "latestRound"
+  },
+  {
+   "key": "consensus/driver.go:182:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/driver.go:192:24",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/driver.go:210:24",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/driver.go:230:30",
+   "old": "r",
+   "new": "round"
+  },
+  {
+   "key": "consensus/driver.go:241:6",
+   "old": "rr",
+   "new": "round"
+  },
+  {
+   "key": "consensus/driver.go:248:29",
+   "old": "r",
+   "new": "round"
+  },
+  {
+   "key": "consensus/driver.go:258:6",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver.go:262:3",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/driver.go:279:34",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/driver.go:281:8",
+   "old": "ok",
+   "new": "held"
+  },
+  {
+   "key": "consensus/driver.go:291:30",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/driver.go:329:30",
+   "old": "t",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/driver.go:331:5",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver.go:342:27",
+   "old": "t",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/driver.go:343:2",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/driver.go:359:6",
+   "old": "all",
+   "new": "allActions"
+  },
+  {
+   "key": "consensus/driver.go:361:3",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver.go:370:18",
+   "old": "step1",
+   "new": "applyOneRule"
+  },
+  {
+   "key": "consensus/driver.go:374:2",
+   "old": "r",
+   "new": "currentRound"
+  },
+  {
+   "key": "consensus/driver.go:379:9",
+   "old": "rr",
+   "new": "round"
+  },
+  {
+   "key": "consensus/driver.go:380:3",
+   "old": "pc",
+   "new": "precommitSet"
+  },
+  {
+   "key": "consensus/driver.go:381:3",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/driver.go:381:6",
+   "old": "ok",
+   "new": "held"
+  },
+  {
+   "key": "consensus/driver.go:388:8",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver.go:404:3",
+   "old": "skip",
+   "new": "skipToRound"
+  },
+  {
+   "key": "consensus/driver.go:405:3",
+   "old": "thresh",
+   "new": "skipThreshold"
+  },
+  {
+   "key": "consensus/driver.go:406:7",
+   "old": "rr",
+   "new": "round"
+  },
+  {
+   "key": "consensus/driver.go:418:6",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/driver.go:418:9",
+   "old": "ok",
+   "new": "held"
+  },
+  {
+   "key": "consensus/driver.go:423:8",
+   "old": "pv",
+   "new": "validRoundPrevotes"
+  },
+  {
+   "key": "consensus/driver.go:434:5",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/driver.go:434:8",
+   "old": "ok",
+   "new": "held"
+  },
+  {
+   "key": "consensus/driver.go:451:6",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver.go:474:29",
+   "old": "r",
+   "new": "round"
+  },
+  {
+   "key": "consensus/driver.go:474:38",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/driver.go:474:50",
+   "old": "vr",
+   "new": "proofOfLockRound"
+  },
+  {
+   "key": "consensus/driver.go:489:6",
+   "old": "digestPtr",
+   "new": "digestPointer"
+  },
+  {
+   "key": "consensus/driver.go:489:16",
+   "old": "d",
+   "new": "digest"
+  },
+  {
+   "key": "consensus/driver.go:489:40",
+   "old": "c",
+   "new": "digestCopy"
+  },
+  {
+   "key": "consensus/consensus_test.go:13:35",
+   "old": "n",
+   "new": "count"
+  },
+  {
+   "key": "consensus/consensus_test.go:16:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "consensus/consensus_test.go:18:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/consensus_test.go:28:13",
+   "old": "b",
+   "new": "fillByte"
+  },
+  {
+   "key": "consensus/consensus_test.go:29:6",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:36:29",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/consensus_test.go:36:75",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/consensus_test.go:36:89",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:38:2",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/consensus_test.go:46:5",
+   "old": "vs",
+   "new": "fourValidators"
+  },
+  {
+   "key": "consensus/consensus_test.go:50:5",
+   "old": "vs7",
+   "new": "sevenValidators"
+  },
+  {
+   "key": "consensus/consensus_test.go:57:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:58:2",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:59:2",
+   "old": "set",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:65:7",
+   "old": "ok",
+   "new": "hasMajority"
+  },
+  {
+   "key": "consensus/consensus_test.go:72:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:73:2",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:74:2",
+   "old": "set",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:78:8",
+   "old": "ok",
+   "new": "hasMajority"
+  },
+  {
+   "key": "consensus/consensus_test.go:84:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:85:2",
+   "old": "set",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:98:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:99:2",
+   "old": "set",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:100:2",
+   "old": "dX",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/consensus_test.go:100:6",
+   "old": "dY",
+   "new": "digestY"
+  },
+  {
+   "key": "consensus/consensus_test.go:112:8",
+   "old": "ok",
+   "new": "hasMajority"
+  },
+  {
+   "key": "consensus/consensus_test.go:118:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:119:2",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:120:2",
+   "old": "set",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:124:2",
+   "old": "c",
+   "new": "commit"
+  },
+  {
+   "key": "consensus/consensus_test.go:124:5",
+   "old": "ok",
+   "new": "hasCommit"
+  },
+  {
+   "key": "consensus/consensus_test.go:137:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:138:2",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:139:2",
+   "old": "c",
+   "new": "commit"
+  },
+  {
+   "key": "consensus/consensus_test.go:149:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:150:2",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:151:2",
+   "old": "v0",
+   "new": "repeatedVote"
+  },
+  {
+   "key": "consensus/consensus_test.go:152:2",
+   "old": "c",
+   "new": "commit"
+  },
+  {
+   "key": "consensus/consensus_test.go:159:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:160:2",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:167:2",
+   "old": "c",
+   "new": "commit"
+  },
+  {
+   "key": "consensus/consensus_test.go:177:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:178:2",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/consensus_test.go:214:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:215:2",
+   "old": "dX",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/consensus_test.go:215:6",
+   "old": "dY",
+   "new": "digestY"
+  },
+  {
+   "key": "consensus/consensus_test.go:238:2",
+   "old": "set",
+   "new": "voteSet"
+  },
+  {
+   "key": "consensus/consensus_test.go:239:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/consensus_test.go:242:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/consensus_test.go:250:20",
+   "old": "a",
+   "new": "first"
+  },
+  {
+   "key": "consensus/consensus_test.go:250:23",
+   "old": "b",
+   "new": "second"
+  },
+  {
+   "key": "consensus/consensus_test.go:251:2",
+   "old": "inA",
+   "new": "votedInFirst"
+  },
+  {
+   "key": "consensus/consensus_test.go:252:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/consensus_test.go:255:6",
+   "old": "out",
+   "new": "sharedVoters"
+  },
+  {
+   "key": "consensus/consensus_test.go:256:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/evidence_test.go:8:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/evidence_test.go:10:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/evidence_test.go:17:2",
+   "old": "ev",
+   "new": "allEvidence"
+  },
+  {
+   "key": "consensus/evidence_test.go:19:9",
+   "old": "e",
+   "new": "evidence"
+  },
+  {
+   "key": "consensus/power_test.go:13:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/power_test.go:25:5",
+   "old": "q",
+   "new": "quorum"
+  },
+  {
+   "key": "consensus/power_test.go:28:5",
+   "old": "p",
+   "new": "proposer"
+  },
+  {
+   "key": "consensus/proposer_test.go:7:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/proposer_test.go:23:6",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "consensus/proposer_test.go:24:7",
+   "old": "r",
+   "new": "round"
+  },
+  {
+   "key": "consensus/proposer_test.go:29:9",
+   "old": "c",
+   "new": "count"
+  },
+  {
+   "key": "consensus/proposer_test.go:35:9",
+   "old": "k",
+   "new": "publicKey"
+  },
+  {
+   "key": "consensus/driver_test.go:14:2",
+   "old": "m",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:15:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:21:15",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:21:30",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/driver_test.go:22:9",
+   "old": "a",
+   "new": "action"
+  },
+  {
+   "key": "consensus/driver_test.go:23:6",
+   "old": "bv",
+   "new": "broadcast"
+  },
+  {
+   "key": "consensus/driver_test.go:23:10",
+   "old": "ok",
+   "new": "isBroadcast"
+  },
+  {
+   "key": "consensus/driver_test.go:24:4",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/driver_test.go:31:18",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:32:9",
+   "old": "a",
+   "new": "action"
+  },
+  {
+   "key": "consensus/driver_test.go:33:9",
+   "old": "ok",
+   "new": "isProposal"
+  },
+  {
+   "key": "consensus/driver_test.go:40:18",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:41:9",
+   "old": "a",
+   "new": "action"
+  },
+  {
+   "key": "consensus/driver_test.go:42:6",
+   "old": "s",
+   "new": "schedule"
+  },
+  {
+   "key": "consensus/driver_test.go:42:9",
+   "old": "ok",
+   "new": "isSchedule"
+  },
+  {
+   "key": "consensus/driver_test.go:80:18",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:80:36",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:82:9",
+   "old": "r",
+   "new": "round"
+  },
+  {
+   "key": "consensus/driver_test.go:85:9",
+   "old": "v",
+   "new": "validator"
+  },
+  {
+   "key": "consensus/driver_test.go:222:7",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:52:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:53:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:56:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:63:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:68:2",
+   "old": "X",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/driver_test.go:95:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:96:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:102:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:108:2",
+   "old": "dg",
+   "new": "proposedDigest"
+  },
+  {
+   "key": "consensus/driver_test.go:109:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:111:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:115:5",
+   "old": "pv",
+   "new": "prevote"
+  },
+  {
+   "key": "consensus/driver_test.go:122:5",
+   "old": "pc",
+   "new": "precommit"
+  },
+  {
+   "key": "consensus/driver_test.go:129:7",
+   "old": "ok",
+   "new": "decided"
+  },
+  {
+   "key": "consensus/driver_test.go:137:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:138:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:143:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:149:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:150:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:183:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:184:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:188:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:194:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:197:2",
+   "old": "far",
+   "new": "farRound"
+  },
+  {
+   "key": "consensus/driver_test.go:198:5",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:238:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:239:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:241:17",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:244:18",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:244:29",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:258:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:264:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:281:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:282:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:286:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:293:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:303:2",
+   "old": "X",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/driver_test.go:304:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:312:5",
+   "old": "pv",
+   "new": "prevote"
+  },
+  {
+   "key": "consensus/driver_test.go:321:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:322:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:326:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:332:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:344:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:354:5",
+   "old": "pc",
+   "new": "precommit"
+  },
+  {
+   "key": "consensus/driver_test.go:363:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:364:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:367:2",
+   "old": "X",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/driver_test.go:368:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:369:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:383:5",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:392:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:393:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:397:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:402:2",
+   "old": "X",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/driver_test.go:403:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:412:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:413:9",
+   "old": "p",
+   "new": "peer"
+  },
+  {
+   "key": "consensus/driver_test.go:421:9",
+   "old": "p",
+   "new": "peer"
+  },
+  {
+   "key": "consensus/driver_test.go:426:5",
+   "old": "pv",
+   "new": "prevote"
+  },
+  {
+   "key": "consensus/driver_test.go:435:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:436:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:440:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:445:2",
+   "old": "X",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/driver_test.go:446:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:450:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:451:9",
+   "old": "a",
+   "new": "action"
+  },
+  {
+   "key": "consensus/driver_test.go:452:6",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/driver_test.go:452:9",
+   "old": "ok",
+   "new": "isProposal"
+  },
+  {
+   "key": "consensus/driver_test.go:467:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:468:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:472:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:477:2",
+   "old": "X",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/driver_test.go:477:5",
+   "old": "Y",
+   "new": "digestY"
+  },
+  {
+   "key": "consensus/driver_test.go:478:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:494:9",
+   "old": "p",
+   "new": "peer"
+  },
+  {
+   "key": "consensus/driver_test.go:508:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:509:2",
+   "old": "pv",
+   "new": "prevote"
+  },
+  {
+   "key": "consensus/driver_test.go:522:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:523:2",
+   "old": "by",
+   "new": "signerByKey"
+  },
+  {
+   "key": "consensus/driver_test.go:528:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:533:2",
+   "old": "X",
+   "new": "digestX"
+  },
+  {
+   "key": "consensus/driver_test.go:533:5",
+   "old": "Y",
+   "new": "digestY"
+  },
+  {
+   "key": "consensus/driver_test.go:535:2",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:555:2",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/driver_test.go:556:2",
+   "old": "pv",
+   "new": "prevote"
+  },
+  {
+   "key": "consensus/driver_test.go:570:11",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/driver_test.go:572:6",
+   "old": "byz",
+   "new": "byzantine"
+  },
+  {
+   "key": "consensus/driver_test.go:574:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:587:2",
+   "old": "driver",
+   "new": "startDriver"
+  },
+  {
+   "key": "consensus/driver_test.go:587:17",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:588:3",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/driver_test.go:594:2",
+   "old": "d",
+   "new": "deciderDriver"
+  },
+  {
+   "key": "consensus/driver_test.go:596:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "consensus/driver_test.go:600:10",
+   "old": "a",
+   "new": "item"
+  },
+  {
+   "key": "consensus/driver_test.go:601:11",
+   "old": "act",
+   "new": "action"
+  },
+  {
+   "key": "consensus/driver_test.go:609:8",
+   "old": "ok",
+   "new": "decided"
+  },
+  {
+   "key": "consensus/driver_test.go:613:2",
+   "old": "x",
+   "new": "otherDriver"
+  },
+  {
+   "key": "consensus/driver_test.go:615:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/driver_test.go:618:8",
+   "old": "ok",
+   "new": "decided"
+  },
+  {
+   "key": "consensus/sim_test.go:27:6",
+   "old": "simSeeds",
+   "new": "scaledSeedCount"
+  },
+  {
+   "key": "consensus/sim_test.go:31:5",
+   "old": "v",
+   "new": "factorSetting"
+  },
+  {
+   "key": "consensus/sim_test.go:32:6",
+   "old": "f",
+   "new": "factor"
+  },
+  {
+   "key": "consensus/sim_test.go:41:6",
+   "old": "simEvent",
+   "new": "simulatorEvent"
+  },
+  {
+   "key": "consensus/sim_test.go:42:2",
+   "old": "at",
+   "new": "dueTime"
+  },
+  {
+   "key": "consensus/sim_test.go:43:2",
+   "old": "seq",
+   "new": "sequence"
+  },
+  {
+   "key": "consensus/sim_test.go:47:6",
+   "old": "simQueue",
+   "new": "eventQueue"
+  },
+  {
+   "key": "consensus/sim_test.go:49:7",
+   "old": "q",
+   "new": "queue"
+  },
+  {
+   "key": "consensus/sim_test.go:50:7",
+   "old": "q",
+   "new": "queue"
+  },
+  {
+   "key": "consensus/sim_test.go:56:7",
+   "old": "q",
+   "new": "queue"
+  },
+  {
+   "key": "consensus/sim_test.go:57:7",
+   "old": "q",
+   "new": "queue"
+  },
+  {
+   "key": "consensus/sim_test.go:57:25",
+   "old": "x",
+   "new": "event"
+  },
+  {
+   "key": "consensus/sim_test.go:58:7",
+   "old": "q",
+   "new": "queue"
+  },
+  {
+   "key": "consensus/sim_test.go:60:2",
+   "old": "n",
+   "new": "length"
+  },
+  {
+   "key": "consensus/sim_test.go:61:2",
+   "old": "e",
+   "new": "last"
+  },
+  {
+   "key": "consensus/sim_test.go:68:6",
+   "old": "sim",
+   "new": "consensusSimulator"
+  },
+  {
+   "key": "consensus/sim_test.go:70:2",
+   "old": "rng",
+   "new": "random"
+  },
+  {
+   "key": "consensus/sim_test.go:73:2",
+   "old": "seq",
+   "new": "sequence"
+  },
+  {
+   "key": "consensus/sim_test.go:77:2",
+   "old": "vals",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/sim_test.go:80:2",
+   "old": "dropProb",
+   "new": "dropProbability"
+  },
+  {
+   "key": "consensus/sim_test.go:87:6",
+   "old": "newSim",
+   "new": "newSimulator"
+  },
+  {
+   "key": "consensus/sim_test.go:87:39",
+   "old": "n",
+   "new": "validatorCount"
+  },
+  {
+   "key": "consensus/sim_test.go:87:46",
+   "old": "dropProb",
+   "new": "dropProbability"
+  },
+  {
+   "key": "consensus/sim_test.go:89:2",
+   "old": "rng",
+   "new": "random"
+  },
+  {
+   "key": "consensus/sim_test.go:90:11",
+   "old": "vals",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/sim_test.go:91:2",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:106:7",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:111:7",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:112:7",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:115:7",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:115:31",
+   "old": "acts",
+   "new": "actions"
+  },
+  {
+   "key": "consensus/sim_test.go:116:9",
+   "old": "a",
+   "new": "item"
+  },
+  {
+   "key": "consensus/sim_test.go:117:10",
+   "old": "act",
+   "new": "action"
+  },
+  {
+   "key": "consensus/sim_test.go:121:4",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/sim_test.go:126:8",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "consensus/sim_test.go:130:4",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/sim_test.go:135:8",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/sim_test.go:149:11",
+   "old": "d",
+   "new": "decidedDigest"
+  },
+  {
+   "key": "consensus/sim_test.go:160:7",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:160:15",
+   "old": "run",
+   "new": "runUntilDecided"
+  },
+  {
+   "key": "consensus/sim_test.go:165:3",
+   "old": "e",
+   "new": "event"
+  },
+  {
+   "key": "consensus/sim_test.go:172:7",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:185:3",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:200:3",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:215:3",
+   "old": "rng",
+   "new": "random"
+  },
+  {
+   "key": "consensus/sim_test.go:216:12",
+   "old": "vals",
+   "new": "validatorSet"
+  },
+  {
+   "key": "consensus/sim_test.go:217:3",
+   "old": "s",
+   "new": "simulator"
+  },
+  {
+   "key": "consensus/sim_test.go:226:3",
+   "old": "byz",
+   "new": "byzantine"
+  },
+  {
+   "key": "consensus/sim_test.go:227:3",
+   "old": "byzKey",
+   "new": "byzantineKey"
+  },
+  {
+   "key": "consensus/sim_test.go:229:31",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/sim_test.go:229:45",
+   "old": "d",
+   "new": "blockDigest"
+  },
+  {
+   "key": "consensus/sim_test.go:230:4",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "consensus/sim_test.go:241:4",
+   "old": "at",
+   "new": "waveTime"
+  },
+  {
+   "key": "consensus/sim_test.go:242:8",
+   "old": "r",
+   "new": "round"
+  },
+  {
+   "key": "consensus/sim_test.go:243:12",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "consensus/sim_test.go:255:10",
+   "old": "d",
+   "new": "driver"
+  },
+  {
+   "key": "consensus/sim_test.go:256:11",
+   "old": "ev",
+   "new": "evidence"
+  },
+  {
+   "key": "ledger/account_update.go:26:7",
+   "old": "u",
+   "new": "accountUpdate"
+  },
+  {
+   "key": "ledger/account_update.go:38:48",
+   "old": "u",
+   "new": "update"
+  },
+  {
+   "key": "ledger/account_update.go:39:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "ledger/account_update.go:48:67",
+   "old": "u",
+   "new": "update"
+  },
+  {
+   "key": "ledger/account_update.go:54:24",
+   "old": "u",
+   "new": "update"
+  },
+  {
+   "key": "ledger/account_update.go:60:15",
+   "old": "u",
+   "new": "update"
+  },
+  {
+   "key": "ledger/amount.go:36:10",
+   "old": "ok",
+   "new": "parsed"
+  },
+  {
+   "key": "ledger/amount.go:54:10",
+   "old": "c",
+   "new": "character"
+  },
+  {
+   "key": "ledger/amount.go:71:7",
+   "old": "field",
+   "new": "amountJSON"
+  },
+  {
+   "key": "ledger/amount.go:117:7",
+   "old": "parameters",
+   "new": "ledgerParameters"
+  },
+  {
+   "key": "ledger/block.go:39:16",
+   "old": "d",
+   "new": "digest"
+  },
+  {
+   "key": "ledger/block.go:48:2",
+   "old": "PrevStateDigest",
+   "new": "PreviousStateDigest"
+  },
+  {
+   "key": "ledger/block.go:76:23",
+   "old": "e",
+   "new": "equivocation"
+  },
+  {
+   "key": "ledger/digest.go:21:2",
+   "old": "h",
+   "new": "hasher"
+  },
+  {
+   "key": "ledger/digest.go:22:6",
+   "old": "n",
+   "new": "lengthPrefix"
+  },
+  {
+   "key": "ledger/digest.go:23:2",
+   "old": "field",
+   "new": "writeField"
+  },
+  {
+   "key": "ledger/digest.go:23:16",
+   "old": "b",
+   "new": "data"
+  },
+  {
+   "key": "ledger/digest.go:28:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/digest.go:29:3",
+   "old": "amt",
+   "new": "amount"
+  },
+  {
+   "key": "ledger/digest.go:41:6",
+   "old": "out",
+   "new": "digest"
+  },
+  {
+   "key": "ledger/governance.go:69:7",
+   "old": "change",
+   "new": "parameterChange"
+  },
+  {
+   "key": "ledger/ledger.go:50:2",
+   "old": "PrevStateDigest",
+   "new": "PreviousStateDigest"
+  },
+  {
+   "key": "ledger/ledger.go:73:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/ledger.go:88:52",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/ledger.go:88:64",
+   "old": "to",
+   "new": "recipientKey"
+  },
+  {
+   "key": "ledger/ledger.go:88:75",
+   "old": "ok",
+   "new": "resolved"
+  },
+  {
+   "key": "ledger/ledger.go:109:44",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/ledger.go:114:53",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/ledger.go:115:5",
+   "old": "ok",
+   "new": "resolved"
+  },
+  {
+   "key": "ledger/ledger.go:122:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/ledger.go:132:50",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/ledger.go:149:2",
+   "old": "byKey",
+   "new": "accountByKey"
+  },
+  {
+   "key": "ledger/ledger.go:150:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/ledger.go:161:6",
+   "old": "valid",
+   "new": "acceptedPayments"
+  },
+  {
+   "key": "ledger/ledger.go:163:9",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/ledger.go:167:9",
+   "old": "ok",
+   "new": "payerExists"
+  },
+  {
+   "key": "ledger/ledger.go:175:3",
+   "old": "to",
+   "new": "recipientKey"
+  },
+  {
+   "key": "ledger/ledger.go:175:7",
+   "old": "ok",
+   "new": "resolved"
+  },
+  {
+   "key": "ledger/ledger.go:179:3",
+   "old": "id",
+   "new": "paymentID"
+  },
+  {
+   "key": "ledger/ledger.go:195:9",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/ledger.go:199:6",
+   "old": "key",
+   "new": "payerKey"
+  },
+  {
+   "key": "ledger/ledger.go:199:11",
+   "old": "out",
+   "new": "totalOutgoing"
+  },
+  {
+   "key": "ledger/ledger.go:200:6",
+   "old": "a",
+   "new": "payerAccount"
+  },
+  {
+   "key": "ledger/ledger.go:200:9",
+   "old": "ok",
+   "new": "payerExists"
+  },
+  {
+   "key": "ledger/ledger.go:207:9",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/ledger.go:218:6",
+   "old": "k",
+   "new": "accountKey"
+  },
+  {
+   "key": "ledger/ledger.go:221:6",
+   "old": "k",
+   "new": "accountKey"
+  },
+  {
+   "key": "ledger/ledger.go:224:6",
+   "old": "k",
+   "new": "accountKey"
+  },
+  {
+   "key": "ledger/ledger.go:229:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/ledger.go:234:6",
+   "old": "k",
+   "new": "accountKey"
+  },
+  {
+   "key": "ledger/ledger.go:235:3",
+   "old": "old",
+   "new": "previousAccount"
+  },
+  {
+   "key": "ledger/ledger.go:235:8",
+   "old": "ok",
+   "new": "accountExists"
+  },
+  {
+   "key": "ledger/ledger.go:239:3",
+   "old": "amt",
+   "new": "newAmount"
+  },
+  {
+   "key": "ledger/ledger.go:243:6",
+   "old": "c",
+   "new": "totalReceived"
+  },
+  {
+   "key": "ledger/ledger.go:243:9",
+   "old": "ok",
+   "new": "credited"
+  },
+  {
+   "key": "ledger/ledger.go:246:6",
+   "old": "d",
+   "new": "totalSent"
+  },
+  {
+   "key": "ledger/ledger.go:246:9",
+   "old": "ok",
+   "new": "debited"
+  },
+  {
+   "key": "ledger/ledger.go:250:4",
+   "old": "na",
+   "new": "updatedAccount"
+  },
+  {
+   "key": "ledger/ledger.go:260:6",
+   "old": "addRat",
+   "new": "addToTotal"
+  },
+  {
+   "key": "ledger/ledger.go:260:13",
+   "old": "m",
+   "new": "totals"
+  },
+  {
+   "key": "ledger/ledger.go:260:36",
+   "old": "key",
+   "new": "accountKey"
+  },
+  {
+   "key": "ledger/ledger.go:260:48",
+   "old": "v",
+   "new": "amount"
+  },
+  {
+   "key": "ledger/ledger.go:261:5",
+   "old": "cur",
+   "new": "currentTotal"
+  },
+  {
+   "key": "ledger/ledger.go:261:10",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "ledger/parameters.go:46:7",
+   "old": "parameters",
+   "new": "ledgerParameters"
+  },
+  {
+   "key": "ledger/parameters.go:62:7",
+   "old": "parameters",
+   "new": "ledgerParameters"
+  },
+  {
+   "key": "ledger/parameters.go:81:7",
+   "old": "parameters",
+   "new": "ledgerParameters"
+  },
+  {
+   "key": "ledger/parameters.go:95:7",
+   "old": "parameters",
+   "new": "ledgerParameters"
+  },
+  {
+   "key": "ledger/parameters.go:122:7",
+   "old": "state",
+   "new": "ledgerState"
+  },
+  {
+   "key": "ledger/payment.go:18:16",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment.go:25:2",
+   "old": "h",
+   "new": "hasher"
+  },
+  {
+   "key": "ledger/payment.go:26:6",
+   "old": "n",
+   "new": "lengthPrefix"
+  },
+  {
+   "key": "ledger/payment.go:27:16",
+   "old": "b",
+   "new": "data"
+  },
+  {
+   "key": "ledger/payment.go:33:9",
+   "old": "f",
+   "new": "field"
+  },
+  {
+   "key": "ledger/payment.go:43:7",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment.go:61:42",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment.go:62:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "ledger/payment.go:75:61",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment.go:84:2",
+   "old": "out",
+   "new": "verifiedPayments"
+  },
+  {
+   "key": "ledger/payment.go:85:9",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/reassignment.go:131:2",
+   "old": "to",
+   "new": "recipientKey"
+  },
+  {
+   "key": "ledger/receipt.go:24:7",
+   "old": "r",
+   "new": "receipt"
+  },
+  {
+   "key": "ledger/receipt.go:35:18",
+   "old": "node",
+   "new": "nodeSigner"
+  },
+  {
+   "key": "ledger/receipt.go:35:40",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/receipt.go:36:2",
+   "old": "r",
+   "new": "receipt"
+  },
+  {
+   "key": "ledger/receipt.go:37:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "ledger/receipt.go:47:7",
+   "old": "r",
+   "new": "receipt"
+  },
+  {
+   "key": "ledger/topology.go:12:62",
+   "old": "dim",
+   "new": "dimension"
+  },
+  {
+   "key": "ledger/topology.go:22:2",
+   "old": "exp",
+   "new": "exponent"
+  },
+  {
+   "key": "ledger/account_update_test.go:96:2",
+   "old": "okName",
+   "new": "nameAtCap"
+  },
+  {
+   "key": "ledger/account_update_test.go:104:5",
+   "old": "got",
+   "new": "aliceAccount"
+  },
+  {
+   "key": "ledger/account_update_test.go:118:2",
+   "old": "V",
+   "new": "victimKey"
+  },
+  {
+   "key": "ledger/account_update_test.go:118:5",
+   "old": "T",
+   "new": "thiefKey"
+  },
+  {
+   "key": "ledger/account_update_test.go:118:8",
+   "old": "P",
+   "new": "payerKey"
+  },
+  {
+   "key": "ledger/account_update_test.go:125:3",
+   "old": "u",
+   "new": "signedUpdate"
+  },
+  {
+   "key": "ledger/account_update_test.go:129:3",
+   "old": "u",
+   "new": "signedUpdate"
+  },
+  {
+   "key": "ledger/account_update_test.go:132:14",
+   "old": "to",
+   "new": "recipientKey"
+  },
+  {
+   "key": "ledger/account_update_test.go:133:3",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/account_update_test.go:137:9",
+   "old": "tc",
+   "new": "testCase"
+  },
+  {
+   "key": "ledger/account_update_test.go:151:10",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/account_update_test.go:161:10",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/amount_test.go:19:3",
+   "old": "got",
+   "new": "parsed"
+  },
+  {
+   "key": "ledger/amount_test.go:24:6",
+   "old": "wantRat",
+   "new": "wantRational"
+  },
+  {
+   "key": "ledger/amount_test.go:78:9",
+   "old": "tc",
+   "new": "testCase"
+  },
+  {
+   "key": "ledger/block_test.go:14:2",
+   "old": "bob",
+   "new": "bobKey"
+  },
+  {
+   "key": "ledger/block_test.go:15:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/block_test.go:19:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/block_test.go:23:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/block_test.go:24:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/block_test.go:41:2",
+   "old": "bob",
+   "new": "bobKey"
+  },
+  {
+   "key": "ledger/block_test.go:42:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/block_test.go:46:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/block_test.go:47:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/block_test.go:49:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/block_test.go:56:2",
+   "old": "bob",
+   "new": "bobKey"
+  },
+  {
+   "key": "ledger/block_test.go:57:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/block_test.go:63:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/block_test.go:69:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/block_test.go:74:6",
+   "old": "TestApplyBlockRejectsWrongPrev",
+   "new": "TestApplyBlockRejectsWrongPreviousState"
+  },
+  {
+   "key": "ledger/block_test.go:76:2",
+   "old": "bob",
+   "new": "bobKey"
+  },
+  {
+   "key": "ledger/block_test.go:77:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/block_test.go:78:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/block_test.go:79:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/block_test.go:81:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/block_test.go:96:2",
+   "old": "V",
+   "new": "victimKey"
+  },
+  {
+   "key": "ledger/block_test.go:96:5",
+   "old": "P",
+   "new": "payeeKey"
+  },
+  {
+   "key": "ledger/block_test.go:98:2",
+   "old": "prev",
+   "new": "previousState"
+  },
+  {
+   "key": "ledger/block_test.go:102:38",
+   "old": "to",
+   "new": "recipientKey"
+  },
+  {
+   "key": "ledger/block_test.go:103:3",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/block_test.go:116:6",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/block_test.go:119:9",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/block_test.go:125:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/block_test.go:126:11",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/block_test.go:138:2",
+   "old": "A",
+   "new": "payerKey"
+  },
+  {
+   "key": "ledger/block_test.go:139:2",
+   "old": "prev",
+   "new": "previousState"
+  },
+  {
+   "key": "ledger/block_test.go:142:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/block_test.go:156:2",
+   "old": "V",
+   "new": "validatorKey"
+  },
+  {
+   "key": "ledger/block_test.go:156:5",
+   "old": "D",
+   "new": "delegatorKey"
+  },
+  {
+   "key": "ledger/block_test.go:158:2",
+   "old": "prev",
+   "new": "previousState"
+  },
+  {
+   "key": "ledger/block_test.go:168:3",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/block_test.go:169:3",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/block_test.go:178:10",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/blockid_test.go:14:2",
+   "old": "bob",
+   "new": "bobKey"
+  },
+  {
+   "key": "ledger/blockid_test.go:15:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/blockid_test.go:19:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/blockid_test.go:24:5",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/blockid_test.go:28:5",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/blockid_test.go:35:2",
+   "old": "bob",
+   "new": "bobKey"
+  },
+  {
+   "key": "ledger/blockid_test.go:36:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/blockid_test.go:40:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/blockid_test.go:45:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/blockid_test.go:49:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/digest_test.go:11:2",
+   "old": "a",
+   "new": "accountsInOrder"
+  },
+  {
+   "key": "ledger/digest_test.go:15:2",
+   "old": "b",
+   "new": "accountsReversed"
+  },
+  {
+   "key": "ledger/digest_test.go:25:2",
+   "old": "a",
+   "new": "originalAccounts"
+  },
+  {
+   "key": "ledger/digest_test.go:29:2",
+   "old": "c",
+   "new": "changedAccounts"
+  },
+  {
+   "key": "ledger/digest_test.go:43:2",
+   "old": "P",
+   "new": "payerKey"
+  },
+  {
+   "key": "ledger/digest_test.go:52:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/digest_test.go:53:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/digest_test.go:54:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/governance_test.go:17:2",
+   "old": "vals",
+   "new": "validatorList"
+  },
+  {
+   "key": "ledger/governance_test.go:19:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/governance_test.go:29:17",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/governance_test.go:30:3",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "ledger/governance_test.go:41:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/governance_test.go:42:13",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/governance_test.go:58:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/governance_test.go:78:2",
+   "old": "vals",
+   "new": "validatorList"
+  },
+  {
+   "key": "ledger/governance_test.go:80:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/governance_test.go:113:2",
+   "old": "vals",
+   "new": "validatorList"
+  },
+  {
+   "key": "ledger/helpers_test.go:11:6",
+   "old": "st",
+   "new": "buildLedgerState"
+  },
+  {
+   "key": "ledger/helpers_test.go:16:6",
+   "old": "key",
+   "new": "freshPublicKey"
+  },
+  {
+   "key": "ledger/ledger_test.go:8:6",
+   "old": "rat",
+   "new": "rational"
+  },
+  {
+   "key": "ledger/ledger_test.go:8:10",
+   "old": "s",
+   "new": "literal"
+  },
+  {
+   "key": "ledger/ledger_test.go:9:2",
+   "old": "r",
+   "new": "value"
+  },
+  {
+   "key": "ledger/ledger_test.go:9:5",
+   "old": "ok",
+   "new": "valid"
+  },
+  {
+   "key": "ledger/ledger_test.go:16:12",
+   "old": "accts",
+   "new": "accounts"
+  },
+  {
+   "key": "ledger/ledger_test.go:18:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/ledger_test.go:24:14",
+   "old": "accts",
+   "new": "accounts"
+  },
+  {
+   "key": "ledger/ledger_test.go:24:31",
+   "old": "pk",
+   "new": "publicKey"
+  },
+  {
+   "key": "ledger/ledger_test.go:25:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/ledger_test.go:102:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/ledger_test.go:162:9",
+   "old": "tc",
+   "new": "testCase"
+  },
+  {
+   "key": "ledger/ledger_test.go:191:3",
+   "old": "got",
+   "new": "payerAfter"
+  },
+  {
+   "key": "ledger/malleability_test.go:12:2",
+   "old": "a",
+   "new": "firstCopy"
+  },
+  {
+   "key": "ledger/malleability_test.go:12:5",
+   "old": "b",
+   "new": "secondCopy"
+  },
+  {
+   "key": "ledger/malleability_test.go:28:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/malleability_test.go:31:2",
+   "old": "p1",
+   "new": "firstCopy"
+  },
+  {
+   "key": "ledger/malleability_test.go:31:6",
+   "old": "p2",
+   "new": "secondCopy"
+  },
+  {
+   "key": "ledger/malleability_test.go:34:2",
+   "old": "out",
+   "new": "after"
+  },
+  {
+   "key": "ledger/malleability_test.go:36:6",
+   "old": "a",
+   "new": "payerBalance"
+  },
+  {
+   "key": "ledger/malleability_test.go:37:9",
+   "old": "acc",
+   "new": "account"
+  },
+  {
+   "key": "ledger/messagesize_test.go:19:2",
+   "old": "A",
+   "new": "payerKey"
+  },
+  {
+   "key": "ledger/messagesize_test.go:19:5",
+   "old": "B",
+   "new": "payeeKey"
+  },
+  {
+   "key": "ledger/messagesize_test.go:20:2",
+   "old": "prev",
+   "new": "previousState"
+  },
+  {
+   "key": "ledger/messagesize_test.go:36:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/messagesize_test.go:40:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/messagesize_test.go:47:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/messagesize_test.go:63:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/messagesize_test.go:72:9",
+   "old": "tc",
+   "new": "testCase"
+  },
+  {
+   "key": "ledger/messagesize_test.go:79:3",
+   "old": "p",
+   "new": "parameters"
+  },
+  {
+   "key": "ledger/messagesize_test.go:81:6",
+   "old": "got",
+   "new": "accepted"
+  },
+  {
+   "key": "ledger/messagesize_test.go:98:3",
+   "old": "u",
+   "new": "signedUpdate"
+  },
+  {
+   "key": "ledger/messagesize_test.go:104:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/messagesize_test.go:111:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/messagesize_test.go:112:2",
+   "old": "prev",
+   "new": "previousState"
+  },
+  {
+   "key": "ledger/messagesize_test.go:114:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/messagesize_test.go:115:2",
+   "old": "content",
+   "new": "contentBytes"
+  },
+  {
+   "key": "ledger/messagesize_test.go:116:2",
+   "old": "from",
+   "new": "updatedKeys"
+  },
+  {
+   "key": "ledger/messagesize_test.go:117:9",
+   "old": "u",
+   "new": "carriedUpdate"
+  },
+  {
+   "key": "ledger/messagesize_test.go:130:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/paybyname_test.go:52:2",
+   "old": "A",
+   "new": "payerKey"
+  },
+  {
+   "key": "ledger/paybyname_test.go:53:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/paybyname_test.go:63:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/paybyname_test.go:72:17",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/paybyname_test.go:82:2",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/paybyname_test.go:108:2",
+   "old": "bob",
+   "new": "bobSigner"
+  },
+  {
+   "key": "ledger/paybyname_test.go:109:2",
+   "old": "A",
+   "new": "payerKey"
+  },
+  {
+   "key": "ledger/paybyname_test.go:109:5",
+   "old": "B",
+   "new": "bobKey"
+  },
+  {
+   "key": "ledger/paybyname_test.go:110:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/paybyname_test.go:117:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/paybyname_test.go:126:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/paybyname_test.go:130:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/payment_test.go:9:58",
+   "old": "to",
+   "new": "recipientKey"
+  },
+  {
+   "key": "ledger/payment_test.go:11:2",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment_test.go:27:2",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment_test.go:35:2",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment_test.go:44:2",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment_test.go:55:2",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/payment_test.go:72:2",
+   "old": "got",
+   "new": "filtered"
+  },
+  {
+   "key": "ledger/prevbind_test.go:13:6",
+   "old": "TestPrevStateBindingPinsToHistory",
+   "new": "TestPreviousStateBindingPinsToHistory"
+  },
+  {
+   "key": "ledger/prevbind_test.go:15:2",
+   "old": "payerKey",
+   "new": "payerSigner"
+  },
+  {
+   "key": "ledger/prevbind_test.go:19:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/prevbind_test.go:20:2",
+   "old": "prevHex",
+   "new": "previousDigestHex"
+  },
+  {
+   "key": "ledger/prevbind_test.go:20:48",
+   "old": "d",
+   "new": "digest"
+  },
+  {
+   "key": "ledger/prevbind_test.go:23:2",
+   "old": "mk",
+   "new": "paymentPinnedTo"
+  },
+  {
+   "key": "ledger/prevbind_test.go:23:13",
+   "old": "prevBind",
+   "new": "pinnedDigest"
+  },
+  {
+   "key": "ledger/prevbind_test.go:24:3",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ledger/prevbind_test.go:31:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/prevbind_test.go:35:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/prevbind_test.go:41:5",
+   "old": "got",
+   "new": "included"
+  },
+  {
+   "key": "ledger/prevbind_test.go:48:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/prevbind_test.go:53:5",
+   "old": "got",
+   "new": "included"
+  },
+  {
+   "key": "ledger/reassignment_test.go:17:2",
+   "old": "vals",
+   "new": "validatorList"
+  },
+  {
+   "key": "ledger/reassignment_test.go:19:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/reassignment_test.go:32:17",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/reassignment_test.go:33:3",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "ledger/reassignment_test.go:44:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/reassignment_test.go:45:13",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/reassignment_test.go:65:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/reassignment_test.go:90:2",
+   "old": "vals",
+   "new": "validatorList"
+  },
+  {
+   "key": "ledger/reassignment_test.go:92:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/reassignment_test.go:100:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/reassignment_test.go:101:3",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "ledger/reassignment_test.go:127:2",
+   "old": "vals",
+   "new": "validatorList"
+  },
+  {
+   "key": "ledger/reassignment_test.go:136:2",
+   "old": "T",
+   "new": "treasuryKey"
+  },
+  {
+   "key": "ledger/reassignment_test.go:136:5",
+   "old": "X",
+   "new": "stashKey"
+  },
+  {
+   "key": "ledger/reassignment_test.go:136:8",
+   "old": "P",
+   "new": "payerKey"
+  },
+  {
+   "key": "ledger/reassignment_test.go:148:3",
+   "old": "cert",
+   "new": "certificate"
+  },
+  {
+   "key": "ledger/reassignment_test.go:149:10",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/reassignment_test.go:153:3",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/reassignment_test.go:157:9",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/reassignment_test.go:168:10",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/reassignment_test.go:176:2",
+   "old": "cert",
+   "new": "certificate"
+  },
+  {
+   "key": "ledger/reassignment_test.go:177:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ledger/reassignment_test.go:187:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/reassignment_test.go:191:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/slash_test.go:11:6",
+   "old": "has",
+   "new": "hasAccount"
+  },
+  {
+   "key": "ledger/slash_test.go:11:30",
+   "old": "key",
+   "new": "publicKey"
+  },
+  {
+   "key": "ledger/slash_test.go:12:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ledger/slash_test.go:27:2",
+   "old": "A",
+   "new": "honestKey"
+  },
+  {
+   "key": "ledger/slash_test.go:27:5",
+   "old": "B",
+   "new": "cheatKey"
+  },
+  {
+   "key": "ledger/slash_test.go:28:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/slash_test.go:34:6",
+   "old": "dX",
+   "new": "firstDigest"
+  },
+  {
+   "key": "ledger/slash_test.go:34:10",
+   "old": "dY",
+   "new": "secondDigest"
+  },
+  {
+   "key": "ledger/slash_test.go:36:2",
+   "old": "vX",
+   "new": "firstVote"
+  },
+  {
+   "key": "ledger/slash_test.go:37:2",
+   "old": "vY",
+   "new": "secondVote"
+  },
+  {
+   "key": "ledger/slash_test.go:38:2",
+   "old": "ev",
+   "new": "evidence"
+  },
+  {
+   "key": "ledger/slash_test.go:40:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/slash_test.go:41:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/slash_test.go:53:11",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/slash_test.go:61:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/slash_test.go:73:2",
+   "old": "A",
+   "new": "honestKey"
+  },
+  {
+   "key": "ledger/slash_test.go:73:5",
+   "old": "B",
+   "new": "cheatKey"
+  },
+  {
+   "key": "ledger/slash_test.go:74:2",
+   "old": "prev",
+   "new": "previousAccounts"
+  },
+  {
+   "key": "ledger/slash_test.go:80:6",
+   "old": "dX",
+   "new": "firstDigest"
+  },
+  {
+   "key": "ledger/slash_test.go:80:10",
+   "old": "dY",
+   "new": "secondDigest"
+  },
+  {
+   "key": "ledger/slash_test.go:83:2",
+   "old": "vX",
+   "new": "firstVote"
+  },
+  {
+   "key": "ledger/slash_test.go:84:2",
+   "old": "vY",
+   "new": "secondVote"
+  },
+  {
+   "key": "ledger/slash_test.go:85:2",
+   "old": "ev",
+   "new": "evidence"
+  },
+  {
+   "key": "ledger/slash_test.go:90:2",
+   "old": "blk",
+   "new": "block"
+  },
+  {
+   "key": "ledger/slash_test.go:94:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/slash_test.go:106:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ledger/slash_test.go:117:8",
+   "old": "ok",
+   "new": "applied"
+  },
+  {
+   "key": "ui/admin.go:55:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:57:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "ui/admin.go:70:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:98:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:121:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:195:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:229:67",
+   "old": "key",
+   "new": "publicKey"
+  },
+  {
+   "key": "ui/admin.go:246:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:260:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:276:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:289:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:326:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:359:18",
+   "old": "C",
+   "new": "Certificate"
+  },
+  {
+   "key": "ui/admin.go:385:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/admin.go:387:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "ui/admin_test.go:23:6",
+   "old": "govNode",
+   "new": "governanceNode"
+  },
+  {
+   "key": "ui/admin_test.go:24:2",
+   "old": "url",
+   "new": "baseURL"
+  },
+  {
+   "key": "ui/admin_test.go:25:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "ui/admin_test.go:32:6",
+   "old": "govPost",
+   "new": "recordedPost"
+  },
+  {
+   "key": "ui/admin_test.go:38:5",
+   "old": "govParameters",
+   "new": "governanceParameters"
+  },
+  {
+   "key": "ui/admin_test.go:40:7",
+   "old": "govSequence",
+   "new": "governanceSequence"
+  },
+  {
+   "key": "ui/admin_test.go:42:6",
+   "old": "newGovNode",
+   "new": "newGovernanceNode"
+  },
+  {
+   "key": "ui/admin_test.go:44:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/admin_test.go:45:2",
+   "old": "mux",
+   "new": "serveMux"
+  },
+  {
+   "key": "ui/admin_test.go:46:42",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/admin_test.go:46:65",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/admin_test.go:51:38",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/admin_test.go:51:61",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/admin_test.go:54:42",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/admin_test.go:54:65",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/admin_test.go:65:27",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/admin_test.go:65:50",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/admin_test.go:76:2",
+   "old": "srv",
+   "new": "server"
+  },
+  {
+   "key": "ui/admin_test.go:83:7",
+   "old": "g",
+   "new": "governanceNode"
+  },
+  {
+   "key": "ui/admin_test.go:83:19",
+   "old": "set",
+   "new": "setState"
+  },
+  {
+   "key": "ui/admin_test.go:96:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "ui/admin_test.go:106:7",
+   "old": "g",
+   "new": "governanceNode"
+  },
+  {
+   "key": "ui/admin_test.go:117:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/admin_test.go:123:2",
+   "old": "ui",
+   "new": "walletUI"
+  },
+  {
+   "key": "ui/admin_test.go:125:3",
+   "old": "req",
+   "new": "request"
+  },
+  {
+   "key": "ui/admin_test.go:128:3",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "ui/admin_test.go:154:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/admin_test.go:156:2",
+   "old": "b",
+   "new": "secondValidator"
+  },
+  {
+   "key": "ui/admin_test.go:156:5",
+   "old": "c",
+   "new": "thirdValidator"
+  },
+  {
+   "key": "ui/admin_test.go:165:2",
+   "old": "own",
+   "new": "ownVote"
+  },
+  {
+   "key": "ui/admin_test.go:177:17",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ui/admin_test.go:208:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/admin_test.go:210:2",
+   "old": "b",
+   "new": "secondValidator"
+  },
+  {
+   "key": "ui/admin_test.go:210:5",
+   "old": "c",
+   "new": "thirdValidator"
+  },
+  {
+   "key": "ui/admin_test.go:220:2",
+   "old": "own",
+   "new": "ownVote"
+  },
+  {
+   "key": "ui/admin_test.go:228:17",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ui/admin_test.go:254:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/admin_test.go:266:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/keyfile.go:37:7",
+   "old": "passphraseEnv",
+   "new": "passphraseEnvironmentVariable"
+  },
+  {
+   "key": "ui/keyfile.go:57:36",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "ui/keyfile.go:57:41",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "ui/keyfile.go:63:3",
+   "old": "pass",
+   "new": "passphrase"
+  },
+  {
+   "key": "ui/keyfile.go:72:6",
+   "old": "k",
+   "new": "storedKey"
+  },
+  {
+   "key": "ui/keyfile.go:78:3",
+   "old": "pass",
+   "new": "passphrase"
+  },
+  {
+   "key": "ui/keyfile.go:105:3",
+   "old": "pass",
+   "new": "passphrase"
+  },
+  {
+   "key": "ui/keyfile.go:120:27",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "ui/keyfile.go:120:32",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "ui/keyfile.go:121:2",
+   "old": "k",
+   "new": "storedKey"
+  },
+  {
+   "key": "ui/keyfile.go:138:2",
+   "old": "tmp",
+   "new": "temporaryFile"
+  },
+  {
+   "key": "ui/keyfile.go:156:21",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "ui/keyfile.go:161:2",
+   "old": "gcm",
+   "new": "aesGCM"
+  },
+  {
+   "key": "ui/keyfile.go:178:7",
+   "old": "e",
+   "new": "encryptedKey"
+  },
+  {
+   "key": "ui/keyfile.go:194:2",
+   "old": "gcm",
+   "new": "aesGCM"
+  },
+  {
+   "key": "ui/keyfile.go:198:2",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "ui/keyfile.go:206:2",
+   "old": "key",
+   "new": "derivedKey"
+  },
+  {
+   "key": "ui/keyfile.go:210:2",
+   "old": "block",
+   "new": "blockCipher"
+  },
+  {
+   "key": "ui/keyfile.go:220:5",
+   "old": "stdin",
+   "new": "standardInput"
+  },
+  {
+   "key": "ui/keyfile.go:225:5",
+   "old": "pass",
+   "new": "passphrase"
+  },
+  {
+   "key": "ui/keyfile.go:237:5",
+   "old": "pass",
+   "new": "passphrase"
+  },
+  {
+   "key": "ui/keyfile.go:247:2",
+   "old": "pass",
+   "new": "passphrase"
+  },
+  {
+   "key": "ui/keyfile.go:272:2",
+   "old": "info",
+   "new": "fileInformation"
+  },
+  {
+   "key": "ui/keyfile_test.go:22:5",
+   "old": "got",
+   "new": "opened"
+  },
+  {
+   "key": "ui/keyfile_test.go:30:2",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:35:2",
+   "old": "got",
+   "new": "opened"
+  },
+  {
+   "key": "ui/keyfile_test.go:43:2",
+   "old": "raw",
+   "new": "ciphertext"
+  },
+  {
+   "key": "ui/keyfile_test.go:60:6",
+   "old": "k",
+   "new": "storedKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:70:5",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/keyfile_test.go:80:2",
+   "old": "dir",
+   "new": "directory"
+  },
+  {
+   "key": "ui/keyfile_test.go:83:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:83:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:99:6",
+   "old": "k",
+   "new": "storedKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:107:2",
+   "old": "info",
+   "new": "fileInformation"
+  },
+  {
+   "key": "ui/keyfile_test.go:114:5",
+   "old": "got",
+   "new": "stateAfterSeal"
+  },
+  {
+   "key": "ui/keyfile_test.go:120:2",
+   "old": "pub2",
+   "new": "reloadedPublicKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:120:8",
+   "old": "priv2",
+   "new": "reloadedPrivateKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:130:2",
+   "old": "dir",
+   "new": "directory"
+  },
+  {
+   "key": "ui/keyfile_test.go:147:6",
+   "old": "k",
+   "new": "storedKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:152:5",
+   "old": "info",
+   "new": "linkInformation"
+  },
+  {
+   "key": "ui/keyfile_test.go:158:6",
+   "old": "stderrOf",
+   "new": "printedToStandardError"
+  },
+  {
+   "key": "ui/keyfile_test.go:158:29",
+   "old": "f",
+   "new": "action"
+  },
+  {
+   "key": "ui/keyfile_test.go:160:2",
+   "old": "r",
+   "new": "pipeReader"
+  },
+  {
+   "key": "ui/keyfile_test.go:160:5",
+   "old": "w",
+   "new": "pipeWriter"
+  },
+  {
+   "key": "ui/keyfile_test.go:169:2",
+   "old": "out",
+   "new": "printed"
+  },
+  {
+   "key": "ui/keyfile_test.go:177:2",
+   "old": "dir",
+   "new": "directory"
+  },
+  {
+   "key": "ui/keyfile_test.go:181:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:181:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:186:6",
+   "old": "k",
+   "new": "storedKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:196:2",
+   "old": "pub2",
+   "new": "reloadedPublicKey"
+  },
+  {
+   "key": "ui/keyfile_test.go:196:8",
+   "old": "priv2",
+   "new": "reloadedPrivateKey"
+  },
+  {
+   "key": "ui/main.go:25:5",
+   "old": "tmplFS",
+   "new": "templateFiles"
+  },
+  {
+   "key": "ui/main.go:27:5",
+   "old": "tmpl",
+   "new": "pageTemplates"
+  },
+  {
+   "key": "ui/main.go:30:2",
+   "old": "node",
+   "new": "nodeURL"
+  },
+  {
+   "key": "ui/main.go:37:2",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/main.go:46:22",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/main.go:51:13",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/main.go:52:2",
+   "old": "h",
+   "new": "walletHandler"
+  },
+  {
+   "key": "ui/main.go:53:2",
+   "old": "mux",
+   "new": "serveMux"
+  },
+  {
+   "key": "ui/main.go:66:31",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:66:54",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:83:17",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:98:2",
+   "old": "u",
+   "new": "sourceURL"
+  },
+  {
+   "key": "ui/main.go:111:8",
+   "old": "p",
+   "new": "hostPort"
+  },
+  {
+   "key": "ui/main.go:118:2",
+   "old": "ip",
+   "new": "hostIP"
+  },
+  {
+   "key": "ui/main.go:133:6",
+   "old": "acctRow",
+   "new": "accountRow"
+  },
+  {
+   "key": "ui/main.go:135:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:135:25",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:135:49",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:139:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:139:24",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:139:48",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:149:2",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "ui/main.go:158:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:158:28",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:158:52",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:170:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:170:26",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:170:50",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "ui/main.go:170:55",
+   "old": "errMsg",
+   "new": "errorMessage"
+  },
+  {
+   "key": "ui/main.go:172:5",
+   "old": "bal",
+   "new": "balance"
+  },
+  {
+   "key": "ui/main.go:178:5",
+   "old": "accts",
+   "new": "accounts"
+  },
+  {
+   "key": "ui/main.go:180:10",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ui/main.go:181:4",
+   "old": "amt",
+   "new": "amount"
+  },
+  {
+   "key": "ui/main.go:214:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:214:25",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:214:49",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:219:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:219:31",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:251:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:251:36",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:251:60",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:258:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:258:36",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:258:60",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:268:7",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "ui/main.go:268:24",
+   "old": "wr",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/main.go:268:48",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/main.go:284:7",
+   "old": "d",
+   "new": "draftedVote"
+  },
+  {
+   "key": "ui/main.go:298:12",
+   "old": "s",
+   "new": "text"
+  },
+  {
+   "key": "ui/main.go:298:22",
+   "old": "n",
+   "new": "count"
+  },
+  {
+   "key": "ui/security_test.go:43:9",
+   "old": "tc",
+   "new": "testCase"
+  },
+  {
+   "key": "ui/security_test.go:46:4",
+   "old": "h",
+   "new": "guardedHandler"
+  },
+  {
+   "key": "ui/security_test.go:46:45",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/security_test.go:46:68",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/security_test.go:47:4",
+   "old": "req",
+   "new": "request"
+  },
+  {
+   "key": "ui/security_test.go:48:8",
+   "old": "k",
+   "new": "headerName"
+  },
+  {
+   "key": "ui/security_test.go:48:11",
+   "old": "v",
+   "new": "headerValue"
+  },
+  {
+   "key": "ui/security_test.go:51:4",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "ui/security_test.go:76:7",
+   "old": "got",
+   "new": "accepted"
+  },
+  {
+   "key": "ui/security_test.go:85:6",
+   "old": "got",
+   "new": "accepted"
+  },
+  {
+   "key": "ui/security_test.go:95:2",
+   "old": "mux",
+   "new": "walletUI"
+  },
+  {
+   "key": "ui/security_test.go:97:3",
+   "old": "req",
+   "new": "request"
+  },
+  {
+   "key": "ui/security_test.go:99:3",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "ui/security_test.go:114:2",
+   "old": "nodeSrv",
+   "new": "nodeServer"
+  },
+  {
+   "key": "ui/security_test.go:114:55",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ui/security_test.go:116:3",
+   "old": "r",
+   "new": "receipt"
+  },
+  {
+   "key": "ui/security_test.go:119:2",
+   "old": "ui",
+   "new": "walletServer"
+  },
+  {
+   "key": "ui/security_test.go:129:9",
+   "old": "tc",
+   "new": "testCase"
+  },
+  {
+   "key": "ui/security_test.go:138:3",
+   "old": "req",
+   "new": "request"
+  },
+  {
+   "key": "ui/security_test.go:143:3",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "ui/security_test.go:152:5",
+   "old": "n",
+   "new": "paymentCount"
+  },
+  {
+   "key": "ui/security_test.go:156:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "ui/security_test.go:168:2",
+   "old": "mux",
+   "new": "walletUI"
+  },
+  {
+   "key": "ui/security_test.go:170:3",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "ui/security_test.go:183:76",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ui/security_test.go:185:2",
+   "old": "mux",
+   "new": "serveMux"
+  },
+  {
+   "key": "ui/security_test.go:186:38",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/security_test.go:186:61",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/security_test.go:189:42",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/security_test.go:189:65",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/security_test.go:192:35",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/security_test.go:192:58",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/security_test.go:193:7",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ui/security_test.go:199:2",
+   "old": "srv",
+   "new": "server"
+  },
+  {
+   "key": "ui/security_test.go:206:2",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/security_test.go:215:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ui/security_test.go:226:2",
+   "old": "srv",
+   "new": "nodeServer"
+  },
+  {
+   "key": "ui/security_test.go:226:51",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ui/security_test.go:227:3",
+   "old": "r",
+   "new": "receipt"
+  },
+  {
+   "key": "ui/security_test.go:233:2",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/security_test.go:249:2",
+   "old": "srv",
+   "new": "nodeServer"
+  },
+  {
+   "key": "ui/security_test.go:249:58",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ui/security_test.go:250:3",
+   "old": "r",
+   "new": "receipt"
+  },
+  {
+   "key": "ui/security_test.go:256:2",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/security_test.go:270:2",
+   "old": "srv",
+   "new": "nodeServer"
+  },
+  {
+   "key": "ui/security_test.go:270:51",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ui/security_test.go:273:3",
+   "old": "r",
+   "new": "receipt"
+  },
+  {
+   "key": "ui/security_test.go:279:2",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/security_test.go:292:2",
+   "old": "srv",
+   "new": "nodeServer"
+  },
+  {
+   "key": "ui/security_test.go:292:51",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ui/security_test.go:293:3",
+   "old": "r",
+   "new": "receipt"
+  },
+  {
+   "key": "ui/security_test.go:300:2",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/trust.go:51:6",
+   "old": "pin",
+   "new": "savePin"
+  },
+  {
+   "key": "ui/trust.go:56:2",
+   "old": "f",
+   "new": "file"
+  },
+  {
+   "key": "ui/trust.go:61:5",
+   "old": "cerr",
+   "new": "closeErr"
+  },
+  {
+   "key": "ui/trust.go:69:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/trust.go:71:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "ui/trust.go:105:21",
+   "old": "c",
+   "new": "commit"
+  },
+  {
+   "key": "ui/trust.go:108:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "ui/trust_test.go:60:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/trust_test.go:82:2",
+   "old": "a",
+   "new": "firstPinned"
+  },
+  {
+   "key": "ui/trust_test.go:82:5",
+   "old": "b",
+   "new": "secondPinned"
+  },
+  {
+   "key": "ui/trust_test.go:82:8",
+   "old": "c",
+   "new": "thirdPinned"
+  },
+  {
+   "key": "ui/trust_test.go:82:11",
+   "old": "d",
+   "new": "firstNewcomer"
+  },
+  {
+   "key": "ui/trust_test.go:82:14",
+   "old": "e",
+   "new": "secondNewcomer"
+  },
+  {
+   "key": "ui/trust_test.go:82:17",
+   "old": "f",
+   "new": "thirdNewcomer"
+  },
+  {
+   "key": "ui/trust_test.go:84:9",
+   "old": "tc",
+   "new": "testCase"
+  },
+  {
+   "key": "ui/trust_test.go:92:6",
+   "old": "got",
+   "new": "signed"
+  },
+  {
+   "key": "ui/wallet.go:42:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "ui/wallet.go:64:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "ui/wallet.go:64:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "ui/wallet.go:103:6",
+   "old": "s",
+   "new": "savedState"
+  },
+  {
+   "key": "ui/wallet.go:116:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet.go:124:25",
+   "old": "s",
+   "new": "candidate"
+  },
+  {
+   "key": "ui/wallet.go:126:2",
+   "old": "raw",
+   "new": "decodedKey"
+  },
+  {
+   "key": "ui/wallet.go:139:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet.go:184:11",
+   "old": "gerr",
+   "new": "governanceErr"
+  },
+  {
+   "key": "ui/wallet.go:201:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet.go:207:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet.go:208:2",
+   "old": "accts",
+   "new": "accounts"
+  },
+  {
+   "key": "ui/wallet.go:212:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "ui/wallet.go:228:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet.go:258:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet.go:259:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "ui/wallet.go:264:6",
+   "old": "st",
+   "new": "status"
+  },
+  {
+   "key": "ui/wallet.go:284:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet.go:284:23",
+   "old": "to",
+   "new": "recipient"
+  },
+  {
+   "key": "ui/wallet.go:285:2",
+   "old": "amt",
+   "new": "parsedAmount"
+  },
+  {
+   "key": "ui/wallet.go:300:2",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "ui/wallet.go:321:2",
+   "old": "resp",
+   "new": "response"
+  },
+  {
+   "key": "ui/wallet.go:327:3",
+   "old": "b",
+   "new": "responseBody"
+  },
+  {
+   "key": "ui/wallet.go:350:7",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet_test.go:24:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "ui/wallet_test.go:25:2",
+   "old": "key",
+   "new": "publicKey"
+  },
+  {
+   "key": "ui/wallet_test.go:50:2",
+   "old": "w1",
+   "new": "originalWallet"
+  },
+  {
+   "key": "ui/wallet_test.go:56:3",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:64:2",
+   "old": "w2",
+   "new": "reloadedWallet"
+  },
+  {
+   "key": "ui/wallet_test.go:84:3",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet_test.go:92:2",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet_test.go:95:5",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:100:5",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:104:5",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:109:5",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:115:6",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:119:5",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:122:9",
+   "old": "h",
+   "new": "nodeHeight"
+  },
+  {
+   "key": "ui/wallet_test.go:124:6",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:129:5",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "ui/wallet_test.go:138:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/wallet_test.go:162:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/wallet_test.go:180:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/wallet_test.go:196:5",
+   "old": "payment",
+   "new": "paymentBlockID"
+  },
+  {
+   "key": "ui/wallet_test.go:205:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/wallet_test.go:208:2",
+   "old": "ui",
+   "new": "walletUI"
+  },
+  {
+   "key": "ui/wallet_test.go:210:3",
+   "old": "req",
+   "new": "request"
+  },
+  {
+   "key": "ui/wallet_test.go:213:3",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "ui/wallet_test.go:240:2",
+   "old": "g",
+   "new": "testNode"
+  },
+  {
+   "key": "ui/wallet_test.go:281:2",
+   "old": "srv",
+   "new": "server"
+  },
+  {
+   "key": "ui/wallet_test.go:281:50",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "ui/wallet_test.go:281:73",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "ui/wallet_test.go:288:32",
+   "old": "w",
+   "new": "wallet"
+  },
+  {
+   "key": "ui/wallet_test.go:290:2",
+   "old": "id",
+   "new": "blockID"
+  },
+  {
+   "key": "cmd/demo/main.go:48:2",
+   "old": "dir",
+   "new": "temporaryDirectory"
+  },
+  {
+   "key": "cmd/demo/main.go:127:2",
+   "old": "ui",
+   "new": "walletUI"
+  },
+  {
+   "key": "cmd/demo/main.go:148:6",
+   "old": "rat",
+   "new": "mustParseAmount"
+  },
+  {
+   "key": "cmd/demo/main.go:149:10",
+   "old": "ok",
+   "new": "parsed"
+  },
+  {
+   "key": "cmd/demo/main_test.go:15:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/demo/main_test.go:15:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "cmd/demo/main_test.go:19:2",
+   "old": "dir",
+   "new": "directory"
+  },
+  {
+   "key": "cmd/demo/main_test.go:46:5",
+   "old": "info",
+   "new": "fileInformation"
+  },
+  {
+   "key": "cmd/keygen/main.go:19:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/keygen/main.go:19:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "cmd/server/config.go:63:25",
+   "old": "cfg",
+   "new": "nodeConfig"
+  },
+  {
+   "key": "cmd/server/config.go:68:6",
+   "old": "fc",
+   "new": "configFile"
+  },
+  {
+   "key": "cmd/server/config.go:73:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/server/config.go:77:2",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "cmd/server/config.go:102:5",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "cmd/server/config.go:110:2",
+   "old": "vals",
+   "new": "configuredValidators"
+  },
+  {
+   "key": "cmd/server/config.go:111:9",
+   "old": "v",
+   "new": "validator"
+  },
+  {
+   "key": "cmd/server/config.go:124:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "cmd/server/config.go:125:3",
+   "old": "amt",
+   "new": "amount"
+  },
+  {
+   "key": "cmd/server/config.go:161:3",
+   "old": "th",
+   "new": "parsedThreshold"
+  },
+  {
+   "key": "cmd/server/config.go:248:10",
+   "old": "v",
+   "new": "validator"
+  },
+  {
+   "key": "cmd/server/config.go:259:9",
+   "old": "np",
+   "new": "neighborURLs"
+  },
+  {
+   "key": "cmd/server/config.go:260:12",
+   "old": "k",
+   "new": "neighborKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:19:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:19:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:23:2",
+   "old": "pubB64",
+   "new": "publicKeyBase64"
+  },
+  {
+   "key": "cmd/server/config_test.go:40:32",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:55:6",
+   "old": "loadErr",
+   "new": "expectLoadError"
+  },
+  {
+   "key": "cmd/server/config_test.go:55:28",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:67:2",
+   "old": "cfg",
+   "new": "nodeConfig"
+  },
+  {
+   "key": "cmd/server/config_test.go:86:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:88:2",
+   "old": "cfg",
+   "new": "nodeConfig"
+  },
+  {
+   "key": "cmd/server/config_test.go:107:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:113:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:124:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:142:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:146:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:153:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:163:2",
+   "old": "key",
+   "new": "generatePublicKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:164:3",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:170:2",
+   "old": "a",
+   "new": "firstKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:170:5",
+   "old": "b",
+   "new": "secondKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:172:9",
+   "old": "tc",
+   "new": "testCase"
+  },
+  {
+   "key": "cmd/server/config_test.go:185:4",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:210:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:230:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:231:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:236:2",
+   "old": "cfg",
+   "new": "nodeConfig"
+  },
+  {
+   "key": "cmd/server/config_test.go:249:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:257:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:272:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:276:3",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "cmd/server/config_test.go:308:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:316:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/config_test.go:324:2",
+   "old": "c",
+   "new": "config"
+  },
+  {
+   "key": "cmd/server/main.go:21:2",
+   "old": "cfgPath",
+   "new": "configPath"
+  },
+  {
+   "key": "cmd/server/main.go:24:2",
+   "old": "cfg",
+   "new": "nodeConfig"
+  },
+  {
+   "key": "cmd/server/main.go:30:2",
+   "old": "n",
+   "new": "ledgerNode"
+  },
+  {
+   "key": "cmd/server/main.go:39:2",
+   "old": "srv",
+   "new": "httpServer"
+  },
+  {
+   "key": "cmd/server/main.go:58:22",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/chaos_test.go:32:5",
+   "old": "v",
+   "new": "environmentValue"
+  },
+  {
+   "key": "node/chaos_test.go:33:6",
+   "old": "n",
+   "new": "environmentSeed"
+  },
+  {
+   "key": "node/chaos_test.go:50:6",
+   "old": "chaosNet",
+   "new": "chaosNetwork"
+  },
+  {
+   "key": "node/chaos_test.go:51:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "node/chaos_test.go:52:2",
+   "old": "rng",
+   "new": "random"
+  },
+  {
+   "key": "node/chaos_test.go:55:2",
+   "old": "dropProb",
+   "new": "dropProbability"
+  },
+  {
+   "key": "node/chaos_test.go:56:2",
+   "old": "dupProb",
+   "new": "duplicateProbability"
+  },
+  {
+   "key": "node/chaos_test.go:60:6",
+   "old": "newChaosNet",
+   "new": "newChaosNetwork"
+  },
+  {
+   "key": "node/chaos_test.go:68:7",
+   "old": "c",
+   "new": "chaosNetwork"
+  },
+  {
+   "key": "node/chaos_test.go:68:41",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "node/chaos_test.go:74:7",
+   "old": "c",
+   "new": "chaosNetwork"
+  },
+  {
+   "key": "node/chaos_test.go:74:45",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:75:23",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/chaos_test.go:78:7",
+   "old": "c",
+   "new": "chaosNetwork"
+  },
+  {
+   "key": "node/chaos_test.go:78:36",
+   "old": "dup",
+   "new": "duplicate"
+  },
+  {
+   "key": "node/chaos_test.go:84:7",
+   "old": "c",
+   "new": "chaosNetwork"
+  },
+  {
+   "key": "node/chaos_test.go:90:7",
+   "old": "c",
+   "new": "chaosNetwork"
+  },
+  {
+   "key": "node/chaos_test.go:92:7",
+   "old": "c",
+   "new": "chaosNetwork"
+  },
+  {
+   "key": "node/chaos_test.go:92:43",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/chaos_test.go:94:3",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "node/chaos_test.go:97:6",
+   "old": "out",
+   "new": "deliveries"
+  },
+  {
+   "key": "node/chaos_test.go:100:11",
+   "old": "h",
+   "new": "handler"
+  },
+  {
+   "key": "node/chaos_test.go:112:8",
+   "old": "d",
+   "new": "delay"
+  },
+  {
+   "key": "node/chaos_test.go:120:9",
+   "old": "dv",
+   "new": "pending"
+  },
+  {
+   "key": "node/chaos_test.go:121:3",
+   "old": "dv",
+   "new": "pending"
+  },
+  {
+   "key": "node/chaos_test.go:126:20",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:126:30",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/chaos_test.go:149:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "node/chaos_test.go:158:2",
+   "old": "c",
+   "new": "checker"
+  },
+  {
+   "key": "node/chaos_test.go:173:12",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:174:6",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/chaos_test.go:179:15",
+   "old": "ok",
+   "new": "recorded"
+  },
+  {
+   "key": "node/chaos_test.go:187:13",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "node/chaos_test.go:204:7",
+   "old": "c",
+   "new": "chaosChecker"
+  },
+  {
+   "key": "node/chaos_test.go:210:7",
+   "old": "c",
+   "new": "chaosChecker"
+  },
+  {
+   "key": "node/chaos_test.go:216:9",
+   "old": "v",
+   "new": "violation"
+  },
+  {
+   "key": "node/chaos_test.go:225:2",
+   "old": "net",
+   "new": "network"
+  },
+  {
+   "key": "node/chaos_test.go:237:36",
+   "old": "n",
+   "new": "validatorCount"
+  },
+  {
+   "key": "node/chaos_test.go:237:124",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/chaos_test.go:239:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:240:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/chaos_test.go:242:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/chaos_test.go:250:6",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/chaos_test.go:260:3",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/chaos_test.go:269:3",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:274:9",
+   "old": "a",
+   "new": "account"
+  },
+  {
+   "key": "node/chaos_test.go:283:7",
+   "old": "c",
+   "new": "chaosCluster"
+  },
+  {
+   "key": "node/chaos_test.go:285:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:291:7",
+   "old": "c",
+   "new": "chaosCluster"
+  },
+  {
+   "key": "node/chaos_test.go:293:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:298:7",
+   "old": "c",
+   "new": "chaosCluster"
+  },
+  {
+   "key": "node/chaos_test.go:299:2",
+   "old": "out",
+   "new": "nodeHeights"
+  },
+  {
+   "key": "node/chaos_test.go:300:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:306:7",
+   "old": "c",
+   "new": "chaosCluster"
+  },
+  {
+   "key": "node/chaos_test.go:307:2",
+   "old": "max",
+   "new": "highest"
+  },
+  {
+   "key": "node/chaos_test.go:308:9",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/chaos_test.go:327:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:346:5",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/chaos_test.go:347:5",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/chaos_test.go:379:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "node/chaos_test.go:383:7",
+   "old": "d",
+   "new": "dropFirstProposalSend"
+  },
+  {
+   "key": "node/chaos_test.go:383:56",
+   "old": "msg",
+   "new": "message"
+  },
+  {
+   "key": "node/chaos_test.go:385:3",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/chaos_test.go:405:2",
+   "old": "net",
+   "new": "network"
+  },
+  {
+   "key": "node/chaos_test.go:410:2",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/chaos_test.go:412:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/chaos_test.go:420:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/chaos_test.go:429:3",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:438:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:443:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:449:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:470:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:485:2",
+   "old": "majAtSplit",
+   "new": "majorityAtSplit"
+  },
+  {
+   "key": "node/chaos_test.go:489:3",
+   "old": "lo",
+   "new": "lowest"
+  },
+  {
+   "key": "node/chaos_test.go:491:7",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/chaos_test.go:520:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:538:10",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/chaos_test.go:554:6",
+   "old": "srv",
+   "new": "bootstrapServer"
+  },
+  {
+   "key": "node/chaos_test.go:555:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:591:3",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/chaos_test.go:604:2",
+   "old": "byz",
+   "new": "byzantineSigner"
+  },
+  {
+   "key": "node/chaos_test.go:605:2",
+   "old": "byzKey",
+   "new": "byzantineKey"
+  },
+  {
+   "key": "node/chaos_test.go:607:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:614:6",
+   "old": "byzMu",
+   "new": "byzantineMutex"
+  },
+  {
+   "key": "node/chaos_test.go:616:2",
+   "old": "byzRng",
+   "new": "byzantineRandom"
+  },
+  {
+   "key": "node/chaos_test.go:617:30",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/chaos_test.go:621:3",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/chaos_test.go:632:3",
+   "old": "real",
+   "new": "realDigest"
+  },
+  {
+   "key": "node/chaos_test.go:633:7",
+   "old": "r",
+   "new": "round"
+  },
+  {
+   "key": "node/chaos_test.go:634:11",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "node/chaos_test.go:635:12",
+   "old": "d",
+   "new": "digest"
+  },
+  {
+   "key": "node/chaos_test.go:636:6",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/chaos_test.go:655:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:656:4",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/chaos_test.go:679:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:690:2",
+   "old": "makeCert",
+   "new": "makeCertificate"
+  },
+  {
+   "key": "node/chaos_test.go:690:19",
+   "old": "newParams",
+   "new": "newParameters"
+  },
+  {
+   "key": "node/chaos_test.go:690:54",
+   "old": "prev",
+   "new": "previousParametersDigest"
+  },
+  {
+   "key": "node/chaos_test.go:690:69",
+   "old": "seq",
+   "new": "sequence"
+  },
+  {
+   "key": "node/chaos_test.go:692:10",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/chaos_test.go:693:4",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/chaos_test.go:702:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:706:29",
+   "old": "seq",
+   "new": "sequence"
+  },
+  {
+   "key": "node/chaos_test.go:708:11",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:709:5",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/chaos_test.go:718:2",
+   "old": "certAB",
+   "new": "certificateAToB"
+  },
+  {
+   "key": "node/chaos_test.go:722:2",
+   "old": "certBA",
+   "new": "certificateBToA"
+  },
+  {
+   "key": "node/chaos_test.go:752:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:763:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/chaos_test.go:772:3",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/chaos_test.go:773:3",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/chaos_test.go:793:5",
+   "old": "v",
+   "new": "environmentValue"
+  },
+  {
+   "key": "node/chaos_test.go:794:6",
+   "old": "n",
+   "new": "environmentSeconds"
+  },
+  {
+   "key": "node/chaos_test.go:802:2",
+   "old": "c",
+   "new": "cluster"
+  },
+  {
+   "key": "node/chaos_test.go:809:6",
+   "old": "wg",
+   "new": "waitGroup"
+  },
+  {
+   "key": "node/chaos_test.go:814:3",
+   "old": "rng",
+   "new": "random"
+  },
+  {
+   "key": "node/chaos_test.go:840:3",
+   "old": "rng",
+   "new": "random"
+  },
+  {
+   "key": "node/chaos_test.go:849:5",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/chaos_test.go:850:5",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/restart_test.go:24:6",
+   "old": "restartNet",
+   "new": "restartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:27:2",
+   "old": "cfgs",
+   "new": "configs"
+  },
+  {
+   "key": "node/restart_test.go:28:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/restart_test.go:31:2",
+   "old": "mu",
+   "new": "mutex"
+  },
+  {
+   "key": "node/restart_test.go:35:32",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:39:6",
+   "old": "newRestartNet",
+   "new": "newRestartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:40:2",
+   "old": "rn",
+   "new": "network"
+  },
+  {
+   "key": "node/restart_test.go:43:6",
+   "old": "vals",
+   "new": "validators"
+  },
+  {
+   "key": "node/restart_test.go:46:3",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/restart_test.go:47:3",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:53:2",
+   "old": "dir",
+   "new": "snapshotDirectory"
+  },
+  {
+   "key": "node/restart_test.go:54:9",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:64:7",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:70:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:80:7",
+   "old": "rn",
+   "new": "restartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:82:9",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:83:3",
+   "old": "srv",
+   "new": "checkpointServer"
+  },
+  {
+   "key": "node/restart_test.go:83:51",
+   "old": "w",
+   "new": "responseWriter"
+  },
+  {
+   "key": "node/restart_test.go:83:74",
+   "old": "r",
+   "new": "request"
+  },
+  {
+   "key": "node/restart_test.go:85:4",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:96:6",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:96:9",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/restart_test.go:106:7",
+   "old": "rn",
+   "new": "restartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:106:46",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:112:6",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:112:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:116:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:132:7",
+   "old": "rn",
+   "new": "restartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:133:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:142:7",
+   "old": "rn",
+   "new": "restartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:142:44",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:152:2",
+   "old": "rn",
+   "new": "network"
+  },
+  {
+   "key": "node/restart_test.go:158:7",
+   "old": "rn",
+   "new": "restartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:162:7",
+   "old": "p",
+   "new": "powerCut"
+  },
+  {
+   "key": "node/restart_test.go:162:43",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:178:7",
+   "old": "p",
+   "new": "powerCut"
+  },
+  {
+   "key": "node/restart_test.go:178:25",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:187:7",
+   "old": "rn",
+   "new": "restartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:188:2",
+   "old": "p",
+   "new": "payment"
+  },
+  {
+   "key": "node/restart_test.go:196:7",
+   "old": "rn",
+   "new": "restartNetwork"
+  },
+  {
+   "key": "node/restart_test.go:196:43",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/restart_test.go:199:6",
+   "old": "out",
+   "new": "matching"
+  },
+  {
+   "key": "node/restart_test.go:200:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/restart_test.go:212:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/restart_test.go:214:6",
+   "old": "d",
+   "new": "earlierDigest"
+  },
+  {
+   "key": "node/restart_test.go:214:9",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/restart_test.go:222:15",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:234:14",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:234:37",
+   "old": "h",
+   "new": "height"
+  },
+  {
+   "key": "node/restart_test.go:234:46",
+   "old": "typ",
+   "new": "voteType"
+  },
+  {
+   "key": "node/restart_test.go:245:2",
+   "old": "rn",
+   "new": "network"
+  },
+  {
+   "key": "node/restart_test.go:246:2",
+   "old": "X",
+   "new": "validatorX"
+  },
+  {
+   "key": "node/restart_test.go:246:5",
+   "old": "A",
+   "new": "validatorA"
+  },
+  {
+   "key": "node/restart_test.go:246:8",
+   "old": "B",
+   "new": "validatorB"
+  },
+  {
+   "key": "node/restart_test.go:247:2",
+   "old": "H",
+   "new": "heightH"
+  },
+  {
+   "key": "node/restart_test.go:253:36",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:262:29",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:263:2",
+   "old": "x",
+   "new": "nodeX"
+  },
+  {
+   "key": "node/restart_test.go:264:2",
+   "old": "a",
+   "new": "nodeA"
+  },
+  {
+   "key": "node/restart_test.go:265:2",
+   "old": "b",
+   "new": "nodeB"
+  },
+  {
+   "key": "node/restart_test.go:271:2",
+   "old": "d1",
+   "new": "digestD1"
+  },
+  {
+   "key": "node/restart_test.go:276:10",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/restart_test.go:283:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/restart_test.go:288:12",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:289:6",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/restart_test.go:295:2",
+   "old": "s",
+   "new": "snapshot"
+  },
+  {
+   "key": "node/restart_test.go:296:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/restart_test.go:302:9",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:315:2",
+   "old": "rn",
+   "new": "network"
+  },
+  {
+   "key": "node/restart_test.go:316:8",
+   "old": "H",
+   "new": "HeightH"
+  },
+  {
+   "key": "node/restart_test.go:318:36",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:322:9",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:329:10",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:331:11",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "node/restart_test.go:340:9",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:346:9",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:350:10",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:357:9",
+   "old": "k",
+   "new": "key"
+  },
+  {
+   "key": "node/restart_test.go:375:4",
+   "old": "rn",
+   "new": "network"
+  },
+  {
+   "key": "node/restart_test.go:376:4",
+   "old": "X",
+   "new": "validatorX"
+  },
+  {
+   "key": "node/restart_test.go:377:4",
+   "old": "H",
+   "new": "heightH"
+  },
+  {
+   "key": "node/restart_test.go:381:31",
+   "old": "m",
+   "new": "message"
+  },
+  {
+   "key": "node/restart_test.go:382:4",
+   "old": "x",
+   "new": "nodeX"
+  },
+  {
+   "key": "node/restart_test.go:383:4",
+   "old": "a",
+   "new": "nodeA"
+  },
+  {
+   "key": "node/restart_test.go:384:4",
+   "old": "b",
+   "new": "nodeB"
+  },
+  {
+   "key": "node/restart_test.go:410:2",
+   "old": "a",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/restart_test.go:411:2",
+   "old": "A",
+   "new": "validatorKey"
+  },
+  {
+   "key": "node/restart_test.go:412:2",
+   "old": "dir",
+   "new": "dataDirectory"
+  },
+  {
+   "key": "node/restart_test.go:413:2",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/restart_test.go:414:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:437:9",
+   "old": "p",
+   "new": "proposal"
+  },
+  {
+   "key": "node/restart_test.go:439:6",
+   "old": "d",
+   "new": "earlierDigest"
+  },
+  {
+   "key": "node/restart_test.go:439:9",
+   "old": "ok",
+   "new": "found"
+  },
+  {
+   "key": "node/restart_test.go:451:2",
+   "old": "a",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/restart_test.go:452:2",
+   "old": "A",
+   "new": "validatorKey"
+  },
+  {
+   "key": "node/restart_test.go:454:2",
+   "old": "P",
+   "new": "payerKey"
+  },
+  {
+   "key": "node/restart_test.go:455:2",
+   "old": "dir",
+   "new": "dataDirectory"
+  },
+  {
+   "key": "node/restart_test.go:456:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/restart_test.go:462:29",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/restart_test.go:463:3",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:464:3",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/restart_test.go:473:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:494:2",
+   "old": "s1",
+   "new": "firstSigner"
+  },
+  {
+   "key": "node/restart_test.go:495:2",
+   "old": "s2",
+   "new": "secondSigner"
+  },
+  {
+   "key": "node/restart_test.go:496:2",
+   "old": "vs",
+   "new": "validatorSet"
+  },
+  {
+   "key": "node/restart_test.go:497:2",
+   "old": "x",
+   "new": "proposer"
+  },
+  {
+   "key": "node/restart_test.go:502:2",
+   "old": "P",
+   "new": "payerKey"
+  },
+  {
+   "key": "node/restart_test.go:503:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/restart_test.go:508:29",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/restart_test.go:508:54",
+   "old": "msg",
+   "new": "failureMessage"
+  },
+  {
+   "key": "node/restart_test.go:509:3",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:510:3",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/restart_test.go:529:2",
+   "old": "a",
+   "new": "validatorSigner"
+  },
+  {
+   "key": "node/restart_test.go:530:2",
+   "old": "A",
+   "new": "validatorKey"
+  },
+  {
+   "key": "node/restart_test.go:531:2",
+   "old": "snap",
+   "new": "snapshotPath"
+  },
+  {
+   "key": "node/restart_test.go:532:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/restart_test.go:540:2",
+   "old": "pay",
+   "new": "payment"
+  },
+  {
+   "key": "node/restart_test.go:568:2",
+   "old": "h",
+   "new": "network"
+  },
+  {
+   "key": "node/restart_test.go:569:2",
+   "old": "x",
+   "new": "proposerIndex"
+  },
+  {
+   "key": "node/restart_test.go:571:9",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "node/restart_test.go:574:2",
+   "old": "cp",
+   "new": "checkpoint"
+  },
+  {
+   "key": "node/restart_test.go:577:2",
+   "old": "snap",
+   "new": "snapshotPath"
+  },
+  {
+   "key": "node/restart_test.go:581:2",
+   "old": "cfg",
+   "new": "config"
+  },
+  {
+   "key": "node/restart_test.go:585:2",
+   "old": "rec",
+   "new": "recorder"
+  },
+  {
+   "key": "node/restart_test.go:586:2",
+   "old": "nd",
+   "new": "node"
+  },
+  {
+   "key": "node/restart_test.go:596:9",
+   "old": "v",
+   "new": "vote"
+  },
+  {
+   "key": "signing/domain.go:12:2",
+   "old": "DomainValidatorMsg",
+   "new": "DomainValidatorMessage"
+  },
+  {
+   "key": "signing/domain.go:14:2",
+   "old": "DomainServerAuth",
+   "new": "DomainServerAuthentication"
+  },
+  {
+   "key": "signing/domain.go:42:9",
+   "old": "f",
+   "new": "field"
+  },
+  {
+   "key": "signing/domain.go:45:2",
+   "old": "buf",
+   "new": "preimage"
+  },
+  {
+   "key": "signing/domain.go:47:16",
+   "old": "b",
+   "new": "component"
+  },
+  {
+   "key": "signing/domain.go:48:7",
+   "old": "n",
+   "new": "lengthPrefix"
+  },
+  {
+   "key": "signing/domain.go:56:9",
+   "old": "f",
+   "new": "field"
+  },
+  {
+   "key": "signing/ed25519.go:17:31",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/ed25519.go:17:36",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "signing/ed25519.go:18:2",
+   "old": "pk",
+   "new": "generatedPublicKey"
+  },
+  {
+   "key": "signing/ed25519.go:18:6",
+   "old": "sk",
+   "new": "generatedPrivateKey"
+  },
+  {
+   "key": "signing/ed25519.go:25:21",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "signing/ed25519.go:32:23",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/ed25519.go:32:37",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/scheme.go:22:17",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/scheme.go:22:22",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "signing/scheme.go:24:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "signing/scheme.go:27:9",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/scheme.go:27:23",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signer.go:11:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/signer.go:12:2",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "signing/signer.go:16:49",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/signer.go:16:54",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "signing/signer.go:24:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/signer.go:24:7",
+   "old": "priv",
+   "new": "privateKey"
+  },
+  {
+   "key": "signing/signer.go:32:7",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signer.go:35:7",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signer.go:38:7",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signer.go:43:7",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signer.go:44:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signer.go:54:46",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/signer.go:54:73",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signer.go:61:45",
+   "old": "pubB64",
+   "new": "publicKeyBase64"
+  },
+  {
+   "key": "signing/signer.go:61:75",
+   "old": "sigB64",
+   "new": "signatureBase64"
+  },
+  {
+   "key": "signing/signer.go:65:2",
+   "old": "pub",
+   "new": "publicKey"
+  },
+  {
+   "key": "signing/signer.go:66:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signer.go:77:22",
+   "old": "s",
+   "new": "encoded"
+  },
+  {
+   "key": "signing/signing_test.go:12:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:20:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:22:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signing_test.go:34:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:36:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signing_test.go:45:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:47:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signing_test.go:57:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:58:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signing_test.go:68:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:69:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signing_test.go:77:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:78:2",
+   "old": "sig",
+   "new": "signature"
+  },
+  {
+   "key": "signing/signing_test.go:89:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:90:2",
+   "old": "sigB64",
+   "new": "signatureBase64"
+  },
+  {
+   "key": "signing/signing_test.go:104:2",
+   "old": "s",
+   "new": "signer"
+  },
+  {
+   "key": "signing/signing_test.go:105:2",
+   "old": "sig",
+   "new": "signatureBase64"
+  }
+ ]
+}

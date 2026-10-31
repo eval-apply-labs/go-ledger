@@ -150,8 +150,10 @@ zero re-mint).
   reassignment-vs-payment ordering (#20).
 
 **Deferred (with reason)**
-- Height continuity (#7, MEDIUM) — not currently exploitable (the node enforces monotonic height); the
-  full ledger-layer fix (block height in `LedgerState`) is a further digest change, left for later.
+- Height continuity (#7, MEDIUM) — deferred as not exploitable, wrongly: the node checked the
+  proposal's height but not its block's, so a proposer could re-apply old payments. Fixed in the node
+  on 2026-10-27; the full ledger-layer fix (block height in `LedgerState`) is a further digest
+  change, left for later.
 - Unauthenticated write API / single-loop DoS (#10, MEDIUM) — a deployment concern (front the node with
   TLS + an allowlist / rate-limit) rather than a code fix; the 1 MiB body bound stays as the in-process
   guard.
@@ -251,10 +253,12 @@ the user manual should keep saying it plainly.
 `ledger/ledger.go:119`
 
 A payer whose total outgoing across a block exceeds their balance is *banned*: their payments are
-skipped (`ledger.go:100`) **and** the account is dropped from the result entirely, so its existing
-balance vanishes from supply. Trace: A holds 10, two signed 6-unit payments in one block →
-`outgoing[A]=12 > 10` → banned → A is in neither the pass-through loop nor the `affected` loop →
-A's 10 units are destroyed.
+skipped (`ledger.go:100`) **and** their balance from before the block is destroyed, so it vanishes
+from supply. Trace: A holds 10, two signed 6-unit payments in one block → `outgoing[A]=12 > 10` →
+banned → A is rebuilt from a zero balance → A's 10 units are destroyed. Credits A receives in the
+same block still land, and a named A stays on the ledger with its name, at zero if nothing lands.
+(This trace first said A was dropped from the result entirely. In fact a banned payer that also
+received a payment in that block kept its whole balance, until 2026-10-27.)
 
 **This is intentional network behavior, not a bug to fix.** An account that tries to overdraw is
 sent to the shadow realm — the balance disappearing is an accepted consequence and does not threaten
@@ -356,9 +360,12 @@ to exactly A (e.g. a later B→A revert lets a proposer unilaterally re-flip to 
 `LedgerState` carries no height; `ApplyBlock` accepts any `block.Height` as long as
 `PrevStateDigest` matches. Since a payment's replay guard is `BlockID == block.Height`, a pure-ledger
 caller not independently enforcing monotonic height could double-apply a payment across two blocks
-both claiming height N. The `node` layer guards this today (`node/node.go:286,299`), so it isn't
-currently exploitable — but adding height to `LedgerState` (and its digest) closes this and the two
-certificate-replay findings above in one move.
+both claiming height N. This review took the `node` layer to guard it (`node/node.go:286,299`) and
+called it not currently exploitable. That was wrong: the node checked the proposal message's height
+but never its block's, so a scheduled proposer could label its block with an old height and re-apply
+the payments signed for that height, payments to itself included. Since 2026-10-27 the node refuses a
+proposal or a commit whose block names another height. Adding height to `LedgerState` (and its
+digest) is still the ledger-layer fix.
 
 ---
 

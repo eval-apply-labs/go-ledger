@@ -13,67 +13,67 @@ import "github.com/eval-apply-labs/go-ledger/ledger"
 // changes. The dimension math lives in ledger.GroupParameters, shared with the governance timing
 // invariant so the window and the fan-out can't be tuned inconsistently.
 
-// Neighbors returns the gossip peers for `self` among the sorted validator keys, auto-scaled to the
+// Neighbors returns the gossip peers for `self` among the sorted validator names, auto-scaled to the
 // agreed maxPeers. maxPeers <= 0 means all-to-all. Every node must relay received messages for a
 // multi-hop topology to reach everyone.
-func Neighbors(keys []string, self string, maxPeers int) []string {
-	n := len(keys)
-	idx := -1
-	for i, k := range keys {
-		if k == self {
-			idx = i
+func Neighbors(names []string, self string, maxPeers int) []string {
+	participantCount := len(names)
+	selfIndex := -1
+	for i, name := range names {
+		if name == self {
+			selfIndex = i
 			break
 		}
 	}
-	if idx < 0 || n <= 1 {
+	if selfIndex < 0 || participantCount <= 1 {
 		return nil
 	}
-	k, dim := ledger.GroupParameters(n, maxPeers)
-	if dim <= 1 { // one dimension == all-to-all
-		out := make([]string, 0, n-1)
-		for i, key := range keys {
-			if i != idx {
-				out = append(out, key)
+	groupSize, dimensions := ledger.GroupParameters(participantCount, maxPeers)
+	if dimensions <= 1 { // one dimension == all-to-all
+		neighbors := make([]string, 0, participantCount-1)
+		for i, name := range names {
+			if i != selfIndex {
+				neighbors = append(neighbors, name)
 			}
 		}
-		return out
+		return neighbors
 	}
-	coord := toCoord(idx, k, dim)
-	seen := make(map[int]bool)
-	var out []string
-	for d := 0; d < dim; d++ {
-		for v := 0; v < k; v++ {
-			if v == coord[d] {
+	// Each neighbour differs from the node in exactly one digit, so no two are the same and none is the
+	// node itself; groupSize^dimensions >= participantCount, so every node has an address. Only the
+	// addresses past the last participant are left out.
+	selfCoordinates := indexToCoordinates(selfIndex, groupSize, dimensions)
+	var neighbors []string
+	for dimension := 0; dimension < dimensions; dimension++ {
+		for coordinateValue := 0; coordinateValue < groupSize; coordinateValue++ {
+			if coordinateValue == selfCoordinates[dimension] {
 				continue
 			}
-			c := append([]int(nil), coord...)
-			c[d] = v
-			j := fromCoord(c, k)
-			if j >= 0 && j < n && j != idx && !seen[j] {
-				seen[j] = true
-				out = append(out, keys[j])
+			neighborCoordinates := append([]int(nil), selfCoordinates...)
+			neighborCoordinates[dimension] = coordinateValue
+			if j := coordinatesToIndex(neighborCoordinates, groupSize); j < participantCount {
+				neighbors = append(neighbors, names[j])
 			}
 		}
 	}
-	return out
+	return neighbors
 }
 
-// toCoord / fromCoord are the little-endian mixed-radix address <-> index mapping (the original
-// calculateAddress: repeated floorMod/floorDiv by groupSize).
-func toCoord(idx, k, dim int) []int {
-	c := make([]int, dim)
-	for d := 0; d < dim; d++ {
-		c[d] = idx % k
-		idx /= k
+// indexToCoordinates is a node's address in the topology: the digits of index in base groupSize,
+// lowest first, dimensions of them. coordinatesToIndex turns the digits back into the index.
+func indexToCoordinates(index, groupSize, dimensions int) []int {
+	coordinates := make([]int, dimensions)
+	for dimension := 0; dimension < dimensions; dimension++ {
+		coordinates[dimension] = index % groupSize
+		index /= groupSize
 	}
-	return c
+	return coordinates
 }
 
-func fromCoord(c []int, k int) int {
-	idx, mul := 0, 1
-	for d := 0; d < len(c); d++ {
-		idx += c[d] * mul
-		mul *= k
+func coordinatesToIndex(coordinates []int, groupSize int) int {
+	index, multiplier := 0, 1
+	for dimension := 0; dimension < len(coordinates); dimension++ {
+		index += coordinates[dimension] * multiplier
+		multiplier *= groupSize
 	}
-	return idx
+	return index
 }

@@ -1,0 +1,27 @@
+base run 1
+ok  	github.com/eval-apply-labs/go-ledger/node	0.517s
+guard run 1
+ok  	github.com/eval-apply-labs/go-ledger/node	0.515s
+base run 2
+--- FAIL: TestChaosDynamicAdmissionConverges (60.12s)
+FAIL
+FAIL	github.com/eval-apply-labs/go-ledger/node	60.134s
+FAIL
+guard run 2
+ok  	github.com/eval-apply-labs/go-ledger/node	0.497s
+base run 3
+--- FAIL: TestChaosDynamicAdmissionConverges (60.14s)
+FAIL
+FAIL	github.com/eval-apply-labs/go-ledger/node	60.148s
+FAIL
+guard run 3
+ok  	github.com/eval-apply-labs/go-ledger/node	1.424s
+base run 4
+ok  	github.com/eval-apply-labs/go-ledger/node	1.419s
+guard run 4
+ok  	github.com/eval-apply-labs/go-ledger/node	0.517s
+base run 5
+ok  	github.com/eval-apply-labs/go-ledger/node	1.540s
+guard run 5
+ok  	github.com/eval-apply-labs/go-ledger/node	0.526s
+DONE

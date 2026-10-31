@@ -1,0 +1,49 @@
+items: 1288 before, 1288 after (declarations 1257 and 1257; package doc and floating comments 31 and 31)
+moved: 30
+  func (*Driver) Evidence                  consensus/evidence.go -> consensus/driver.go
+  func (*Node) AdmitPayment                node/node.go -> node/mempool.go
+  func (*Node) AdmitUpdate                 node/node.go -> node/updatepool.go
+  func (*Node) admitPayment                node/node.go -> node/mempool.go
+  func (*Node) adopt                       node/node.go -> node/sync.go
+  func (*Node) anchorVouches               node/node.go -> node/sync.go
+  func (*Node) catchUp                     node/node.go -> node/sync.go
+  func (*Node) checkPayment                node/node.go -> node/mempool.go
+  func (*Node) fastForward                 node/node.go -> node/persist.go
+  func (*Node) pendingEvidence             node/node.go -> node/proofs.go
+  func (*Node) pendingOutgoing             node/node.go -> node/mempool.go
+  func (*Node) prunePendingProofs          node/node.go -> node/proofs.go
+  func (*Node) recordLateDoubleSign        node/node.go -> node/proofs.go
+  func (*Node) reportEquivocation          node/node.go -> node/proofs.go
+  func (*Node) retireDriver                node/node.go -> node/proofs.go
+  func (*Node) selfConsistent              node/node.go -> node/persist.go
+  func (*Node) verifyCheckpoint            node/node.go -> node/sync.go
+  func (*Server) handleLifelongRecord      node/record.go -> node/httptransport.go
+  func (*Server) handleRecord              node/record.go -> node/httptransport.go
+  func (LedgerState) Digest                ledger/parameters.go -> ledger/ledger.go
+  func (LedgerState) NamesAscending        ledger/parameters.go -> ledger/ledger.go
+  func AccountAmount                       ledger/reassignment.go -> ledger/ledger.go
+  func ProcessPayments                     ledger/ledger.go -> ledger/payment.go
+  func addToTotal                          ledger/ledger.go -> ledger/payment.go
+  func paymentIntakeError                  node/node.go -> node/mempool.go
+  func recordFrom                          node/record.go -> node/httptransport.go
+  type LedgerState                         ledger/parameters.go -> ledger/ledger.go
+  type Payment                             ledger/ledger.go -> ledger/payment.go
+  type VoteEvidence                        consensus/voteset.go -> consensus/evidence.go
+  type pendingProof                        node/node.go -> node/proofs.go
+doc comments changed where allowed: 2
+  func AccountAmount (ledger/ledger.go)
+  before: "AccountAmount is the balance of the account named name in `accounts`, or zero if there is none.\nExported so a node can check whether a reassignment still amends the balance its voters agreed on.\n"
+  after:  "AccountAmount returns the balance of the account named name in `accounts`, or zero if there is none.\n"
+  type Payment (ledger/payment.go)
+  before: "Payment moves Amount from the account named From to the account named To. From's current key signs\nit (see payment.go), and every node looks that key up in the state, so a payment can come only from\nthe holder of From's key. Comment, BlockID and PreviousStateDigest are all part of the signed fields.\n"
+  after:  "Payment moves Amount from the account named From to the account named To. From's current key signs\nit (see SignPayment), and every node looks that key up in the state, so a payment can come only from\nthe holder of From's key. Comment, BlockID and PreviousStateDigest are all part of the signed fields.\n"
+imports that differ, by file:
+  ledger/ledger.go: +["strconv"] -[]
+  ledger/payment.go: +["math/big"] -[]
+  node/httptransport.go: +["math" "strconv"] -[]
+  node/mempool.go: +["encoding/hex" "errors"] -[]
+  node/node.go: +[] -["encoding/hex"]
+  node/proofs.go: +["fmt" "github.com/eval-apply-labs/go-ledger/consensus" "github.com/eval-apply-labs/go-ledger/ledger" "log"] -[]
+  node/record.go: +[] -["math" "net/http"]
+  node/sync.go: +["github.com/eval-apply-labs/go-ledger/consensus"] -[]
+OK: every declaration and comment is the same text before and after

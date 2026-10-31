@@ -1,0 +1,108 @@
+--- <repo>/node/messages.go	2026-10-27 06:27:48.711723202 +0000
++++ verify-pl-combined-clean/node/messages.go	2026-10-27 07:50:28.630850671 +0000
+@@ -10,6 +10,8 @@
+ package node
+ 
+ import (
++	"crypto/sha256"
++	"encoding/json"
+ 	"strconv"
+ 
+ 	"github.com/eval-apply-labs/go-ledger/consensus"
+@@ -42,19 +44,32 @@
+ 	Signature  string // proposer's signature over the fields, domain "proposal", network-bound
+ }
+ 
+-func proposalSignFields(height int64, round, validRound int32, digest [32]byte) [][]byte {
++func proposalSignFields(height int64, round, validRound int32, block ledger.Block) [][]byte {
++	body := blockBodyHash(block)
+ 	return [][]byte{
+ 		[]byte(strconv.FormatInt(height, 10)),
+ 		[]byte(strconv.FormatInt(int64(round), 10)),
+ 		[]byte(strconv.FormatInt(int64(validRound), 10)),
+-		digest[:],
++		block.StateDigest[:],
++		body[:],
+ 	}
+ }
+ 
++// blockBodyHash binds the whole block (not just its claimed result digest) into the proposal
++// signature, so a copied signature cannot carry a swapped body. JSON re-encoding of decoded values is
++// deterministic (sorted keys, normalized big.Rat), so sender and receiver hash the same bytes.
++func blockBodyHash(b ledger.Block) [32]byte {
++	encoded, err := json.Marshal(b)
++	if err != nil {
++		return [32]byte{}
++	}
++	return sha256.Sum256(encoded)
++}
++
+ // SignProposal fills in p.Proposer/p.Signature: the proposer signs (height, round, validRound, block
+ // digest). Because the block's digest is signed, the block cannot be swapped without invalidating it.
+ func SignProposal(signer *signing.Signer, p *ProposalMsg) error {
+-	sig, err := signer.SignBase64(signing.DomainProposal, proposalSignFields(p.Height, p.Round, p.ValidRound, p.Block.StateDigest)...)
++	sig, err := signer.SignBase64(signing.DomainProposal, proposalSignFields(p.Height, p.Round, p.ValidRound, p.Block)...)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -66,7 +81,7 @@
+ // VerifyProposal reports whether p carries a valid signature by p.Proposer over its fields (the
+ // caller must additionally check p.Proposer is the round's scheduled proposer).
+ func VerifyProposal(scheme signing.Scheme, networkID string, p ProposalMsg) bool {
+-	return signing.VerifyBase64(scheme, networkID, p.Proposer, signing.DomainProposal, p.Signature, proposalSignFields(p.Height, p.Round, p.ValidRound, p.Block.StateDigest)...)
++	return signing.VerifyBase64(scheme, networkID, p.Proposer, signing.DomainProposal, p.Signature, proposalSignFields(p.Height, p.Round, p.ValidRound, p.Block)...)
+ }
+ 
+ // Message is what nodes exchange: a proposal, a (self-contained, signed) vote, or a gossiped
+--- <scratch>/flake-suite-fix/node/node.go	2026-10-27 06:57:29.527390041 +0000
++++ verify-pl-combined-clean/node/node.go	2026-10-27 07:50:28.630850671 +0000
+@@ -114,6 +114,7 @@
+ 	lastCommitVals *consensus.ValidatorSet // the set that signed lastCommit (served in checkpoints)
+ 
+ 	pendingSlashes        map[string]consensus.Evidence      // equivocation proofs to carry into the next block (by offender)
++	proposalEquivocations map[string][2]ProposalMsg          // two different signed proposals for one (height, round), by proposer
+ 	paramProposals        map[string]*ledger.ParameterChange // accumulating parameter-change votes (by proposal)
+ 	reassignmentProposals map[string]*ledger.Reassignment    // accumulating balance-reassignment votes (by proposal)
+ }
+@@ -143,6 +144,7 @@
+ 		heightVotes:           map[string]consensus.Vote{},
+ 		heightProposals:       map[int32]ProposalMsg{},
+ 		pendingSlashes:        map[string]consensus.Evidence{},
++		proposalEquivocations: map[string][2]ProposalMsg{},
+ 		paramProposals:        map[string]*ledger.ParameterChange{},
+ 		reassignmentProposals: map[string]*ledger.Reassignment{},
+ 	}
+@@ -530,7 +532,7 @@
+ 		}
+ 		// Post-commit window: the next height's driver does not exist yet. Authenticate against the
+ 		// NEW height's schedule and hold the proposal; startHeight replays it into the new driver.
+-		if _, held := n.heightProposals[p.Round]; held {
++		if _, held := n.heightProposals[p.Round]; held || p.Round < 0 || p.Round > 1 {
+ 			return false
+ 		}
+ 		if p.Proposer != n.validatorsFor(n.accounts).ProposerAt(p.Height, p.Round) || !VerifyProposal(n.cfg.Scheme, n.cfg.NetworkID, p) {
+@@ -539,15 +541,17 @@
+ 		n.rememberProposal(p)
+ 		return true
+ 	}
+-	if held, ok := n.heightProposals[p.Round]; ok && held.Block.StateDigest == p.Block.StateDigest {
+-		// We already hold this round's proposal, so do NOT relay this duplicate. The proposal was
+-		// flooded on its first sight, and reGossipProposal periodically re-broadcasts the AUTHENTIC
+-		// held copy, so propagation is covered. Relaying the duplicate would be unsafe: only its
+-		// StateDigest is matched here (an attacker-settable field the proposal signature covers but
+-		// the block BODY is not), so a copied digest can carry a swapped, unverified body — and the
+-		// proposer's own broadcast bypasses relay() dedup, so it, uniquely, would re-flood that body.
++	if held, ok := n.heightProposals[p.Round]; ok {
++		// First authentic proposal per round wins (as in the driver): never re-validate, store or relay
++		// another. A DIFFERENT validly-signed one from the same proposer is proposal equivocation.
++		if held.Proposer == p.Proposer && held.Signature != p.Signature && VerifyProposal(n.cfg.Scheme, n.cfg.NetworkID, p) {
++			n.proposalEquivocations[p.Proposer] = [2]ProposalMsg{held, p}
++		}
+ 		return false
+ 	}
++	if p.Round < 0 || p.Round > n.driver.Round()+1 {
++		return false // no lookahead beyond the next round: bounds per-height ApplyBlock work
++	}
+ 	if p.Proposer != n.driver.Proposer(p.Round) || !VerifyProposal(n.cfg.Scheme, n.cfg.NetworkID, p) {
+ 		return false // wrong proposer or bad signature — drop, don't relay
+ 	}

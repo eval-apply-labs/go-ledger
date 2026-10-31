@@ -1,0 +1,282 @@
+--- a/node/node.go
++++ b/node/node.go
+@@ -114,6 +114,7 @@
+ 	pendingSlashes        map[string]consensus.Evidence      // equivocation proofs to carry into the next block (by offender)
+ 	paramProposals        map[string]*ledger.ParameterChange // accumulating parameter-change votes (by proposal)
+ 	reassignmentProposals map[string]*ledger.Reassignment    // accumulating balance-reassignment votes (by proposal)
++	sign                  signLog                            // own votes at the current height, durable before release
+ }
+ 
+ // New builds a node. If a snapshot is configured and present on disk, it is loaded as the starting
+@@ -145,6 +146,7 @@
+ 		reassignmentProposals: map[string]*ledger.Reassignment{},
+ 	}
+ 	n.loadSnapshot()
++	n.loadSignLog()
+ 	return n
+ }
+ 
+@@ -386,10 +388,7 @@
+ // it was away, without trusting the serving peer. (Full rotation past the anchor would need a chain
+ // of checkpoints; for incremental growth the anchor overlaps the signing set — the real case here.)
+ func (n *Node) verifyCheckpoint(cp Checkpoint, anchor []ledger.Account) bool {
+-	if !cp.Commit.Verify(n.cfg.Scheme, n.cfg.NetworkID, n.checkpointSigners(cp)) {
+-		return false
+-	}
+-	if (ledger.LedgerState{Accounts: cp.Accounts, Parameters: cp.Parameters, GovernanceSequence: cp.GovernanceSequence}).Digest() != cp.Commit.BlockDigest {
++	if !n.selfConsistent(cp) {
+ 		return false
+ 	}
+ 	trusted := n.validatorsFor(anchor)
+@@ -398,6 +397,12 @@
+ 		vouched += trusted.Power(voter)
+ 	}
+ 	return vouched*3 > trusted.TotalPower()
++}
++
++// selfConsistent: cp's Commit is a valid quorum of the set that signed it and binds cp's state digest.
++func (n *Node) selfConsistent(cp Checkpoint) bool {
++	return cp.Commit.Verify(n.cfg.Scheme, n.cfg.NetworkID, n.checkpointSigners(cp)) &&
++		(ledger.LedgerState{Accounts: cp.Accounts, Parameters: cp.Parameters, GovernanceSequence: cp.GovernanceSequence}).Digest() == cp.Commit.BlockDigest
+ }
+ 
+ // slashEvidence returns the pending equivocation proofs for offenders that are still validators, to
+@@ -482,7 +487,22 @@
+ 		n.heightVals)
+ 	n.blocks[candidateBlock.StateDigest] = candidateBlock
+ 	n.driver = consensus.NewDriver(n.cfg.Signer, n.heightVals, n.cfg.Scheme, n.cfg.NetworkID, n.height, candidateBlock.StateDigest)
+-	n.process(n.driver.Start())
++	if n.sign.Height != n.height || len(n.sign.Votes) == 0 {
++		n.process(n.driver.Start())
++		return
++	}
++	// Re-entering a height we were already voting in before a crash: resume from our durable votes.
++	locked := n.sign.Locked
++	if locked != nil {
++		n.blocks[locked.Block.StateDigest] = locked.Block
++	}
++	for _, v := range n.sign.Votes {
++		n.rememberVote(v) // re-gossiped, so peers that missed them still get them
++	}
++	n.process(n.driver.Resume(n.sign.Votes))
++	if locked != nil {
++		n.onProposal(*locked) // re-verified like any proposal; lets the locked round still decide
++	}
+ }
+ 
+ // onProposal ingests a proposal and returns whether it was AUTHENTIC (so the caller relays it). A
+@@ -532,6 +552,9 @@
+ 			n.transport.Broadcast(n.self, Message{Type: MsgProposal, From: n.self, Proposal: proposal})
+ 		case consensus.ActBroadcastVote:
+ 			v := act.Vote
++			if !n.persistVote(v) {
++				continue // not durable: releasing it could let a reboot sign a conflicting vote
++			}
+ 			n.rememberVote(v)
+ 			n.transport.Broadcast(n.self, Message{Type: MsgVote, From: n.self, Vote: &v})
+ 		case consensus.ActSchedule:
+--- a/node/persist.go
++++ b/node/persist.go
+@@ -2,6 +2,8 @@
+ 
+ import (
+ 	"encoding/json"
++	"errors"
++	"fmt"
+ 	"os"
+ 	"path/filepath"
+ 	"strconv"
+@@ -18,19 +20,21 @@
+ 		return
+ 	}
+ 	data, err := os.ReadFile(n.cfg.SnapshotPath)
+-	if err != nil {
+-		return
++	if errors.Is(err, os.ErrNotExist) {
++		return // first start: nothing persisted yet
+ 	}
+ 	var cp Checkpoint
+-	if err := json.Unmarshal(data, &cp); err != nil {
+-		return
++	if err != nil || json.Unmarshal(data, &cp) != nil || !n.selfConsistent(cp) {
++		// Never fall back to genesis silently: a validator that re-runs genesis re-commits old heights
++		// and can roll committed history back. An operator must look (restore it, or delete it and sync).
++		panic(fmt.Sprintf("node: snapshot %s is unreadable or does not verify; refusing to restart from genesis", n.cfg.SnapshotPath))
+ 	}
+ 	if cp.Commit.Height+1 <= n.height {
+ 		return
+ 	}
+-	if !n.verifyCheckpoint(cp, n.accounts) { // anchor = genesis at this point (set in New)
+-		return
+-	}
++	// Our OWN snapshot is trusted on self-consistency (a quorum of the set that signed it, binding its
++	// digest): we verified every block before writing it. The genesis-overlap (skipping) rule is for
++	// peer-served checkpoints; applied here it discards a valid snapshot once the set has drifted.
+ 	n.fastForward(cp)
+ }
+ 
+@@ -70,27 +74,86 @@
+ // fsyncs the temp file before the rename and the directory after, so on power loss the rename can't
+ // become durable while the data blocks are not — which would silently drop a committed checkpoint
+ // (and then fail to parse on reload). Best-effort: any error abandons the write.
+-func writeAtomic(path, tmp string, data []byte) {
++func writeAtomic(path, tmp string, data []byte) error {
+ 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
++	if err != nil {
++		return err
++	}
++	if _, err := f.Write(data); err != nil {
++		f.Close()
++		return err
++	}
++	if err := f.Sync(); err != nil { // flush data to disk before the rename exposes it
++		f.Close()
++		return err
++	}
++	if err := f.Close(); err != nil {
++		return err
++	}
++	if err := os.Rename(tmp, path); err != nil {
++		return err
++	}
++	dir, err := os.Open(filepath.Dir(path)) // make the rename itself durable
++	if err != nil {
++		return err
++	}
++	defer dir.Close()
++	return dir.Sync()
++}
++
++// signLog is this validator's write-ahead record of what it signed at the height in progress: its
++// own votes, plus the proposal of the round it last precommitted a value in (so after a restart it
++// can still decide or re-propose what it is locked on). It is made durable BEFORE a vote is released
++// and replayed on restart (Driver.Resume), so an honest reboot mid-height can neither sign a second,
++// conflicting vote nor forget its lock. It lives next to the snapshot.
++type signLog struct {
++	Height int64
++	Votes  []consensus.Vote
++	Locked *ProposalMsg
++}
++
++func (n *Node) signLogPath() string {
++	if n.cfg.SnapshotPath == "" {
++		return ""
++	}
++	return n.cfg.SnapshotPath + ".votes"
++}
++
++// persistVote appends an own vote to the current height's sign log and fsyncs it. false means it is
++// not durable, and the caller must not release the vote.
++func (n *Node) persistVote(v consensus.Vote) bool {
++	path := n.signLogPath()
++	if path == "" {
++		return true // no persistence configured: amnesia on restart (validators should set snapshotPath)
++	}
++	if n.sign.Height != n.height {
++		n.sign = signLog{Height: n.height}
++	}
++	n.sign.Votes = append(n.sign.Votes, v)
++	if v.Type == consensus.Precommit && v.BlockDigest != ([32]byte{}) {
++		if p, ok := n.heightProposals[v.Round]; ok && p.Block.StateDigest == v.BlockDigest {
++			n.sign.Locked = &p
++		}
++	}
++	data, err := json.Marshal(n.sign)
++	if err != nil {
++		return false
++	}
++	return writeAtomic(path, path+".tmp", data) == nil
++}
++
++// loadSignLog reloads the sign log if it is for the height this node is about to (re)enter.
++func (n *Node) loadSignLog() {
++	path := n.signLogPath()
++	if path == "" {
++		return
++	}
++	data, err := os.ReadFile(path)
+ 	if err != nil {
+ 		return
+ 	}
+-	if _, err := f.Write(data); err != nil {
+-		f.Close()
+-		return
+-	}
+-	if err := f.Sync(); err != nil { // flush data to disk before the rename exposes it
+-		f.Close()
+-		return
+-	}
+-	if err := f.Close(); err != nil {
+-		return
+-	}
+-	if err := os.Rename(tmp, path); err != nil {
+-		return
+-	}
+-	if dir, err := os.Open(filepath.Dir(path)); err == nil { // make the rename itself durable
+-		_ = dir.Sync()
+-		_ = dir.Close()
++	var sl signLog
++	if json.Unmarshal(data, &sl) == nil && sl.Height == n.height {
++		n.sign = sl
+ 	}
+ }
+--- a/consensus/driver.go
++++ b/consensus/driver.go
+@@ -176,10 +176,15 @@
+ func (d *Driver) startRound(r int32) []Action {
+ 	d.round = r
+ 	d.step = StepPropose
++	if d.sentPrecommit[r] { // only after Resume: re-entering a round we had already voted in
++		d.step = StepPrecommit
++	} else if d.sentPrevote[r] {
++		d.step = StepPrevote
++	}
+ 	d.ensureRound(r)
+ 
+ 	var acts []Action
+-	if d.self == d.Proposer(r) {
++	if d.self == d.Proposer(r) && !d.sentPrevote[r] { // never re-propose a round we already acted in
+ 		digest := d.proposeValue
+ 		vr := int32(-1)
+ 		if d.validValue != nil {
+@@ -194,6 +199,40 @@
+ 		acts = append(acts, ActSchedule{Step: StepPropose, Round: r})
+ 	}
+ 	return append(acts, d.evaluate()...)
++}
++
++// Resume re-enters this height after a crash, from the validator's OWN votes that were made durable
++// before release (the node's sign log). Each is re-counted and marked sent, so the driver can never
++// sign a second, different vote for the same (round, type); the lock (and valid value) is restored
++// from the highest-round non-nil precommit -- this driver locks exactly when it precommits a value --
++// and the driver resumes at the latest round it voted in, never earlier. Without this a restart is
++// amnesia: an honest node re-enters round 0 unlocked and can complete a conflicting quorum.
++func (d *Driver) Resume(own []Vote) []Action {
++	r := int32(0)
++	for _, v := range own {
++		if v.Height != d.height || v.Validator != d.self || v.Round < 0 {
++			continue
++		}
++		d.ensureRound(v.Round)
++		switch v.Type {
++		case Prevote:
++			d.prevotes[v.Round].Add(d.scheme, d.networkID, v)
++			d.sentPrevote[v.Round] = true
++		case Precommit:
++			d.precommits[v.Round].Add(d.scheme, d.networkID, v)
++			d.sentPrecommit[v.Round] = true
++			if v.BlockDigest != nilDigest && (d.lockedValue == nil || v.Round > d.lockedRound) {
++				d.lockedValue, d.lockedRound = digestPtr(v.BlockDigest), v.Round
++				d.validValue, d.validRound = digestPtr(v.BlockDigest), v.Round
++			}
++		default:
++			continue
++		}
++		if v.Round > r {
++			r = v.Round
++		}
++	}
++	return d.startRound(r)
+ }
+ 
+ // ReceiveProposal records a proposal (assumed already checked to be from the round's proposer

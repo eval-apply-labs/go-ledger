@@ -1,0 +1,30 @@
+--- a/node/node.go
++++ b/node/node.go
+@@ -64,6 +64,7 @@
+ 	reassignment *ledger.Reassignment
+ 	step         consensus.Step
+ 	round        int32
++	height       int64 // for evTimeout: the height whose driver armed the timer
+ 	query        chan Snapshot
+ 	govQuery     chan GovernanceView
+ 	checkpoint   *Checkpoint
+@@ -272,7 +273,7 @@
+ 		n.rememberVote(*e.vote)
+ 		n.relay(Message{Type: MsgVote, From: n.self, Vote: e.vote})
+ 	case evTimeout:
+-		if n.driver != nil {
++		if n.driver != nil && e.height == n.height {
+ 			n.process(n.driver.Timeout(e.step, e.round))
+ 		}
+ 	case evPayment:
+@@ -598,8 +599,9 @@
+ // per-step timeout is the GOVERNED value from committed parameters (see stepTimeout).
+ func (n *Node) arm(step consensus.Step, round int32) {
+ 	d := n.stepTimeout() * time.Duration(round+1)
++	height := n.height
+ 	time.AfterFunc(d, func() {
+-		n.enqueue(event{kind: evTimeout, step: step, round: round})
++		n.enqueue(event{kind: evTimeout, step: step, round: round, height: height})
+ 	})
+ }
+ 

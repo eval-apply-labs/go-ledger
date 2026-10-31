@@ -1,0 +1,1227 @@
+[
+ {
+  "area": "key-lifecycle",
+  "summary": "The direct eMudhra lesson is a clean pass: every production key-generation path (signing/ed25519.go, cmd/keygen, ui/keyfile.go, cmd/demo) draws from crypto/rand, with no seeded/derived/time-based/math-rand path a real deployment could fall into, and the ML-DSA slot is inert comments \u2014 so the weak-entropy failure that burned eMudhra is not representable here. Wallet-at-rest sealing (PBKDF2-HMAC-SHA256 600k + AES-256-GCM, per-seal random salt/nonce, vector-tested) is sound, and config load already length-checks keys and refuses a negative fee. The real gaps are in key *handling* and *recovery*, not generation. (1) The C4 length check does not verify the configured private key actually signs for the configured public key, and there is no sign+verify self-test, so a mismatched-but-valid-length keypair boots a silent consensus ghost. (2) Signatures bind only the free-form network-id string (universal default \"village\"), never a genesis/chain digest, so same-id coexisting deployments and the documented re-genesis migration both replay old payments and governance certificates (re-minting a grant with no new vote). (3) There is no key rotation/revocation: account identity IS the public key, names/seats/delegations cannot move to a new key, and the only recovery lever (\u2154 reassignment) loses the race to an attacker who simply signs a payment \u2014 and the owner's \"two-signings-burns-the-key\" principle only covers validator consensus equivocation, not a leaked ordinary key. (4) The demo writes the founder (sole-validator) private key in plaintext to a predictable os.TempDir() path with no O_EXCL/symlink safety, exploitable on a shared machine.",
+  "findings": [
+   {
+    "id": "KEY-1",
+    "title": "Config load does not verify the private key matches the configured public key (incomplete C4 fix; no sign+verify self-test) \u2192 silent consensus ghost",
+    "severity": "medium",
+    "category": "key-management",
+    "locations": [
+     "cmd/server/config.go:78-83",
+     "cmd/server/config.go:170-173",
+     "node/node.go:121-149",
+     "consensus/driver.go:253-262"
+    ],
+    "description": "The C4 fix validates Ed25519 key LENGTHS at load but never checks that the configured privateKey actually signs for the configured publicKey, and nothing does a sign+verify self-test at startup. Go's ed25519.Sign binds the private key's own embedded public bytes (priv[32:]) into every signature (confirmed in the stdlib signWithDom), so if an operator pastes publicKey from one keygen run and privateKey from another (both 32/64 bytes), the node's identity is the configured pub while its votes/proposals/receipts verify only under priv's real pub. castVote swallows the resulting situation silently; the node logs \"up\" and serves HTTP but can never contribute a counted vote. If that validator holds >1/3 power this is a liveness stall; otherwise it is a validator that is quietly absent from quorum.",
+    "failure_scenario": "Operator assembles node.json from two keygen outputs (or rotates one field of the pair). load() accepts it. The node joins as a listed validator but every Vote it signs fails Verify under its configured identity (PoC: SignVote then Verify == false), so quorum silently excludes it. No error at load, no error at runtime \u2014 the exact 'consensus ghost' C4 set out to prevent, reachable past the length-only check.",
+    "attacker": "no attacker (operator misconfiguration / key-handling slip)",
+    "known_status": "Relates to C4 (findings.md 'External review (GLM) 2026-08-02', recorded FIXED). Verified the fix is incomplete in current code: config.go:78-83 checks only len(pub)==32 and len(priv)==64, not that priv derives pub, and there is no startup sign+verify. New angle: a correctly-sized but mismatched pair reproduces the C4 failure mode.",
+    "poc": "<scratch>/key-lifecycle/cmd/server/poc_keymismatch_test.go \u2014 PASS (TestPoCConfigAcceptsMismatchedKeypair): load() accepts the mismatched config and the node's own signed vote fails verification under its configured pub.",
+    "fix": "In load(), after decoding, derive the public key from the private seed (ed25519.PrivateKey(priv).Public()) and require it to equal the configured pub; and/or have node.New/Start do a one-shot sign+verify self-test with cfg.Signer and fail fast with a clear message.",
+    "confidence": "high"
+   },
+   {
+    "id": "KEY-2",
+    "title": "Signatures bind only the network-id string, not a genesis/chain digest \u2014 same-id deployments and the documented re-genesis migration replay payments and governance certificates",
+    "severity": "medium",
+    "category": "naming",
+    "locations": [
+     "signing/domain.go:38-59",
+     "ledger/payment.go:159-173",
+     "ledger/reassignment.go:48-57",
+     "ledger/parameters.go:251-263",
+     "cmd/demo/main.go:35",
+     "ui/main.go:31",
+     "docs/operating-a-network.md:135-158"
+    ],
+    "description": "Every preimage binds protocolTag + networkID + domain + fields, but nothing binds a genesis/chain identity. networkID is a free-form string whose default is \"village\" in the demo, the operator example config, the wallet and the user manual. Consequences: (a) two independently-stood-up \"village\" networks are NOT isolated \u2014 a payment or governance certificate signed on one is signature-valid on the other wherever the key/account exists; (b) the documented migration/upgrade path (operating-a-network.md 'Migrating the ledger'; findings.md 2026-07-31 'coordinated re-genesis') restarts heights at 1 and the governance sequence at 0, so unless it also changes the scheme (re-keys) or the payment signFields, old signed payments and \u2014 most sharply \u2014 old reassignment grant certificates re-apply on the new chain, re-minting value with no new vote. The docs claim networkId 'isolates testnet/mainnet/forks', which the mechanism does not deliver across same-id deployments or a same-id re-genesis.",
+    "failure_scenario": "A community re-genesises its \"village\" chain (a plain restart, or a digest-field software upgrade that leaves reassignment-vote fields untouched) without changing the id or re-keying. Anyone who kept an old \u2154 grant certificate (prev 0 \u2192 100, sequence 0) resubmits it: on the fresh chain the newcomer is at 0 and sequence is 0, so Valid() passes and 100 is minted again with no new vote (PoC). Separately, two co-located operators each default to \"village\"; a validator present on both has its governance votes/payments cross-replayable.",
+    "attacker": "anyone who observed an old signed payment/certificate (every gossip peer / validator / archive), given a re-genesis or a second same-id deployment",
+    "known_status": "New. C6 (findings.md) tests cross-NETWORK rejection but only with DIFFERENT ids; the universal-default collision and the lack of genesis binding are not covered. The 2026-07-31 re-genesis note addresses mixed-version digest divergence, not replay of old signatures onto the re-genesised chain.",
+    "poc": "<scratch>/key-lifecycle/ledger/keylife_regenesis_test.go \u2014 3 tests FAIL asserting the safe behaviour (payment re-applies after re-genesis; grant certificate re-ratifies at reset sequence; cert valid on a different same-id deployment). Also <scratch>/key-lifecycle/ledger/poc_networkid_test.go \u2014 PASS confirming cross-deployment Valid() and id-only VerifyPayment.",
+    "fix": "Bind a unique chain identifier (genesis digest, or a random chain-id chosen at genesis) into the signing preimage alongside networkID, so signatures do not cross a re-genesis or an id collision; at minimum, make keygen/config generate a random networkId default and document that a re-genesis MUST change it (and that migration should re-key).",
+    "confidence": "high"
+   },
+   {
+    "id": "KEY-3",
+    "title": "No key rotation or revocation: a compromised account/validator key cannot be recovered faster than an attacker can spend, and 'two-signings-burns-the-key' does not cover ordinary keys",
+    "severity": "medium",
+    "category": "key-management",
+    "locations": [
+     "ledger/account_update.go:83-114",
+     "ledger/reassignment.go:80-107",
+     "consensus/evidence.go:5-23",
+     "ledger/ledger.go:157-169",
+     "docs/managing-the-currency.md:348-352"
+    ],
+    "description": "Account identity IS the public key, and there is no primitive to move a name, stake delegation, validator seat or published address to a new key: applyAccountUpdates only lets an account claim a free name or edit its own attributes \u2014 never transfer ownership to another key. So once a key is known weak/leaked, the holder cannot rotate; a registered name can only be freed by the (compromised) key and then raced for. The sole community lever is a \u2154 Reassignment (seize-to-zero or mint-to-new-key), which needs vote collection plus a block \u2014 the attacker just signs a payment that clears in a near-future block on the same timescale, and typically wins. The owner's 'two different signings means the key is burned' principle is implemented ONLY for validator consensus equivocation (slashing, consensus/evidence.go); a leaked ORDINARY key that signs two conflicting payments is not burned \u2014 and the overdraw ban (two same-block payments) destroys the victim's own balance, aiding a griefer rather than protecting the owner. (For context on the eMudhra trigger: that was weak-entropy keys, which this code avoids via crypto/rand; the 'burned on double-sign' rule would not have applied to such user keys here.)",
+    "failure_scenario": "Alice's key leaks. She generates a new key but cannot move her name/balance/delegations to it without the old key, and the attacker holds the old key too. She (or the community) initiates a \u2154 reassignment to a safe key; before it is collected and committed, the attacker signs a payment draining Alice's balance into the next block. Alice's name and validator seat remain bound to the dead key with no transfer path.",
+    "attacker": "holder of one stolen or cracked key (recovery gap; no cheap mint by itself)",
+    "known_status": "New framing in this area. Partly acknowledged in managing-the-currency.md (self-custody 'loss/theft fatal at scale; needs bolting on recovery/custodial'), but the absence of any rotation/transfer primitive and the narrow scope of the 'two-signings-burned' principle (validators only, not account keys) are not stated where the owner's premise expects them.",
+    "poc": "none \u2014 this is an absence-of-primitive / recovery-race observation, not a single failing assertion; traced end-to-end: account_update.go has no owner-transfer path, reassignment.go is the only balance-moving governance action, evidence.go slashes only vote equivocation.",
+    "fix": "Add a signed key-rotation/account-transfer primitive (owner signs over a successor key; name, delegations and seat move atomically), and document the compromised-key playbook honestly (reassignment races the attacker; prefer register-then-pay and modest balances; no rotation today). Optionally extend 'burned on double-sign' to detect an account key that signs two conflicting same-block payments.",
+    "confidence": "high"
+   },
+   {
+    "id": "KEY-4",
+    "title": "Demo writes the sole-validator private key in plaintext to a predictable os.TempDir() path with no O_EXCL/symlink safety and never deletes it",
+    "severity": "low",
+    "category": "key-management",
+    "locations": [
+     "cmd/demo/main.go:72",
+     "cmd/demo/main.go:136-146"
+    ],
+    "description": "cmd/demo generates the founder key (sole validator, 1000 units, full governance of the demo net) and writes it, base64 in plaintext, to filepath.Join(os.TempDir(), \"go_ledger_demo_wallet.json\") via os.WriteFile (O_CREATE without O_EXCL, mode 0600). On a shared host os.TempDir() is /tmp (world-writable, sticky): a local attacker who pre-creates that exact fixed path can (a) make it a symlink so the write lands on a file the attacker chose (confirmed: the write follows the symlink), or (b) pre-create it owned by the attacker with readable perms, so the 0600 is not reapplied to the existing file and the attacker reads the key. The file is also never removed on Ctrl-C, leaving a plaintext key for network \"village\" in /tmp after the demo exits.",
+    "failure_scenario": "On a shared machine, attacker pre-creates /tmp/go_ledger_demo_wallet.json (as a symlink into their own dir, or as a 0644 file they own). A user runs `make demo`; writeWallet writes the founder private key through/into the attacker-controlled file. While the demo runs the attacker signs payments and governance votes as the founder on the local demo net; the plaintext key also persists in /tmp afterward.",
+    "attacker": "local user on the machine",
+    "known_status": "New. Prior work hardened the real wallet's at-rest sealing (keyfile.go) but the demo's own key write was not covered; the task explicitly asked about demo key paths/permissions/symlink safety.",
+    "poc": "<scratch>/key-lifecycle/cmd/demo/poc_demo_wallet_test.go \u2014 PASS (TestPoCDemoWalletPredictablePathAndSymlinkUnsafe): confirms plaintext key write and that writeWallet follows a pre-planted symlink to an attacker-chosen target.",
+    "fix": "Write the demo wallet into a fresh os.MkdirTemp dir (unpredictable path), open with O_CREATE|O_EXCL, and remove it on shutdown; or seal it with a demo passphrase. The real wallet (ui/keyfile.go) already does 0600 + no-silent-overwrite, so only the demo path needs this.",
+    "confidence": "high"
+   }
+  ],
+  "checked_ok": [
+   "Entropy source: every production key-gen path uses crypto/rand \u2014 signing/ed25519.go GenerateKey (ed25519.GenerateKey(rand.Reader)), cmd/keygen/main.go, ui/keyfile.go loadOrCreateKey, cmd/demo newAccount. No NewKeyFromSeed, fixed seed, math/rand, or time-based key anywhere in non-test code (math/rand appears only in sim/chaos fault scheduling).",
+   "signing/mldsa.go is entirely commented out \u2014 no deterministic/alternate scheme can be reached by accident; scheme selection is Ed25519 everywhere.",
+   "Wallet at-rest sealing (ui/keyfile.go): per-seal fresh 16-byte random salt and fresh random GCM nonce, PBKDF2-HMAC-SHA256 at 600k iterations (matches published vectors in keyfile_test.go), AES-256-GCM; a wrong passphrase or tampered ciphertext is a hard error, never a silent fresh-key overwrite of a funded wallet.",
+   "cmd/server config load (C4/C3) verified present in current code: refuses wrong-length keys and a negative transactionCost, and runs Acceptable() on assembled genesis parameters.",
+   "No private key is logged (cmd/server/main.go startup line logs only network/listen/peers and a validators label) and no HTTP endpoint serves private key material; keygen prints locally and transmits nothing.",
+   "The 'two-signings-burned' principle is correctly and unforgeably implemented for validator consensus equivocation: consensus/evidence.go Valid requires two validly-signed conflicting votes by the same key, and ledger applySlashes removes the offender deterministically; an honest validator cannot be framed.",
+   "Receipt/vote/update/payment/governance domains are distinct and network-bound (signing/domain.go), so a signature in one role cannot be replayed as another within a network (the id-binding gap in KEY-2 is about ACROSS deployments, not across domains)."
+  ],
+  "notes": "Residual low/info observations (folded, not separate findings): (a) No known-weak-key blocklist and no small-order/identity public-key rejection at config/genesis load beyond length \u2014 not practically exploitable without the private scalar, but a sign+verify self-test (see KEY-1 fix) and an on-curve/non-identity check would be cheap defense-in-depth. (b) ui/keyfile.go seals without AEAD associated data over the KDF params/salt; tampering is still caught by GCM auth failure (surfaced as 'wrong passphrase or corrupt file'), so no downgrade is possible, but binding the params as AAD would give a cleaner error. (c) saveKey uses os.WriteFile (not temp+rename), so a crash mid-write can corrupt the only wallet copy; loadOrCreateKey correctly errors rather than regenerating, and the manual says keep a backup.\n\nRotation/recovery matrix (KEY-3), what a victim of a leaked key can move to a new key today:\n| asset | can move to new key? | mechanism / blocker |\n| balance | only via \u2154 reassignment (races attacker) | no owner-initiated transfer; attacker with the key spends first |\n| registered name | no | applyAccountUpdates has no transfer; freeing it races the attacker to re-claim |\n| validator seat | no | seat = account key; no separate consensus key; delegators must re-point |\n| stake delegation | only with the (compromised) key | attacker can re-delegate too |\n| published address | only with the (compromised) key | same |"
+ },
+ {
+  "area": "The \"two different signings means the key is burned\" principle \u2014 how far the code implements it across every signed statement type, and how it is bypassed or weaponized.",
+  "summary": "The burn principle is implemented for exactly ONE of the nine signed-statement types: consensus prevote/precommit votes (block-revision). There, equivocation is detected in-round (VoteSet.Add), carried as unforgeable, age-windowed Evidence, and acted on. For every other type the rule is absent or defeated. Most important for the owner's eMudhra framing: it does NOT apply to PAYMENTS, the statement that moves user money. A thief with a leaked/cracked key drains an account with ONE signing \u2014 no \"second conflicting signing\" ever arises, so the rule never fires; worse, on the same block the thief can hijack the victim's registered name and redirect all future pay-by-name traffic (NAME-1). Even the one working case burns an ACCOUNT, not the KEY: in the default static-validator mode a slashed equivocator keeps full voting power (SLASH-1), and in dynamic mode delegated stake keeps it seated (SLASH-2), so a \u22651/3 equivocator is an un-slashable permanent stall. Proposal equivocation is wholly undetected and even amplified network-wide (PROP-1). The overdraw ban is escapable (BAN-1). So the owner's belief that \"two different signings would have stopped a leaked key immediately\" does not hold in this code \u2014 the rule protects consensus votes only, and even that incompletely.",
+  "findings": [
+   {
+    "id": "NAME-1",
+    "title": "Deleting an account (spend-to-zero or slash) frees its registered name \u2014 a leaked key both drains AND hijacks the victim's name and all future pay-by-name traffic",
+    "severity": "high",
+    "category": "naming",
+    "locations": [
+     "ledger/ledger.go:209",
+     "ledger/block.go:230",
+     "ledger/block.go:231",
+     "ledger/account_update.go:75",
+     "ledger/account_update.go:93"
+    ],
+    "description": "ProcessPayments drops any account whose balance reaches 0 (ledger.go:209), discarding its Name. applyAccountUpdates runs AFTER payments in the same block (block.go:230-231) and builds ownerByName from the post-payment accounts, so a name whose owner was just deleted is 'free' and another account's same-block update claims it. A slash (applySlashes) likewise deletes the offender and frees its name next block. The burn rule's opposite of burning: deleting an identity hands its name to the first claimant. Since pay-by-name resolves recipients via nameRegistry, the new owner then receives every future payment addressed to that name. A slashed/spent key is also recreated by any later payment (no tombstone).",
+    "failure_scenario": "A thief holds alice's leaked key (eMudhra case). In one block: (1) signs alice\u2192thief for alice's EXACT balance, draining her to 0 \u2192 alice's account+name deleted; (2) from the thief's own funded account signs an AccountUpdate claiming Name='alice' for this block. Payments apply first (alice gone), then the claim succeeds (name free). Now nameRegistry['alice']=thief, so every future 'pay alice' credits the thief \u2014 permanent identity hijack, not a one-time drain. No leaked key is even needed for the natural-spend-to-zero variant: anyone reaching the port can pre-stage a claim and grab any name the moment its owner spends to zero.",
+    "attacker": "holder of one stolen or cracked key (drain + name capture); also anyone reaching the port can claim a name freed by a natural spend-to-zero",
+    "known_status": "new. Related to findings.md MEDIUM 'evidence replayable against recreated accounts' (fixed via age window) and the third-pass pay-by-name resolution hardening, but neither addresses name DURABILITY on account deletion / same-block re-registration. Not in findings.md or TODO.md.",
+    "poc": "<scratch>/burn-rule/ledger/burnrule_poc_test.go \u2014 TestPoCSpendToZeroFreesNameInSameBlock (FAIL: name resolves to the other account), TestPoCSlashFreesValidatorNameForAnyone (FAIL), TestPoCSlashedKeyIsRecreatedByAnyPayment (FAIL: burned key recreated, self-delegated).",
+    "fix": "Make a name survive its account's deletion for a window, or tombstone freed names: keep released names in committed state and refuse re-registration for N blocks / until a governance action. Alternatively resolve same-block name claims against PRE-payment ownership and refuse to re-grant a name whose owner is deleted in the same block. Tie name ownership to a monotonic claim sequence so a freed name cannot be grabbed in the same/next block.",
+    "confidence": "high"
+   },
+   {
+    "id": "SLASH-1",
+    "title": "Static-validator mode: a slashed equivocator is NOT ejected from consensus (keeps full voting power); a \u22651/3 compromised key is an un-recoverable permanent stall",
+    "severity": "high",
+    "category": "key-management",
+    "locations": [
+     "node/validators.go:15",
+     "node/validators.go:16",
+     "ledger/block.go:82",
+     "node/node.go:406",
+     "node/node.go:413"
+    ],
+    "description": "applySlashes removes only the offender's ACCOUNT. In static mode the consensus set is Config.Validators (validators.go:15-16), which account deletion never touches, so the offender keeps its fixed voting power and keeps proposing/voting. Honest nodes still accept its votes (it is in their set). The VoteSet only un-counts it WITHIN one (height,round,type); each height gets a fresh Driver, so it equivocates anew every height, producing fresh evidence that slashEvidence re-carries every block (node.go:406-417) to no effect \u2014 the account is already gone and the set is unchanged, so the key is never removed. This is the DEFAULT deployment mode (the operating-a-network.md example).",
+    "failure_scenario": "A static set of 3 equal-power validators (quorum = 3, so all three are needed \u2014 a realistic 'concentrate stake on reliable machines' setup per security.md). One validator's key is compromised and equivocates. Its votes are un-counted everywhere, so the honest 2 can reach at most power 2 < quorum 3 \u2192 no block ever commits. Slashing destroys the offender's on-chain balance but leaves it in Config.Validators with power 1, so quorum stays 3. There is no in-protocol recovery: operators must edit every node's static validators and re-genesis. In dynamic mode the same slash shrinks the set and self-heals; static mode cannot.",
+    "attacker": "one validator (holder of a compromised validator key holding \u22651/3 of a static set)",
+    "known_status": "new. The brief asks this directly. findings.md's slashing items concern evidence replay/age windows, not the static-mode non-ejection. docs/managing-the-currency.md:40 claims the offender 'is ejected from the set' unconditionally \u2014 false here (see DOCS-1).",
+    "poc": "<scratch>/burn-rule/node/burnrule_poc_test.go \u2014 TestPoCStaticModeSlashDoesNotEjectValidator (FAIL: slashed key still a validator; honest power 2 < quorum 3). Permanent-stall follows from quorum math; the load-bearing fact (still in set) is asserted directly.",
+    "fix": "Carry a committed 'slashed keys' set and subtract it from the effective validator set in static mode (validatorsFor), so a proven double-signer is removed from quorum/power/proposer selection, not merely stripped of its account. Recompute quorum over the reduced set so the honest remainder can still finalise.",
+    "confidence": "high"
+   },
+   {
+    "id": "SLASH-2",
+    "title": "Dynamic mode: stake delegated by OTHER accounts keeps a slashed equivocator in the validator set \u2014 an un-slashable Byzantine validator",
+    "severity": "high",
+    "category": "key-management",
+    "locations": [
+     "node/validators.go:31",
+     "node/validators.go:37",
+     "node/validators.go:40",
+     "ledger/block.go:82",
+     "node/node.go:413"
+    ],
+    "description": "deriveValidators sums the balance of EVERY account whose ValidatorNode == key (validators.go:33-42). applySlashes deletes only the offender's OWN account; it never touches accounts that delegated TO the offender. So delegated stake alone keeps the offender in the derived set with power = that stake, and its key keeps proposing/voting after being 'slashed'. slashEvidence re-carries the same proof every block (node.go:413) with no effect: the offender's account is already gone and delegators are untouched, so it is never actually removed. The only exit is for the honest delegators to re-delegate \u2014 impossible if the attacker controls (sock-puppets) the delegating accounts.",
+    "failure_scenario": "Dynamic set (validatorThreshold). Account D (stake 100) delegates to validator O (ValidatorNode=O). O's own account holds any amount. O equivocates and is slashed: O's account is deleted, but deriveValidators still sees D's 100 pointed at O, so O remains a validator with power 100 and keeps double-signing. If O's delegated power is \u22651/3, the un-counted-equivocator stall of SLASH-1 recurs and is equally unrecoverable (the set never shrinks). An attacker who sets up O's seat via its own delegating accounts has a permanently un-slashable Byzantine validator; the honest majority cannot remove it.",
+    "attacker": "one validator whose seat is backed by delegated stake (possibly its own sock-puppet accounts)",
+    "known_status": "new. The brief asks this directly. docs/consensus.md:79 and README.md:77 say slashing 'ejects from a dynamic set' / 'zeroes out the double-signer' \u2014 false when delegated stake backs the seat (see DOCS-1).",
+    "poc": "<scratch>/burn-rule/node/burnrule_poc_test.go \u2014 TestPoCDynamicModeDelegationKeepsSlashedValidator (FAIL: slashed key still a validator with power 100 from delegated stake).",
+    "fix": "On slash, neutralize delegations to the offender: carry a committed tombstone for slashed keys and exclude them from deriveValidators regardless of delegated stake (or zero/redirect ValidatorNode fields pointing at a slashed key). Otherwise deleting the account never removes the key from the set.",
+    "confidence": "high"
+   },
+   {
+    "id": "PROP-1",
+    "title": "Proposer equivocation (two different signed proposals for one height/round) is never detected or slashed \u2014 and the second is relayed and re-applied network-wide",
+    "severity": "medium",
+    "category": "safety",
+    "locations": [
+     "consensus/driver.go:203",
+     "consensus/driver.go:204",
+     "consensus/evidence.go:26",
+     "node/node.go:498",
+     "node/node.go:507",
+     "node/node.go:516"
+    ],
+    "description": "Proposals are signed (DomainProposal) but there is no proposal-equivocation evidence: Driver.Evidence (evidence.go:26-35) scans only vote sets, and the driver keeps the first proposal per round (driver.go:203-204). onProposal's held-proposal fast path only short-circuits on a MATCHING Block.StateDigest (node.go:498); a SECOND, different-digest proposal from the authentic round proposer passes the proposer+signature gate (node.go:507), is ApplyBlock'd, and is relayed onward (returns true, node.go:516). So a proposer can sign two conflicting blocks for one (height,round) with zero penalty \u2014 the exact 'two different signings' the principle targets, for the one role that is never burned.",
+    "failure_scenario": "The round proposer signs block X and block Y (different payments, different digest) for (h,r) and sends X to half the peers and Y to the other half. Each honest node records whichever it saw first and prevotes it; prevotes split, the round fails to reach \u2154, and it times out to nil. Every node also runs ApplyBlock on BOTH blocks and relays both (2\u00d7 validation work network-wide). The proposer is never slashed. A validator with ~p of stake proposes ~p of rounds and can tax every such round this way \u2014 a sustained, unpunished liveness/CPU drain from a validator position. Safety holds (locking + quorum), so it is griefing, not a fork.",
+    "attacker": "one validator (the scheduled proposer for a round)",
+    "known_status": "new. Distinct from findings.md #2/#8 (unauthenticated proposals) and the RC-review 'duplicate proposal re-relayed unverified' (same-digest body swap): this is a DIFFERENT-digest equivocation by the AUTHENTIC proposer, which no code detects.",
+    "poc": "<scratch>/burn-rule/node/burnrule_poc_test.go \u2014 TestPoCProposalEquivocationUndetectedAndRelayed (FAIL: both distinct proposals accepted/relayed, 0 evidence produced).",
+    "fix": "Treat two validly-signed proposals for the same (height,round) with different digests as equivocation: record a proposal-evidence pair, carry it into a block, and slash it like vote equivocation. Also stop relaying a second distinct-digest proposal from the same proposer (relay only the first per (height,round,proposer)).",
+    "confidence": "high"
+   },
+   {
+    "id": "BAN-1",
+    "title": "The overdraw ban is escaped when the banned payer also receives a same-block credit \u2014 the payer keeps its full balance and name, contradicting the documented/pinned 'balance destroyed' invariant",
+    "severity": "low",
+    "category": "safety",
+    "locations": [
+     "ledger/ledger.go:167",
+     "ledger/ledger.go:193",
+     "ledger/ledger.go:197",
+     "ledger/ledger.go:198"
+    ],
+    "description": "ProcessPayments bans an overdrawing payer by skipping its outgoing (ledger.go:174) and excluding it from the pass-through loop (ledger.go:193). But the `affected` re-add loop (ledger.go:197-213) does NOT check `banned`: a banned payer that received ANY credit this block is in `affected`, so it is re-created from its ORIGINAL byKey balance plus the credit (its own debits were skipped), surviving with balance intact and its Name intact. findings.md's accepted design decision and TestOverdrawBanDestroysPayerBalance assert the account 'vanishes entirely'; that holds only when no same-block credit lands. Supply is still conserved (no mint), so this softens \u2014 not breaks \u2014 a safety property.",
+    "failure_scenario": "A holds 10, Name 'alice'. In one block A signs two 6-unit payments to B (12 > 10 \u2192 A banned) and C pays A 0.2. After ProcessPayments: A is re-added in the affected loop as 10 + 0.2 = 10.2 with Name 'alice' retained; B receives nothing; supply conserved. The documented harsh penalty (A destroyed) did not occur. This also means the hoarded-same-block-pair weaponization (findings.md second pass) can be dodged by any interleaving credit \u2014 benign direction, but it shows 'overdraw \u21d2 balance destroyed' is not a reliable invariant and the regression test only covers the no-credit case.",
+    "attacker": "no attacker (inconsistency / safety-by-accident); relevant to the hoarded-pair weaponization recorded in findings.md",
+    "known_status": "new angle on the accepted overdraw-ban design decision (findings.md). The decision and TestOverdrawBanDestroysPayerBalance assume the balance is always destroyed; the same-block-credit escape is not covered \u2014 reporting it as the brief's explicit (e) question, not to reverse the accepted decision.",
+    "poc": "<scratch>/burn-rule/ledger/burnrule_poc_test.go \u2014 TestPoCOverdrawBanEscapedByIncomingCredit (FAIL: banned payer A present with 10.10 and name retained).",
+    "fix": "If the ban must mean 'destroyed', skip banned payers in the affected re-add loop too: `for k := range affected { if banned[k] { continue } ... }`. Otherwise document that an incoming same-block credit preserves a banned payer and relax the test accordingly.",
+    "confidence": "high"
+   },
+   {
+    "id": "DOCS-1",
+    "title": "Docs claim slashing 'ejects the double-signer from the set' / 'zeroes it out' \u2014 the code removes an account, not the key's place in the validator set",
+    "severity": "low",
+    "category": "docs-drift",
+    "locations": [
+     "docs/managing-the-currency.md:40",
+     "docs/consensus.md:79",
+     "README.md:77"
+    ],
+    "description": "docs/managing-the-currency.md:40 says a double-signer 'is ejected from the set' (unconditional). docs/consensus.md:79 and README.md:77 say slashing 'removes the offender's account ... ejecting them from a dynamic set' and 'zeroes out the double-signer'. The code only deletes the account: in static mode the key stays in Config.Validators with full power (SLASH-1), and in dynamic mode delegated stake keeps it in the derived set (SLASH-2). So 'ejected from the set' is false in static mode and false in dynamic mode whenever others delegate to the offender. The design slogan 'two different signings means the key is burned' is likewise overstated: the account's balance is burned, the key is not.",
+    "failure_scenario": "An operator reads managing-the-currency.md and believes a caught double-signer is automatically removed from consensus, so no manual action is needed. In a static network (the documented default) the compromised validator keeps voting and, if \u22651/3, stalls the chain with no in-protocol recovery (SLASH-1). The operator has no doc warning that slashing is cosmetic for the consensus set in static mode, or that delegated stake defeats it in dynamic mode.",
+    "attacker": "no attacker (documentation)",
+    "known_status": "new. The brief requires flagging doc/README claims the code contradicts in this area.",
+    "poc": "none (documentation finding); the contradicted behavior is proven by SLASH-1 and SLASH-2 PoCs in <scratch>/burn-rule/node/burnrule_poc_test.go.",
+    "fix": "Either fix the code (SLASH-1/SLASH-2: a committed slashed-set removed from the effective validator set) and keep the docs, or correct the docs to state that slashing confiscates the account/stake but does NOT remove the key from a static Config.Validators set and is defeated by delegated stake in dynamic mode, with the manual re-genesis recovery step spelled out.",
+    "confidence": "high"
+   },
+   {
+    "id": "PAY-1",
+    "title": "Payments have no conflict/burn slot \u2014 the burn rule never fires against a leaked payment key (the owner's eMudhra hypothesis does not hold in this code)",
+    "severity": "info",
+    "category": "key-management",
+    "locations": [
+     "ledger/ledger.go:160",
+     "ledger/ledger.go:181",
+     "node/node.go:432",
+     "signing/domain.go:11"
+    ],
+    "description": "There is no equivocation concept for payments. Two different payments from one payer for the same BlockID are not flagged: either both apply (if the balance covers them) or the payer is overdraw-banned (ledger.go:160-181) \u2014 never recorded as a double-sign, never yielding durable evidence, never burning the key. admitPayment (node.go:432) refuses a second same-block payment only when it would overdraw; it is a refusal, not a burn. So the 'two different signings means the key is burned' principle simply does not cover the statement that moves money. A leaked/cracked key (the eMudhra scenario the owner cites) drains an account with ONE signing \u2014 there is no second conflicting signing for the rule to catch.",
+    "failure_scenario": "A thief obtains a user's key (leaked, or cracked from a low-entropy key as in eMudhra). The thief signs one payment draining the account for a near-future block the owner is not using. Honest intake accepts it (valid signature, funds present) and it commits. No 'two different signings' condition ever arises; the owner may never even produce a competing signature. The rule the owner expected to 'stop the issue immediately' is vote-only and does nothing here. Combined with NAME-1, the same leaked key also captures the victim's name. The rule protects consensus votes, not funds.",
+    "attacker": "holder of one stolen or cracked key",
+    "known_status": "new framing \u2014 directly answers the owner's stated hypothesis. The architecture is intentional (payments are authorised by one signature); the point is that the burn principle's scope excludes payments, so it provides no leaked-key protection.",
+    "poc": "none (architectural scope observation); the concrete end-state harm of a leaked key is demonstrated by NAME-1's PoCs (drain-to-zero + same-block name capture) in <scratch>/burn-rule/ledger/burnrule_poc_test.go.",
+    "fix": "Set expectations: the 'two signings = burn' rule is consensus-vote-only and cannot catch a single-signing drain. If leaked-key resilience for funds is wanted, add out-of-band mechanisms \u2014 key rotation/revocation, social recovery, or a hold/challenge window on large or name-changing transfers \u2014 rather than relying on equivocation detection.",
+    "confidence": "high"
+   },
+   {
+    "id": "GOV-1",
+    "title": "Account-update and governance-vote equivocation are undetected (two conflicting signings, no burn) \u2014 benign today, but the principle is absent",
+    "severity": "info",
+    "category": "governance",
+    "locations": [
+     "ledger/account_update.go:83",
+     "ledger/governance.go:78",
+     "ledger/reassignment.go:185",
+     "signing/domain.go:14"
+    ],
+    "description": "Two conflicting AccountUpdates from one key for the same block both apply in order (account_update.go:83-114, last-wins, deterministic) \u2014 no conflict detected. A validator may sign parameter-vote (governance.go) and reassignment-vote (reassignment.go) approvals for multiple competing proposals at the same governance sequence; none is flagged as equivocation. These are benign: account-update last-wins is deterministic and same-key-only, and quorum intersection plus the single-use GovernanceSequence prevent two conflicting governance actions from both ratifying. But the burn principle is not applied here either. Separately, the declared domains validator-message (DomainValidatorMsg) and server-auth (DomainServerAuth) are UNUSED in the codebase (no Sign/Verify caller) \u2014 reserved slots, so no statement of those types exists to conflict.",
+    "failure_scenario": "No concrete harm. A validator double-votes YES on two contradictory reassignments at sequence N (e.g. grant Alice 1000 and grant Bob 1000); only one can enact because applying it bumps the sequence and the other becomes stale \u2014 no double-mint. A key signing two conflicting account-updates only changes its own attributes twice (last wins). Recorded for completeness of the matrix and because any future weakening of the quorum/sequence/determinism guards would turn these undetected equivocations into live risks.",
+    "attacker": "one validator (benign under current guards)",
+    "known_status": "new (matrix completeness). No prior finding covers non-vote equivocation detection; the dead domains are not noted in findings.md.",
+    "poc": "<scratch>/burn-rule/ledger/burnrule_poc_test.go \u2014 TestPoCConflictingAccountUpdatesBothApply (FAIL: both conflicting same-key updates applied, last wins, no detection).",
+    "fix": "Optional accountability only: detect and record conflicting same-key governance/account-update signings for the same slot if a social-punishment trail is wanted. Remove or document the unused validator-message/server-auth domains so they are not assumed to be protected statement types.",
+    "confidence": "high"
+   }
+  ],
+  "checked_ok": [
+   "Vote (prevote/precommit) equivocation IS detected in-round and acted on: VoteSet.Add un-counts the second conflicting vote and records Evidence (consensus/voteset.go:160-169) \u2014 the one working link of the burn chain.",
+   "Equivocation evidence is unforgeable and cannot frame an honest key: Evidence.Valid requires both votes signed by the offender (consensus/evidence.go:11-22) and ApplyBlock rejects a block whose evidence does not verify (ledger/block.go:205-209); TestSlashRemovesEquivocator's framing case still passes.",
+   "Evidence is age-windowed (evidenceInWindow, maxEvidenceAge=1000, ledger/block.go:59-65) so stale evidence cannot be replayed against a recreated account \u2014 verified not regressed.",
+   "Quorum intersection (>\u2154, consensus/validator.go:63) still prevents two conflicting block commits and two conflicting governance ratifications even if a validator double-votes across competing proposals.",
+   "Governance single-use via GovernanceSequence (ledger/parameters.go:319-323, bumped in ApplyBlock) prevents value-cycle replay of parameter/reassignment certificates \u2014 confirmed against TestChaosGovernanceCycleReplayStaysInert and reassignment_test.go.",
+   "Commit is round-scoped: Commit.Verify requires every precommit to share c.Round (consensus/commit.go:260), closing the mixed-round forge that would let a bad checkpoint verify.",
+   "Payment identity is content-based (PaymentID, ledger/payment.go:244), so a malleated signature cannot double-count a payment at mempool/gossip/ledger.",
+   "Gossip payment intake verifies the payer signature before admitting (node/httptransport.go:213), so the mempool cannot be filled with unsigned junk."
+  ],
+  "notes": "Burn-rule coverage matrix (signing/domain.go domains). 'Really burns the key?' = does a second conflicting signing permanently exclude the KEY?\n\n| statement type (domain) | conflict slot | detected? | durable evidence? | penalty | really burns the key? |\n|---|---|---|---|---|---|\n| payment (DomainPayment) | same payer + same BlockID, different content | NO \u2014 not treated as equivocation | NO | either both apply, or overdraw-ban destroys the PAYER's balance (escapable, BAN-1) | NO \u2014 one signing drains; name hijackable (NAME-1); key recreatable, no tombstone |\n| validator-message (DomainValidatorMsg) | none \u2014 domain DECLARED but UNUSED in code | n/a | n/a | none | n/a |\n| account-update (DomainAccountUpdate) | same From + same BlockID, different content | NO | NO | none \u2014 both apply in order, last-wins (deterministic) | NO (benign, GOV-1) |\n| server-auth (DomainServerAuth) | none \u2014 domain DECLARED but UNUSED in code | n/a | n/a | none | n/a |\n| block-revision prevote/precommit (DomainBlockRevision) | same (height,round,type), different digest | YES \u2014 VoteSet.Add | YES \u2014 Evidence in Block.Evidence, age-windowed | applySlashes deletes offender's ACCOUNT | PARTIAL \u2014 account only; key stays in set (static: SLASH-1; dynamic via delegation: SLASH-2); account/name recreatable (NAME-1) |\n| receipt (DomainReceipt) | none \u2014 a node may ack many payments; no exclusivity | NO | NO | none (a self-signed bogus receipt is evidence against the node, but no automated burn) | n/a |\n| parameter-vote (DomainParameterVote) | validator signs two different changes at same sequence | NO | NO | none \u2014 quorum + single-use sequence prevent conflicting ratification | NO (benign, GOV-1) |\n| reassignment-vote (DomainReassignmentVote) | validator signs two different reassignments at same sequence | NO | NO | none \u2014 as above | NO (benign, GOV-1) |\n| proposal (DomainProposal) | proposer signs two proposals for same (height,round), different digest | NO \u2014 first-wins; Driver.Evidence scans only vote sets | NO | none; the second is even relayed + re-ApplyBlock'd network-wide (PROP-1) | NO |\n\nBottom line for the owner: the rule is live for exactly one row (block-revision votes), and even there it burns an account, not the key. It does not cover payments, so a leaked/cracked key is not burned by any 'two signings' rule \u2014 it is simply used to steal (PAY-1), and on the same block to seize the victim's name (NAME-1). The vindication the owner hoped for is not in the code as written."
+ },
+ {
+  "area": "consensus-core",
+  "summary": "The consensus safety core is faithful Tendermint and held up under focused probing: quorum = floor(2\u00b7total/3)+1 with correct intersection, round-scoped Commit.Verify (distinct validators, tampered/mixed-round/below-quorum all rejected), a decision rule that fires only on a locally-held, ApplyBlock-validated, non-nil proposal plus a same-round precommit quorum (so a node cannot decide a value it never received or validated), POL verified against locally-received prevotes, the step\u2265prevote one-shot guard, the per-height validator set frozen at startHeight (so honest nodes agree), maxRoundLookahead bounding per-round allocation, and the checkpoint skipping-trust rule all check out \u2014 I found no fork/mint/fund-loss path under \u22641/3 Byzantine. The weaknesses are at the edges and mostly around the owner's own \"two different signings = burned key\" principle. (1) The vote intake is the one gossip path with no ingress verification, and the post-review vote-re-gossip machinery (an unbounded heightVotes map re-broadcast wholesale every tick) turns that into an amplifying, unbounded-memory DoS any port-reacher can trigger \u2014 a materially worse, newer surface than deferred #10. (2) Equivocation evidence is harvested only on the local-decide path, so a node that advances by catch-up silently drops it. (3) Proposal equivocation is entirely outside slashing. (4) Power saturation can invert the stake\u2194power premise at (assumed-away) >2^40 stakes.",
+  "findings": [
+   {
+    "id": "DOS-1",
+    "title": "Unauthenticated vote intake + unbounded heightVotes + wholesale re-gossip = amplifying DoS",
+    "severity": "medium",
+    "category": "dos",
+    "locations": [
+     "node/httptransport.go:139-146",
+     "node/node.go:268-273",
+     "node/node.go:548-553",
+     "node/node.go:562-570",
+     "node/node.go:108"
+    ],
+    "description": "handleVote decodes a Vote and calls SubmitVote with NO verification \u2014 unlike handlePay/handleGossipPayment/handleAccountUpdate, which VerifyPayment/VerifyAccountUpdate at ingress. In evVote the driver's ReceiveVote result is discarded, then rememberVote stores the vote keyed by validator+signature if v.Height==n.height (the ONLY thing checked \u2014 no signature, no validator-set membership, no round bound), and relay() re-broadcasts it. heightVotes has no cap (contrast mempool.maxSize). reGossipVotes then re-broadcasts the ENTIRE map to every peer each tick. So a non-validator who can POST /hdls/vote grows a node's memory without bound and makes every node flood the network with arbitrary junk every tick.",
+    "failure_scenario": "Attacker POSTs N distinct junk Vote JSONs (Height=current, junk Validator/Signature, absurd Round) to /hdls/vote. Each is stored in heightVotes (no cap) and relayed. Every reGossipVotes tick re-broadcasts all N to every peer, which store+relay+re-gossip them too \u2014 N\u00d7peers broadcasts network-wide per tick, unbounded N. PoC stored 5000 junk votes and re-broadcast all 5000 in one tick.",
+    "attacker": "anyone reaching the port (non-validator); worse with a stolen validator key, which also forces per-vote signature verification on every node each tick",
+    "known_status": "New angle on deferred #10 (unauthenticated write API / DoS). Materially worse: heightVotes is unbounded (no mempool-style cap) and the vote-re-gossip loop (a post-review liveness fix) amplifies one poster into a whole-network flood; the vote path is also the only gossip intake still lacking the ingress verification the gossip-payment fix added.",
+    "poc": "<scratch>/consensus-core/node/poc_consensus_core_test.go :: TestPoCUnverifiedVotesStoredUnboundedAndReGossiped (PASS \u2014 confirms 5000 unverified votes stored, 5000 re-broadcast in one tick)",
+    "fix": "Verify at vote ingress exactly like payments: check signature, validator-set membership, height, and round\u2264current+maxRoundLookahead BEFORE rememberVote/relay; store/re-gossip only accepted votes; cap heightVotes.",
+    "confidence": "high"
+   },
+   {
+    "id": "SLASH-1",
+    "title": "Equivocation evidence is dropped when a node advances a height by catch-up instead of deciding locally",
+    "severity": "low",
+    "category": "governance",
+    "locations": [
+     "node/node.go:644-648",
+     "node/node.go:357-369",
+     "node/node.go:341-352",
+     "consensus/evidence.go:26"
+    ],
+    "description": "A driver records equivocation (two conflicting votes for one height/round/type) as transferable Evidence. But the node harvests driver.Evidence() into pendingSlashes ONLY inside commit() (the local-decide path, node.go:644). A node that instead advances the height via catchUp() \u2014 verifyCheckpoint\u2192fastForward\u2192startHeight, the normal recovery when it fell behind \u2014 replaces the driver without harvesting, and fastForward does not touch pendingSlashes. So a double-signer the node witnessed during that height is never queued for slashing on that node. Also, late conflicting votes that arrive after commit() ran (same height, before the next startHeight) are added to the old driver but likewise never re-harvested. This weakens the owner's stated 'two different signings = burned key' guarantee.",
+    "failure_scenario": "Node is slightly behind. During height H it receives validator B's two conflicting prevotes (equivocation is detectable in its driver). Before it decides H locally, a peer's verified height-H checkpoint arrives; the node catches up to H+1. B's evidence, held only in the discarded H-driver, is never added to pendingSlashes \u2014 this node will never carry the slash. If every node that DID decide H locally also missed one of B's votes (loss/partition), B escapes the burn network-wide despite double-signing.",
+    "attacker": "one validator (the equivocator); exploited against nodes that resolve the height by catch-up",
+    "known_status": "New. The findings.md evidence items (#5 replay, maxEvidenceAge) concern re-including/aging evidence, not the harvest-skip on the catch-up path; this is a distinct lifetime gap. Safety (no fork) is unaffected \u2014 this is an accountability/deterrence gap.",
+    "poc": "<scratch>/consensus-core/node/poc_consensus_core_test.go :: TestPoCEquivocationEvidenceLostOnCatchUp (PASS \u2014 driver holds the evidence, pendingSlashes empty after catchUp to H+1)",
+    "fix": "Harvest driver.Evidence() into pendingSlashes in fastForward/catchUp as well as commit (evidence survives a height change regardless of how the height was resolved); consider retaining cross-height evidence for a bounded window.",
+    "confidence": "medium"
+   },
+   {
+    "id": "SLASH-2",
+    "title": "Proposal equivocation is unslashable and both conflicting proposals are relayed",
+    "severity": "low",
+    "category": "liveness",
+    "locations": [
+     "node/node.go:494-517",
+     "node/node.go:498-506",
+     "consensus/evidence.go:13-16"
+    ],
+    "description": "The owner's 'two signings = burned key' principle is enforced for VOTES (prevote/precommit \u2192 Evidence \u2192 slash) but not for PROPOSALS. The round's scheduled proposer can sign two different, validly-signed proposals for the same (height,round) \u2014 two signatures over conflicting statements by one key \u2014 and there is no evidence type or slash for it. Worse, onProposal relays BOTH: the held-proposal fast path (node.go:498) only dedups an IDENTICAL StateDigest, so a second, different-digest proposal from the same proposer passes the proposer+signature checks and returns true (relayed), flooding a second full block and splitting that round's prevote.",
+    "failure_scenario": "Byzantine proposer for (H, r) sends block A to half the nodes and block B to the other half, both validly signed. Each node relays whichever it sees first AND relays the other on arrival (fast path misses, different digest). The round's prevote splits; the round times out to nil. The proposer is never recorded as a double-signer. Over a height it can do this on every round it is selected for (~its stake fraction), a liveness tax plus doubled proposal bandwidth, at zero cost to its key.",
+    "attacker": "one validator (whichever is the round's scheduled proposer)",
+    "known_status": "New. Cannot fork (safety unaffected) and cannot stall permanently (honest-proposer rounds still commit); it is a bounded liveness/bandwidth tax plus a hole in the burned-key principle the owner cares about.",
+    "poc": "<scratch>/consensus-core/node/poc_consensus_core_test.go :: TestPoCProposerEquivocationUnslashedAndBothRelayed (PASS \u2014 both conflicting proposals accepted/relayed, no pendingSlashes entry)",
+    "fix": "Treat two differently-signed proposals for one (height,round) by the scheduled proposer as slashable proposal-equivocation evidence (a new Evidence variant over the proposal preimage); and never relay a second proposal for a round already held.",
+    "confidence": "high"
+   },
+   {
+    "id": "SAT-1",
+    "title": "Power saturation equalizes all above-cap validators, inverting the '<1/3 of stake' premise",
+    "severity": "info",
+    "category": "safety",
+    "locations": [
+     "consensus/validator.go:24",
+     "consensus/validator.go:40-41",
+     "docs/security.md"
+    ],
+    "description": "NewValidatorSet saturates any power >2^40 to exactly 2^40. The C2 decision framed this as keeping a whale's 'largest possible voice', but it also discards the true-stake ordering AMONG above-cap validators: a validator with true stake ~2^63 and one with true stake 2^40+1 end up with identical power. A by-count majority of above-cap validators then meets quorum regardless of how small their true-stake share is relative to a larger whale \u2014 breaking the stake==power premise behind docs/security.md's 'BFT up to <1/3 of stake'.",
+    "failure_scenario": "Set = {whale: true 2^63, byz1/byz2/byz3: true 2^40+1 each}. All four cap to 2^40. The three 'byz' (a vanishing fraction of the whale's true stake, i.e. far below 1/3 of true stake) hold 3\u00b72^40 of capped power vs quorum \u22482.67\u00b72^40 \u2014 they alone form a quorum and control finality. Governance/proposer views also show them as equals, masking the true disparity.",
+    "attacker": "<1/3 of true stake, but only reachable when multiple validators exceed 2^40 whole units \u2014 assumed away by the design, so no live break",
+    "known_status": "New angle on accepted C2 (truncation\u2192saturation). C2 reasoned about the whale's own power not overflowing; it did not note that saturation equalizes multiple above-cap validators and can invert the BFT stake threshold. Also a docs-drift: security.md's '<1/3 of stake' claim does not hold once >1 validator exceeds the cap.",
+    "poc": "<scratch>/consensus-core/node/poc_consensus_core_test.go :: TestPoCSaturationEqualizesAboveCapValidators (PASS)",
+    "fix": "If saturation can ever trigger in a deployment, scale all powers down by a common factor to preserve ratios instead of clamping independently; otherwise document that the <1/3-of-stake guarantee assumes no validator exceeds 2^40 whole units.",
+    "confidence": "medium"
+   }
+  ],
+  "checked_ok": [
+   "Commit.Verify is round-scoped and rejects mixed-round, wrong-Round, duplicate-voter, tampered, and below-quorum certificates (consensus/commit.go:155-172; consensus_test TestCommitRejectsMixedRounds et al.) \u2014 the forged-certificate-on-onboarding HIGH stays fixed.",
+   "Decision rule (driver.go:303-312) fires only on a locally-held proposal that is p.Valid (ApplyBlock-validated by the caller), non-nil, with a same-round precommit quorum \u2014 a node cannot decide a value it never received or never validated, and never decides nil.",
+   "Proof-of-lock is verified against the node's OWN prevote set (driver.go:337-340 checks d.prevotes[vr].HasQuorumFor), not trusted from the proposal; the unlock/lock rules (prevoteFor, driver.go:385-398) match Tendermint and the POL-release and conflicting-prevote tests pass.",
+   "The step>=StepPrevote guard on the 2/3-prevote one-shot (driver.go:349) is present, preventing the propose-step consumption stall.",
+   "maxRoundLookahead (256) bounds per-round VoteSet allocation; negative and far-future rounds are rejected before ensureRound (driver.go:216-218); future-HEIGHT votes are dropped by the driver (not buffered).",
+   "Per-height validator set is frozen once at startHeight (node.go:472) and reused by driver, onProposal, and commit \u2014 in dynamic mode all honest nodes derive the same set from identical committed state, so they cannot disagree on who verifies votes for height H.",
+   "Checkpoint skipping-trust rule is sound: Commit.Verify against the carried signing set + digest-binding to the supplied accounts + >1/3 anchor-power overlap (node.go:388-401); a fabricated all-stranger set has no anchor overlap and a nil-digest commit cannot bind a real SHA-256 state digest.",
+   "Proposer selection (validator.go ProposerAt) is a deterministic pure function of (height,round,set) via FNV, returns '' for an empty/zero-power set, and is stake-weighted without a usable single-key grind (seed is fixed by height/round).",
+   "Equivocation Evidence.Valid is unforgeable (both votes must carry the offender's own signatures), so an honest validator cannot be framed; in-round un-counting of equivocators is correct.",
+   "onProposal authenticates proposals against driver.Proposer(round) and VerifyProposal before use, and does not relay an identical-digest duplicate \u2014 the unauthenticated-front-run HIGH stays fixed (the residual is the different-digest relay in SLASH-2)."
+  ],
+  "notes": "On the owner's \"two different signings = burned key\" principle: it is correctly and robustly enforced for the safety-critical case \u2014 a validator that signs two conflicting PREVOTES or PRECOMMITS for the same (height,round) is caught as unforgeable Evidence, un-counted in-round, and slashed out of state, and this cannot fork the chain. The gaps this review surfaced are at the principle's edges, not its core: (a) evidence is harvested only on the local-decide path, so a node that advances by catch-up drops it (SLASH-1); and (b) a double-signed PROPOSAL (also two signings over conflicting statements by one key) is entirely outside the evidence/slash machinery (SLASH-2). Neither breaks no-fork safety, but both mean a key that \"signs two different things\" is not always burned, contrary to the stated design intent \u2014 worth closing if that principle is to be relied on after a key-compromise event."
+ },
+ {
+  "area": "ledger-transition (ledger/*.go state transition: ProcessPayments, ProposeBlock/ApplyBlock, digest, account updates, payments, parameters/topology as they feed the digest)",
+  "summary": "The arithmetic and conservation core is sound for well-formed input, and propose/apply symmetry holds for accepted blocks: both paths run the same payments \u2192 updates \u2192 slashes \u2192 reassignment pipeline under the pre-block parameters, and ApplyBlock rejects wherever ProposeBlock filters. The digest covers every Account field, every parameter and the governance sequence. The governance-sequence replay fixes hold. The weak points are at the boundaries. (1) Nothing bounds a block, so fee-free updates can make every proposal undeliverable and halt the chain (PoC). (2) Amounts are decoded and size-checked too late: exponent-form big.Rat fields cost about 1.5 MB each at decode, and balances can grow without bound past the per-message cap. (3) Identity is a string, not a key, and a name is tied to the balance lifecycle: base64 aliases, and names released at zero balance and claimable in the same block. (4) Relative to the owner's 'two different signings means the key is burned' principle, a slash removes only the offender's own account. Delegated stake keeps the key in the dynamic set, the static set is untouched, and nothing tombstones the key. The overdraw ban, meanwhile, fires on a single over-balance payment, which the documented wallet closure does not cover. Each finding is backed by a failing PoC in the scratch copy except TOPO-1 (low confidence, script-only evidence).",
+  "findings": [
+   {
+    "id": "BLOCK-SIZE-1",
+    "title": "No per-block size bound: fee-free updates push every proposal past peers' 1 MiB decode limit and halt the chain",
+    "severity": "high",
+    "category": "liveness",
+    "locations": [
+     "ledger/block.go:105-127",
+     "ledger/block.go:180-204",
+     "ledger/account_update.go:112-160",
+     "node/node.go:283-288",
+     "node/updatepool.go:130-141",
+     "node/node.go:466-486",
+     "node/httptransport.go:302-314"
+    ],
+    "description": "MaxMessageBytes bounds each message, but nothing bounds a block. ProposeBlock carries every valid payment and update naming the height, and ApplyBlock accepts any number of them. Every receiver, though, decodes a proposal under a 1 MiB body limit. Account updates carry no fee, and the update pool admits any BlockID. So pooled content for one height can push every honest proposer's candidate (built once per height from the whole gossiped pools) past 1 MiB. Peers fail to decode it and prevote nil. The next proposer's candidate fails the same way, and nothing evicts the content, because pools are pruned only on commit.",
+    "failure_scenario": "PoC on a 4-validator HTTP network: one account holding 1 unit signs 600 distinct updates, each 2000 bytes or less (within the default cap), all naming height 3, and they are gossiped to all nodes. Heights 1-2 commit. The candidate for height 3 serializes to 1,159,040 bytes, and the chain stays at height 3 for 100 s with all validators up (heights=[3 3 3 3]). A control run with 400 updates (772,841 bytes) commits in 1.2 s. Below-cost payments (FEE-1) are a second fee-free way to fill a block.",
+    "attacker": "any account holder (no fee; a 1-unit balance suffices)",
+    "known_status": "new. The findings.md third pass added a per-message bound only; there is no per-block bound. Distinct from deferred #10 (request flooding).",
+    "poc": "<scratch>/ledger-transition/node/poc_oversize_block_test.go: TestPoCOversizeBlockStallsHeight FAILs (stalled at height 3); control TestPoCOversizeBlockControlUnderLimit PASSes. Run with GOLEDGER_CHAOS_SLACK=4.",
+    "fix": "Add a governed per-block byte budget (well under the transport limit) plus a count cap. ProposeBlock fills deterministically up to it, and ApplyBlock rejects blocks over it. Charge a fee for account updates or cap them per account per block. Refuse BlockIDs beyond height+window at intake, and drop pooled content for a height after N failed rounds.",
+    "confidence": "high"
+   },
+   {
+    "id": "RAT-DECODE-1",
+    "title": "Exponent-form big.Rat amounts: an 11-byte JSON field costs ~1.5 MB of heap and seconds of CPU before any size check",
+    "severity": "high",
+    "category": "dos",
+    "locations": [
+     "ledger/ledger.go:37",
+     "ledger/payment.go:43-47",
+     "ledger/payment.go:75-80",
+     "ledger/block.go:17-23",
+     "ledger/block.go:180-198",
+     "node/httptransport.go:129-136",
+     "node/httptransport.go:150-164",
+     "node/httptransport.go:220-240",
+     "node/httptransport.go:302-314",
+     "node/node.go:432-440",
+     "node/sync.go:108-119"
+    ],
+    "description": "Rat.SetString, which JSON decoding uses for every ledger amount, accepts exponent notation, e.g. \"1p9999999\" (2^9999999, 11 bytes). Decoding allocates the full number. The size cap is measured only by re-serializing (WithinMessageBound \u2192 json.Marshal \u2192 decimal conversion), and VerifyPayment/PaymentID RatString the amount first. So the cost is paid before any bound rejects the message:\n- at JSON decode on every endpoint (proposals are decoded before proposer authentication, and decode() does not require a JSON Content-Type);\n- on handler goroutines (signature check);\n- on the single event loop (admitPayment).\nThe same applies to account amounts in a peer-served checkpoint (no body limit at all) and to governance Rats.",
+    "failure_scenario": "Measured: decoding 40 fields of {\"Amount\":\"1p9999999\"} (921 bytes) adds 59 MB of live heap, 1529 KB per field. A 1 MiB body holds about 45k such fields, roughly 66 GB extrapolated (not run on the shared machine). Any POST to /hdls/proposal, /hdls/pay or /hdls/payment is decoded this way before authentication. A validly signed payment carrying that amount costs 1.42 s in VerifyPayment and 1.55 s in WithinMessageBound per submission before it is refused.",
+    "attacker": "anyone reaching the port",
+    "known_status": "Related to deferred #10 (unauthenticated API / rate limiting). New angle: a single small request amplifies 10^4-10^5x in memory and CPU, which per-client rate limiting does not bound.",
+    "poc": "<scratch>/ledger-transition/ledger/poc_rat_decode_amplification_test.go: TestPoCRatDecodeAmplification FAILs (1529 KB of heap per 22-byte field; VerifyPayment 1.42 s, WithinMessageBound 1.55 s).",
+    "fix": "Give amounts a custom JSON type that accepts only plain \"a/b\" or decimal strings with a digit cap and no exponent, before allocating. Add a cheap Num().BitLen()+Denom().BitLen() precheck in WithinMessageBound and before any RatString (VerifyPayment, PaymentID, intake). Bound the checkpoint response body, and require Content-Type: application/json.",
+    "confidence": "high"
+   },
+   {
+    "id": "SLASH-1",
+    "title": "A slash does not burn the key: delegated stake keeps the equivocator in the dynamic set, the static set is untouched, and there is no tombstone",
+    "severity": "high",
+    "category": "key-management",
+    "locations": [
+     "ledger/block.go:72-89",
+     "node/validators.go:31-42",
+     "node/node.go:403-418",
+     "node/node.go:642-655",
+     "README.md:76-77",
+     "docs/consensus.md:76-81",
+     "docs/managing-the-currency.md:39-41"
+    ],
+    "description": "applySlashes removes only the account whose PublicKey is the offender's. In this DPoS design most of a validator's power is delegated, i.e. comes from accounts whose ValidatorNode points at it. Those accounts are untouched, and deriveValidators keeps summing them, so the equivocator stays a validator with nearly unchanged power. In static mode the slash never affects the configured set. Nothing records the key as burned, so it can be re-funded or re-delegated and keeps voting, proposing and signing governance votes. The node re-carries the evidence every block until the 1000-block window closes, because the offender is still 'a validator'. README, consensus.md and managing-the-currency.md all claim the slash ejects the offender from the set.",
+    "failure_scenario": "PoC: dynamic threshold 100; validator V owns 10, and two delegators delegate 400 each to V. A block with valid equivocation evidence against V applies and V's own account is removed. deriveValidators still reports V as a validator with power 800 (it was 810). A leaked validator key that is caught double-signing therefore keeps its voting power.",
+    "attacker": "one validator (an equivocating or leaked validator key)",
+    "known_status": "new. The findings.md MEDIUM (evidence replay against recreated accounts) was fixed with an age window; nothing addresses delegated stake or exclusion of the key. Contradicts the owner's burned-key principle and the README/docs claims (docs-drift).",
+    "poc": "<scratch>/ledger-transition/node/poc_slash_delegation_test.go: TestPoCSlashDoesNotEjectDelegatedValidator FAILs (power 810 \u2192 800, still a validator).",
+    "fix": "Add a committed BurnedKeys set to LedgerState, bound into the digest; valid evidence adds the key. deriveValidators and the node's static set exclude burned keys regardless of delegations, and votes, proposals and governance votes from burned keys are refused. Optionally reset delegations that point at a burned key back to their owners.",
+    "confidence": "high"
+   },
+   {
+    "id": "NAME-1",
+    "title": "Zero-balance deletion releases a registered name; another account can claim it in the same block and receive pay-by-name payments",
+    "severity": "high",
+    "category": "naming",
+    "locations": [
+     "ledger/ledger.go:191-214",
+     "ledger/ledger.go:164-169",
+     "ledger/block.go:72-89",
+     "ledger/block.go:151-153",
+     "ledger/block.go:230-232",
+     "ledger/account_update.go:118-146",
+     "ui/USER_MANUAL.md:36-42",
+     "ui/USER_MANUAL.md:86-90"
+    ],
+    "description": "An account whose balance reaches zero is deleted, and its Name goes with it, with no owner-signed release. applyAccountUpdates runs after payments, against the post-payment accounts, so a fee-free update from any other account naming that block claims the freed name in the same block. Pay-by-name payments resolve at apply time. Payments already signed by name for later blocks, and all future ones, therefore credit the new holder. The user manual's migration advice ('create a fresh wallet there and pay yourself to it') empties the old account, and bans and slashes release names the same way. No doc says that emptying an account gives up its name.",
+    "failure_scenario": "PoC: Alice ('alice', balance 10) moves 10 to her new wallet in block 5, and the same block carries another account's update claiming 'alice'. Bob's payment of 20 to 'alice', signed earlier for block 6, credits the claimant (1 \u2192 20.90). The claimant keeps the name (first-come), so later payers typing 'alice' also pay it.",
+    "attacker": "any account holder (fee-free update), once the name holder's balance reaches zero or it is banned or slashed",
+    "known_status": "new. The findings.md third pass moved name resolution on-chain; the release-on-zero lifecycle is not discussed anywhere.",
+    "poc": "<scratch>/ledger-transition/ledger/poc_name_release_test.go: TestPoCZeroBalanceReleasesNameToAnotherKey FAILs (the claimant owns 'alice' and is credited with Bob's payment).",
+    "fix": "Decouple identity from balance. Keep accounts that hold a Name, delegation or Address at zero balance, or tombstone a released name for a governed grace period. Release a name only through an owner-signed update. Warn in the wallet and manual.",
+    "confidence": "high"
+   },
+   {
+    "id": "OVERDRAW-1",
+    "title": "Overdraw ban fires on a single over-balance payment; the wallet signs any amount, so the documented same-block closure does not protect honest payers",
+    "severity": "high",
+    "category": "economic",
+    "locations": [
+     "ledger/ledger.go:157-169",
+     "ledger/block.go:176-241",
+     "ui/wallet.go:198-238",
+     "ui/wallet.go:29-36",
+     "ui/wallet.go:168-191",
+     "node/node.go:451-454",
+     "findings.md:265",
+     "findings.md:275-282",
+     "docs/security.md:74-81",
+     "ui/USER_MANUAL.md:107-109"
+    ],
+    "description": "The ban (an accepted design) destroys the payer's whole balance whenever its outgoing in a block exceeds its balance. One payment is enough, as is a later-block payment that exceeds what an earlier one left. The second-pass closure assumes the trigger needs two same-block payments, and stops only that case. The wallet has no local balance check: it signs whatever amount is typed and posts it, and only then gets the node's 409. Honest proposers never include such a payment, but a block that does is fully valid. Docs-drift: the manual says a refused payment means 'nothing is debited', and security.md says an honest user cannot trip the ban.",
+    "failure_scenario": "PoC: a payer holds 10 and signs one payment of 100. A block carrying it at its BlockID applies, and the payer's account (10) is destroyed. In practice: a typo of 100 instead of 10 is refused with 409 by the reference node, which now holds the signature. If that validator is the proposer at the payment's BlockID and includes it, the payer's whole balance is destroyed. The wallet derives the BlockID from the height that same node reports.",
+    "attacker": "one validator acting as the payer's reference node (proposer at the payment's BlockID)",
+    "known_status": "Relates to the accepted overdraw-ban DESIGN DECISION and its second-pass wallet closure. New angle: the closure is incomplete, because a single payment with no same-block pair triggers the ban. security.md, USER_MANUAL.md and the wallet.go comment overstate the protection.",
+    "poc": "<scratch>/ledger-transition/ledger/poc_overdraw_semantics_test.go: TestPoCOverdrawBanSemantics FAILs (case 1: a block with one over-balance payment applies and the payer is destroyed).",
+    "fix": "Ledger: drop a lone over-balance payment without destroying the balance, and reserve the ban for provable double-spends (two or more distinct same-block payments, each individually within the balance). Wallet: track balance minus pending locally and refuse to sign more. Correct the docs.",
+    "confidence": "medium"
+   },
+   {
+    "id": "FEE-1",
+    "title": "Below-cost payments are admitted, receipted and carried by honest nodes with no fee; other zero-fee no-ops still pass ApplyBlock",
+    "severity": "medium",
+    "category": "economic",
+    "locations": [
+     "node/node.go:432-461",
+     "ledger/block.go:105-120",
+     "ledger/block.go:180-204",
+     "ledger/ledger.go:132-155",
+     "node/mempool.go:27-41",
+     "node/mempool.go:96-106"
+    ],
+    "description": "ProcessPayments silently drops payments that are below the cost, come from a non-existent payer, or duplicate another payment's content: no debit, no fee. The release-candidate fix kept only unresolvable-recipient payments out of blocks. Honest intake rejects only non-positive amounts, so a below-cost payment gets a receipt, is gossiped, and is carried by honest proposers for free. Intake has no upper bound on BlockID, and the overdraw guard just sums amounts. So tiny payments naming a far-future block can sit in the bounded mempool indefinitely and get honest payments refused. Proposers can also pad blocks with phantom-payer or duplicate payments and with no-op updates.",
+    "failure_scenario": "PoCs:\n- 50 of 50 payments of 0.001 (fee 0.1) are admitted, all 50 are carried in the honest proposal, the block applies, and the payer is charged nothing.\n- With a 50-slot pool, 50 such payments naming block 2^40 survive dropBelow while locking 5e-8 units, and an honest 5-unit payment is refused ('mempool full').\n- A block carrying a ghost-payer payment, a below-cost payment and a ghost update applies with no state change.",
+    "attacker": "any account holder (tiny balance)",
+    "known_status": "Partially fixed: the RC review closed unresolvable recipients only, and the original findings.md gossip-intake HIGH noted far-future residency (its signature fix stands). New: below-cost amounts remove the overdraw guard's economic bound.",
+    "poc": "<scratch>/ledger-transition/node/poc_below_cost_intake_test.go: TestPoCBelowCostPaymentAdmittedAndCarriedFree and TestPoCBelowCostFarFutureFillsMempool both FAIL. <scratch>/ledger-transition/ledger/poc_noop_and_pin_test.go: TestPoCApplyBlockAcceptsOtherZeroFeeNoOps FAILs.",
+    "fix": "Refuse Amount < cost at intake. ProposeBlock should filter, and ApplyBlock reject, every payment ProcessPayments would drop (below cost, absent payer, duplicate content) and every no-op update (absent account). Bound BlockID to height+window at intake.",
+    "confidence": "high"
+   },
+   {
+    "id": "DIGEST-1",
+    "title": "State digest encodes nil and zero amounts identically; a checkpoint with null amounts verifies and then panics the state transition",
+    "severity": "medium",
+    "category": "dos",
+    "locations": [
+     "ledger/digest.go:29-32",
+     "ledger/reassignment.go:239-249",
+     "ledger/ledger.go:166",
+     "ledger/ledger.go:202",
+     "node/node.go:388-401",
+     "node/node.go:341-352",
+     "node/node.go:238-247",
+     "node/persist.go:160-186"
+    ],
+    "description": "StateDigest writes \"0\" for a nil Amount, the same bytes as a real zero, so two different account sets share one committed digest. Zero-balance accounts are reachable in committed state: a \u2154 reassignment to 0 keeps the account, and genesis may contain \"0\". A peer serving a checkpoint can replace such an amount with null. verifyCheckpoint checks only the commit and the digest, so the node adopts it. The next block that credits or debits that account dereferences nil in ProcessPayments and panics. The run loop has no recover, so the process exits, and the snapshot it already wrote holds the null, so restarts fail the same way.",
+    "failure_scenario": "PoC: a ratified reassignment sets 'coop' to 0. The committed state and a copy with coop's Amount=nil have equal LedgerState digests, and node-level verifyCheckpoint accepts the null-amount checkpoint. Applying the next honest block (a payment to 'coop') on the adopted state panics with a nil pointer dereference.",
+    "attacker": "a gossip or bootstrap peer serving /hdls/checkpoint (catch-up sources default to gossip peers)",
+    "known_status": "new",
+    "poc": "<scratch>/ledger-transition/ledger/poc_digest_nil_amount_test.go: TestPoCDigestConflatesNilAndZeroAmount FAILs (same digest, then a panic). <scratch>/ledger-transition/node/poc_checkpoint_nil_amount_test.go: TestPoCCheckpointWithNilAmountVerifies FAILs.",
+    "fix": "Make the digest injective (encode nil distinctly, or reject nil amounts). Validate adopted checkpoints and snapshots before fastForward: non-nil and non-negative amounts, canonical and unique keys, unique names. Treat nil as zero defensively in ProcessPayments, and consider a recover-and-halt in the run loop.",
+    "confidence": "high"
+   },
+   {
+    "id": "KEYALIAS-1",
+    "title": "One Ed25519 key has unboundedly many accepted base64 spellings; in dynamic mode it can hold several validator identities and equivocate across them without evidence",
+    "severity": "medium",
+    "category": "key-management",
+    "locations": [
+     "signing/signer.go:60-70",
+     "ledger/ledger.go:118-121",
+     "ledger/ledger.go:197-200",
+     "ledger/account_update.go:148-150",
+     "node/validators.go:31-42",
+     "consensus/voteset.go:45-70",
+     "consensus/evidence.go:11-22"
+    ],
+    "description": "Identities are compared as strings, but signatures verify against the decoded key. Go's base64 decoding ignores the 2 trailing bits of a 32-byte key and any \\r or \\n, even with Strict(). So one key has 4 spellings, plus unboundedly many with embedded newlines. Stake delegated under two spellings creates two validator identities for one key. That key can cast one conflicting vote per spelling in the same (height, round, type): both are counted, the VoteSet records no equivocation, and Evidence.Valid rejects a cross-spelling pair. 'Two different signings means the key is burned' is enforced per spelling, not per key. Payments to an alias also create a separate account for the same key.",
+    "failure_scenario": "PoC: D1 delegates 400 to V's canonical string and D2 delegates 400 to an alias. deriveValidators yields both identities (400 + 400 of 1700). V signs prevote X as V and prevote Y as the alias at height 9, round 0. Both are counted, no evidence is recorded, and hand-built evidence is invalid.",
+    "attacker": "one validator (controls the delegation strings of its own accounts)",
+    "known_status": "new",
+    "poc": "<scratch>/ledger-transition/node/poc_key_alias_test.go: TestPoCKeyAliasEvadesEquivocationDetection FAILs.",
+    "fix": "Accept a key string only if it decodes to 32 bytes and base64.StdEncoding.EncodeToString(decoded) == s. Enforce this in signing.VerifyBase64 and wherever the ledger stores a key (PublicKeyTo, Delegated, genesis, Validator fields), rejecting non-canonical keys at intake and in ApplyBlock. Strict() alone is not enough.",
+    "confidence": "high"
+   },
+   {
+    "id": "RAT-GROWTH-1",
+    "title": "MaxMessageBytes bounds messages, not balances: coprime-denominator payments grow one balance without limit, at super-linear digest and arithmetic cost",
+    "severity": "medium",
+    "category": "dos",
+    "locations": [
+     "ledger/parameters.go:26-31",
+     "ledger/block.go:17-23",
+     "ledger/ledger.go:160-214",
+     "ledger/digest.go:29-31",
+     "ledger/reassignment.go:208-219"
+    ],
+    "description": "Each in-bound payment can carry an amount whose denominator is coprime to the balance's. The balance's denominator becomes their LCM, growing by roughly the per-message digit budget per payment. Every LedgerState.Digest RatString-encodes every balance, several times per block per node, and Cmp/Add/Sub on such balances pay big-number multiply and GCD costs. The owner cannot normalize the balance, because an amount with that denominator exceeds the cap. Once the encoding passes 1 MiB, no reassignment can carry the exact PreviousAmount either. Cost is one fee per payment: free if transactionCost is 0 (documented as allowed), and a single payment suffices if MaxMessageBytes is 0.",
+    "failure_scenario": "PoC (shared machine, so timings are approximate): 1000 payments of 0.1+1/d_i, each within the 2000-byte cap, cost 100 units of fees. Afterwards the payee's and payer's balances each encode to about 1.56 MB. StateDigest takes about 0.9 s per call, and one ordinary 1-unit payment touching these accounts takes about 13.5 s in ProcessPayments, beyond typical step timeouts, on every node.",
+    "attacker": "any account holder paying fees (free if transactionCost is 0)",
+    "known_status": "Relates to the findings.md third-pass item 'one fee could buy an arbitrarily large permanent ledger entry \u2014 FIXED'. That fix bounds messages, not accumulated balances.",
+    "poc": "<scratch>/ledger-transition/ledger/poc_rat_growth_test.go: TestPoCBalanceRepresentationGrowsPastMessageCap FAILs (1,560,790-byte balance; digest about 0.9 s; one payment 13.5 s; runs about 90 s).",
+    "fix": "Fix the money unit: require amounts and the cost to be integer multiples of a governed smallest unit (e.g. 10^-8), so every denominator divides a fixed D and every balance's size is bounded. Alternatively, reject any payment whose application would push a balance's encoding over a bound.",
+    "confidence": "high"
+   },
+   {
+    "id": "OVERDRAW-2",
+    "title": "A banned payer that also receives a credit in the same block keeps its whole balance",
+    "severity": "low",
+    "category": "docs-drift",
+    "locations": [
+     "ledger/ledger.go:183-214",
+     "findings.md:250-263",
+     "ledger/ledger_test.go:92-114"
+    ],
+    "description": "The design decision says a banned payer is 'dropped from the result entirely'. In the code, a banned payer is skipped only in the pass-through loop. If any payment in the block credits it, by key or via a name it holds, it lands in `affected` and is re-added with its old balance plus the credit; its own payments are merely skipped. Whether the ban destroys anything therefore depends on unrelated payments the proposer chooses to include. TestOverdrawBanDestroysPayerBalance does not cover this case.",
+    "failure_scenario": "PoC: A (balance 10) sends two 6-unit payments, which bans it, and C pays A 1 in the same block. A remains with 10.90 instead of being destroyed.",
+    "attacker": "no attacker (semantics); the proposer decides by including or omitting a credit",
+    "known_status": "Relates to the accepted overdraw-ban DESIGN DECISION. New: the documented trace is incomplete.",
+    "poc": "<scratch>/ledger-transition/ledger/poc_overdraw_semantics_test.go: TestPoCOverdrawBanSemantics FAILs (case 2: A present with 10.90).",
+    "fix": "Decide which behaviour is intended and pin it with a regression test. Either skip banned keys in the affected loop too, or document that a same-block credit preserves the account.",
+    "confidence": "high"
+   },
+   {
+    "id": "PIN-1",
+    "title": "PrevStateDigest tier compares the account-only digest, but the docs and the API point clients at the full committed digest",
+    "severity": "low",
+    "category": "docs-drift",
+    "locations": [
+     "ledger/ledger.go:40-48",
+     "ledger/block.go:98-100",
+     "ledger/block.go:110-112",
+     "ledger/block.go:183-191",
+     "docs/operating-a-network.md:224-226",
+     "node/httptransport.go:270-294",
+     "node/node.go:432-461"
+    ],
+    "description": "The Payment field comment says a pinned payment is included only in a block whose PrevStateDigest matches, and the operator guide says 'prior state'. Block.PrevStateDigest is the full LedgerState digest (accounts + parameters + sequence), and it is what /hdls/resolve reports as stateDigest. The ledger, however, compares the pin against StateDigest(accounts) only. A client following the docs builds a payment that can never be included. admitPayment doesn't check the field, so the client still gets a receipt. Pinning only the account digest also leaves parameter and governance history unpinned.",
+    "failure_scenario": "PoC: a payment pinned to hex(prev.Digest()), which equals the block's PrevStateDigest, is excluded by ProposeBlock.",
+    "attacker": "no attacker (bug)",
+    "known_status": "new",
+    "poc": "<scratch>/ledger-transition/ledger/poc_noop_and_pin_test.go: TestPoCPrevStateDigestPinPerDocsNeverIncludable FAILs.",
+    "fix": "In both paths, compare the pin against previousState.Digest() (the block's PrevStateDigest). Alternatively, expose the account digest and correct the docs. Check the pin at intake.",
+    "confidence": "high"
+   },
+   {
+    "id": "GENESIS-1",
+    "title": "Genesis accepts duplicate keys, zero or negative amounts and duplicate names; a duplicated key silently loses balance",
+    "severity": "low",
+    "category": "robustness",
+    "locations": [
+     "cmd/server/config.go:100-110",
+     "ledger/ledger.go:118-121",
+     "ledger/ledger.go:191-214",
+     "ledger/digest.go:16-19"
+    ],
+    "description": "load() validates genesis amounts only for parse errors. ProcessPayments collapses a duplicated key through its map (the last entry wins) the first time the key is touched, destroying the other entry's balance. A negative genesis balance increases the supply sum when its holder is banned, and duplicate names resolve last-wins. StateDigest's comment says the digest must not depend on input order, but SliceStable makes it depend on the order of duplicates. One config typo makes states reachable that the transition itself never produces; all nodes share the config, so there is no fork.",
+    "failure_scenario": "PoC: genesis A:10, A:5, B:1; A pays B 1. Supply goes from 16 to 5.90, i.e. 10 units are lost beyond the 0.1 fee. Swapping the duplicate entries changes the digest.",
+    "attacker": "no attacker (operator typo)",
+    "known_status": "new",
+    "poc": "<scratch>/ledger-transition/ledger/poc_genesis_duplicates_test.go: TestPoCGenesisDuplicateKeyBreaksConservation FAILs.",
+    "fix": "Validate genesis in load(): unique canonical 32-byte keys, positive amounts, and unique names no longer than MaxAccountNameLength. Fix the digest comment.",
+    "confidence": "high"
+   },
+   {
+    "id": "TOPO-1",
+    "title": "Consensus-critical Acceptable() depends on float Pow/Ceil at integer boundaries",
+    "severity": "info",
+    "category": "safety",
+    "locations": [
+     "ledger/topology.go:26",
+     "ledger/topology.go:36",
+     "ledger/parameters.go:76-97",
+     "ledger/governance.go:317-323"
+    ],
+    "description": "GroupParameters derives the gossip dimension with math.Ceil(math.Pow(n, 1/e)). That dimension decides TimingConsistent \u2192 Acceptable \u2192 ParameterChange.Valid inside ApplyBlock. math.Pow is not correctly rounded and is not bit-identical across Go ports: amd64 uses assembly Exp/Log, other ports use pure Go. At perfect powers the result can land just above or below the integer: on amd64, 125^(1/3) = 5.0000000000000009, so Ceil gives 6. Comparing amd64 with GOARCH=386, 5 of 141 perfect powers differ bit-wise, but none of those differences straddle an integer.",
+    "failure_scenario": "Hypothetical: validators on two architectures compute different dimensions for the same (participants, maxPeers). A \u2154-ratified profile whose StepTimeoutMs sits between the two thresholds is then valid on one side and invalid on the other, and the block carrying it splits the validators.",
+    "attacker": "no attacker (bug)",
+    "known_status": "new",
+    "poc": "none: the only evidence is a standalone script comparing math.Pow bits on amd64 and 386 (5 of 141 differ); no divergence that crosses an integer was demonstrated.",
+    "fix": "Compute the group size and dimension with integer arithmetic (an integer k-th root by binary search).",
+    "confidence": "low"
+   }
+  ],
+  "checked_ok": [
+   "Propose/apply symmetry for accepted blocks: both run ProcessPayments \u2192 applyAccountUpdates \u2192 applySlashes \u2192 applyReassignment under the pre-block TransactionCost and MaxMessageBytes, and ApplyBlock rejects wherever ProposeBlock filters (signature, BlockID, pin, size, recipient, evidence window, governance validity, at most one governance action).",
+   "Digest coverage: all six Account fields (incl. Address), all five LedgerParameters fields and GovernanceSequence are hashed; sub-digests are fixed-size; fields are length-prefixed; JSON-decoded Rats are normalized, so RatString is canonical (the only collision is DIGEST-1's nil vs 0).",
+   "Governance replay: ParameterChange and Reassignment are bound to the sequence and single-use in both paths; at most one governance action per block is enforced.",
+   "No mint through payments: negative or nil cost is clamped, negative amounts are excluded, phantom payers can't mint, malleated copies dedup by PaymentID, and self-payment nets exactly -fee.",
+   "Pay-by-name resolves against the pre-block registry in ProcessPayments and in both block filters, so a same-block name move cannot fork resolution; payments naming both or neither recipient are rejected in both paths and at intake.",
+   "Copy-on-write: ProcessPayments allocates fresh Rats, and applyAccountUpdates/applyReassignment copy the slice, so the previous state is never mutated.",
+   "Multiple updates for one key or one name in a block apply deterministically in block order; the first claimant in block order wins a contested free name.",
+   "Evidence verification (same validator string, same h/r/type, different digests, both signatures valid) and the evidence age window are enforced in both paths.",
+   "MaxAccountNameLength (32) keeps names distinct from canonical 44-character keys."
+  ],
+  "notes": "Status of the 'two different signings means the key is burned' principle in this ledger:\n\n| Signing | Detected as a burn signal? | What actually happens |\n|---|---|---|\n| Two conflicting consensus votes, same Validator string, same h/r/type | Yes (Evidence) | Only the offender's own account is removed. Delegations keep it in the dynamic set, the static set is unchanged, and the key can be re-funded (SLASH-1). |\n| The same key under two spellings | No | Conflicting votes evade detection (KEYALIAS-1). |\n| Conflicting proposals, conflicting governance votes for one sequence, receipts | No | Never turned into evidence (outside the ledger area; flag for the consensus and governance reviewers). |\n| Payments | Overdraw ban is the only analog | Fires on a single over-balance payment (OVERDRAW-1) and is undone by any same-block credit (OVERDRAW-2). |\n\nCaveats:\n- RAT-DECODE-1's 1 MiB figure is extrapolated linearly from a 40-field decode (59 MB). I deliberately did not run the full body on the shared machine.\n- RAT-GROWTH-1's timings were taken on a shared, loaded machine. That test takes about 90 s; BLOCK-SIZE-1 takes about 100 s with GOLEDGER_CHAOS_SLACK=4.\n- Minor hygiene (not reported as a finding): evidenceInWindow computes height - e.A.Height without overflow care, so votes signed at heights near MinInt64 stay 'in window' forever. Only the offender's own key can produce them, which is harmless and consistent with burning.\n\nRe-run all PoCs:\ncd <scratch>/ledger-transition && go test -count=1 -run TestPoC -v ./ledger/ && GOLEDGER_CHAOS_SLACK=4 go test -count=1 -short -run TestPoC -v ./node/\n\nThe original tree was not modified. The baseline ledger and node suites pass in the scratch copy with the PoCs skipped, and go vet is clean."
+ },
+ {
+  "area": "governance",
+  "summary": "The \u2154 certificate machinery (sequence single-use guard, quorum math, duplicate/unknown-voter rejection, non-negative guard, at-most-one-action-per-block, full-profile digest coverage) is sound WITHIN a single live chain. The weaknesses are at the seams. Two break supply/liveness invariants the docs advertise as guaranteed: a reassignment is validated against the pre-block balance but applied as an ABSOLUTE set AFTER payments, so an account's same-block outflow is minted a second time (unratified inflation, invisible per-account); and LedgerParameters.Acceptable has only lower timing bounds, so a \u2154 vote can set a block interval of centuries and halt the chain irreversibly. Two more are unauthenticated-reach problems into the governance pools (permanent freeze by slot-squatting; a ~500-byte packet stalling the event loop ~9s via big.Rat exponent amplification). The eMudhra \"burned key\" principle does not hold here: in no validator mode does slashing durably remove a proven double-signer's voting/governance power. Plus a pooled-vote poisoning liveness wedge and a cross-re-genesis certificate/payment replay. All seven are traced end-to-end with failing PoCs.",
+  "findings": [
+   {
+    "id": "GOV-1",
+    "title": "Reassignment applied post-payments as an absolute set mints the target's same-block outflow",
+    "severity": "high",
+    "category": "economic",
+    "locations": [
+     "ledger/block.go:151",
+     "ledger/block.go:155",
+     "ledger/block.go:230",
+     "ledger/block.go:234",
+     "ledger/reassignment.go:90",
+     "ledger/reassignment.go:328",
+     "docs/governance.md:77"
+    ],
+    "description": "Reassignment.Valid checks the account holds PreviousAmount in the PRE-block state (reassignment.go:90), but ApplyBlock runs ProcessPayments first and applyReassignment last (block.go:230-234), setting the balance to the ABSOLUTE NewAmount. If the target's key-holder sends an outgoing payment naming the enacting block, the outflow is honoured (payee credited) AND the balance is re-set to NewAmount regardless \u2014 so whatever was moved out is created from nothing. Supply grows by (moved-out amount) beyond the ratified delta. An honest proposer builds this block: ProposeBlock carries both; ApplyBlock accepts it. The docs note the INBOUND direction (a same-block credit is overwritten) but not that the OUTBOUND direction mints. Breaks the B1/B2 'supply integrity, fixed by construction' claim via governance, and the 'every mint == its certificate' auditability managing-the-currency.md relies on (the extra mint is laundered as an ordinary payment).",
+    "failure_scenario": "Treasury custodian holds key T (balance 1000), NOT a validator. The \u2154 set ratifies a treasury top-up 1000\u21925000. Custodian signs a payment T\u2192X(own 2nd key) of 1000 naming block h; honest intake admits it (pending 1000 \u2264 balance 1000). The proposer of h carries both. ApplyBlock: ProcessPayments debits T, credits X 999.9; applyReassignment sets T=5000. Result: T=5000, X=999.9 \u2014 supply +4999.9 while the certificate ratified +4000. 999.9 minted per top-up, repeatable. A \u2154 seizure 1000\u21920 is likewise defeated: victim pre-signs an outflow into the seizure block, keeps the money at X, account zeroes \u2014 confiscation nets nothing.",
+    "attacker": "holder of one key that is the subject of any \u2154-ratified reassignment (e.g. a treasury custodian; or a seizure target)",
+    "known_status": "Related to findings.md LOW 'Reassignment validated pre-block but applied post-payments', which only documents the INBOUND case (a same-block credit silently overwritten, no supply effect). This is the OUTBOUND case: materially worse \u2014 it MINTS supply and defeats \u2154 seizures. New angle, not recorded.",
+    "poc": "<scratch>/governance/ledger/zz_govreview_poc_test.go (TestPoCGovReassignmentSameBlockOutflowIsMintedTwice) \u2014 FAILs: top-up and both seizure sizes each mint 999.9",
+    "fix": "Validate and apply the reassignment against POST-payment balances (move the PreviousAmount check into ApplyBlock after ProcessPayments), or forbid a block that carries a reassignment for an account that also appears as a payer/payee that block, or apply it as a delta (NewAmount-PreviousAmount) rather than an absolute set.",
+    "confidence": "high"
+   },
+   {
+    "id": "GOV-2",
+    "title": "LedgerParameters.Acceptable has no upper timing bound: a \u2154 vote can halt the chain irreversibly",
+    "severity": "high",
+    "category": "liveness",
+    "locations": [
+     "ledger/parameters.go:76",
+     "ledger/parameters.go:89",
+     "node/node.go:620",
+     "node/node.go:671",
+     "ui/admin.go:81"
+    ],
+    "description": "Acceptable/TimingConsistent (parameters.go:76-97) enforce only LOWER bounds: StepTimeoutMs>0, BlockIntervalMs>=0, MaxPeers>=0, StepTimeoutMs >= dimension*250. There is no CEILING on BlockIntervalMs or StepTimeoutMs. A \u2154-ratified ParameterChange can set BlockIntervalMs to billions of ms (centuries). After the enacting block commits, node.commit schedules evNextHeight that far in the future (node.go:671-678 via blockInterval), so the chain produces no further block. Because every governance action (including a revert) needs a block, nothing on-chain can undo it \u2014 the network is bricked until a manual re-genesis. MinMessageBytes exists precisely so governance cannot vote a chain-bricking value; the timing fields have no equivalent guard, despite the wallet/docs treating Acceptable as the brick-proofing. (StepTimeoutMs=MaxInt64 instead overflows time.Duration to negative, causing immediate-timeout round churn.)",
+    "failure_scenario": "Validators holding \u2154 (or one validator in a small set) vote a profile with BlockIntervalMs=86_400_000_000 ('one day' mistyped with extra zeros, ~2.7 years) and otherwise-current fields. It passes Valid (Acceptable=true) and enacts. The enacting block commits; the next height is scheduled ~2.7 years out. The validator immediately votes the revert \u2014 it pools but is never carried into a block, because no block is ever produced. Chain halted permanently; only an out-of-band coordinated re-genesis recovers it. A hostile \u2154 coalition can do this deliberately as a kill switch; an honest fat-finger does it by accident.",
+    "attacker": "a \u2154 validator coalition, or any single validator in a set whose quorum it meets (e.g. a one-validator or skewed-power deployment)",
+    "known_status": "New. TODO.md 'More governable parameters' notes 'extend Acceptable if it has an invariant' and the MinMessageBytes floor is the precedent for brick-proofing \u2014 the timing fields were given a lower bound but no upper bound. Not in findings.md.",
+    "poc": "ledger: .../governance/ledger/zz_govreview_poc_test.go (TestPoCGovAcceptableAllowsChainHaltingTiming) \u2014 FAILs, Valid=true for 2.7-yr and 285-yr intervals and MaxInt64 step. node: .../governance/node/zz_govreview_poc_test.go (TestPoCGovHugeBlockIntervalHaltsChain) \u2014 FAILs: live node stops committing, revert never enacts",
+    "fix": "Add sane upper bounds to Acceptable (e.g. BlockIntervalMs and StepTimeoutMs each <= a few minutes/hours max), mirroring the MinMessageBytes floor, so a ratified profile can never stop block production. Also clamp StepTimeoutMs to avoid the Duration overflow.",
+    "confidence": "high"
+   },
+   {
+    "id": "GOV-3",
+    "title": "Governance vote pools are fillable with unauthenticated voteless entries, freezing governance permanently",
+    "severity": "high",
+    "category": "dos",
+    "locations": [
+     "node/governance.go:41",
+     "node/governance.go:49",
+     "node/governance.go:229",
+     "node/reassignment.go:49",
+     "node/reassignment.go:279",
+     "node/httptransport.go:186"
+    ],
+    "description": "addParameterVotes/addReassignmentVotes allocate a pool slot for a proposal BEFORE verifying any vote (governance.go:47-54, reassignment.go:49-54): a ParameterChange with an Acceptable profile and ZERO (or bogus-signature) votes still creates an entry. The pools are capped at 64 each. pruneParameterProposals/pruneReassignments only drop entries whose sequence or value guard no longer matches current state (governance.go:229-236) \u2014 a voteless entry bound to the current sequence/digest (or to balance 0 of some unknown key) is NEVER pruned. Once 64 junk entries fill a pool, a legitimate proposal is a new key and is refused by the >=64 cap, so it never pools or gossips. The governance sequence can only advance via a pooled certificate reaching quorum, which can no longer happen \u2014 permanent deadlock. All endpoints are unauthenticated (httptransport.go:186-205); GET /hdls/governance hands the attacker the current sequence/digest to bind.",
+    "failure_scenario": "An attacker who can reach the node port (no key needed) reads GET /hdls/governance, then POSTs 64 distinct voteless ParameterChanges (each an Acceptable profile binding the current digest+sequence) to /hdls/parameter-vote and 64 voteless Reassignments (distinct unknown accounts, prev=0) to /hdls/reassignment-vote \u2014 128 small requests per node. Both pools are now full of un-prunable junk. A legitimate validator's genuine vote for a fee change or a reassignment is refused at the >=64 cap, never pools, never gossips, never enacts. Governance is frozen for the life of the network. PoC: a quorum-1 validator's fully-valid fee change AND reassignment never enact after the squat; pools stay 64/64 across 15 blocks.",
+    "attacker": "anyone who can reach the node's HTTP port (unauthenticated; no validator key)",
+    "known_status": "Relates to deferred #10 (unauthenticated write API / rate limiting), but is a distinct logic flaw, not just a volumetric concern: entries are pooled before verification and the cap+no-eviction makes a single 128-request burst a PERMANENT freeze that rate-limiting alone does not fix. New angle / materially worse than #10 as recorded.",
+    "poc": "<scratch>/governance/node/zz_govreview_poc_test.go (TestPoCGovPoolSquatFreezesGovernance) \u2014 FAILs: GOVERNANCE FROZEN, quorum-1 change+reassignment never enact",
+    "fix": "Do not pool a proposal until it carries at least one VERIFIED current-validator vote; key/evict by whether progress is possible; or reserve capacity / use a per-sender bound. At minimum, drop pooled entries that have made no progress and never pool a voteless certificate.",
+    "confidence": "high"
+   },
+   {
+    "id": "GOV-4",
+    "title": "Slashing does not durably burn a proven double-signer's validating or governance power",
+    "severity": "high",
+    "category": "key-management",
+    "locations": [
+     "ledger/block.go:72",
+     "ledger/block.go:153",
+     "node/validators.go:31",
+     "node/node.go:649",
+     "docs/consensus.md"
+    ],
+    "description": "The owner's principle is 'two different signings means the key is burned'. It does not hold. applySlashes (block.go:72-89) deletes only the offender's OWN account. (1) Dynamic + delegated: deriveValidators (validators.go:31-61) sums each account's balance by its ValidatorNode; depositors delegating to a bank keep their own accounts, so a slashed bank keeps nearly all its voting power and stays a validator \u2014 directly contradicting docs/consensus.md 'removes the offender's account ... ejecting them from a dynamic set'. (2) Dynamic + self-staked: the offender is ejected, but node.commit (node.go:649-654) prunes its evidence the moment it leaves the set, so a single later incoming payment re-creates the account (ValidatorNode defaults to self in ProcessPayments) and re-admits the key \u2014 nobody re-slashes it. (3) Static set: the set is config; slashing confiscates the balance but the key keeps FULL consensus + governance voting power forever. In every mode a burned key keeps or regains power.",
+    "failure_scenario": "Dynamic/delegated: a 'bank' validator B (own balance 1, 200 delegated to it) equivocates and is slashed. On every node B's derived power is still 200 of 400 \u2014 above the skip threshold, able to veto or help ratify. B keeps casting consensus votes and \u2154 governance votes (parameter/reassignment) that count. PoC confirms B remains in the set post-slash. Static: PoC shows a slashed key still supplies the DECIDING governance vote (3-of-4) to mint 1,000,000 to an attacker account after its own slash. Self-staked: PoC shows an ejected key back in the set one 20-unit payment later. The compromise-exclusion the eMudhra retrospective wants is absent.",
+    "attacker": "a single validator whose key is proven compromised/equivocating (the exact party slashing targets)",
+    "known_status": "New. docs/consensus.md and managing-the-currency.md present slashing as THE accountability lever and claim ejection from a dynamic set; the code achieves durable ejection in no mode. Includes a docs-drift component (consensus.md 'ejecting them from a dynamic set').",
+    "poc": "node: <scratch>/governance/node/zz_govreview_poc_test.go (TestPoCGovSlashDoesNotBurnDynamicValidatorKey) \u2014 FAILs on delegated-still-validating and re-admit-by-payment. ledger: <scratch>/governance/ledger/zz_govreview_poc_test.go (TestPoCGovSlashedStaticValidatorStillRatifies) \u2014 FAILs: burned key casts the deciding governance vote",
+    "fix": "Tombstone slashed keys in committed state (a durable burn-set under the digest): exclude a tombstoned key from deriveValidators and from the static set's effective power, reject its votes/certificates, and refuse to re-create or re-fund it. Keep evidence actionable against a recreated key (retire the 'prune once it leaves the set' step for tombstoning).",
+    "confidence": "high"
+   },
+   {
+    "id": "GOV-5",
+    "title": "A departed voter's stuck pool vote poisons a proposal so a clear live quorum can never carry it",
+    "severity": "medium",
+    "category": "liveness",
+    "locations": [
+     "node/governance.go:55",
+     "node/governance.go:88",
+     "node/governance.go:229",
+     "ledger/governance.go:79",
+     "ledger/reassignment.go:97"
+    ],
+    "description": "ParameterChange.Valid / Reassignment.Valid reject the WHOLE certificate if ANY carried vote is from a key not in the current validator set (governance.go:79, reassignment.go:97). The node's pools accumulate votes by validator and never remove one (governance.go:55-71); addParameterVotes dedups but cannot drop a vote, and pruning only deletes a whole entry on a sequence/value change. So if a validator votes for a pooled proposal and then leaves the set (re-delegates, drops below the dynamic threshold, or is slashed), its signature stays wedged in that pooled certificate. pendingParameterChange calls Valid on the pooled entry, which now always returns false, so the proposal can never be carried \u2014 even though the remaining CURRENT validators hold a clear >\u2154. The admin view still shows it 'ready \u2713'. Re-submitting the good votes is a no-op (same pool key, already-voted). A fresh clean entry can't be created (key occupied).",
+    "failure_scenario": "Dynamic set v1(60) v2(30) v3(15). Small validator v3 votes for a fee change, then re-delegates its stake to v1 (one signed account update) \u2014 leaving the set. v1 and v2 (now 105 of 105 power, well above quorum 71) both vote. The pooled certificate is [v3,v1,v2]; Valid hits v3 (not a current validator) and returns false, so pendingParameterChange returns nil and the change is never proposed, despite a 105/71 live quorum. PoC: votedPower=105, reached=true, amendsCurrent=true, yet pendingParameterChange()=false; a fresh [v1,v2] certificate is Valid=true but cannot be pooled. A minority validator can thus veto any proposal it voted on by moving its stake once; ordinary validator churn/slashing wedges in-flight proposals silently.",
+    "attacker": "one minority validator (griefing), or ordinary non-adversarial validator-set churn/slashing",
+    "known_status": "New. Not in findings.md/TODO.md; distinct from the C5 deterministic-selection fix (that was about map order, this is about stale votes never being evicted).",
+    "poc": "<scratch>/governance/node/zz_govreview_poc_test.go (TestPoCGovDepartedVoterPoisonsPooledProposal) \u2014 FAILs: votedPower 105 of quorum 71, reached=true, but pendingParameterChange()=false",
+    "fix": "When building/validating a pooled certificate, filter its votes to current validators (drop non-members) rather than rejecting the whole certificate, and prune votes from departed validators each commit. Re-tally the surviving current-validator votes against the quorum.",
+    "confidence": "high"
+   },
+   {
+    "id": "GOV-6",
+    "title": "Governance certificates and payments replay across a re-genesis (sequence and BlockID reset, networkId reused)",
+    "severity": "medium",
+    "category": "safety",
+    "locations": [
+     "ledger/parameters.go:198",
+     "node/node.go:98",
+     "node/node.go:128",
+     "ledger/governance.go:31",
+     "ledger/reassignment.go:265",
+     "docs/operating-a-network.md:160"
+    ],
+    "description": "The only replay anchors for governance are the GovernanceSequence (parameters.go:198) and, for payments, BlockID. Both are chain-local and restart at 0/height-1 when a node boots fresh (node.go:98,128). The vote/payment preimages are bound to networkId but NOT to any genesis identifier. operating-a-network.md:136-171 documents re-genesis as the normal path for ANY release that changes the state digest or signing preimage ('restart every node on the new version from the captured state'), reusing the SAME networkId and validator keys and re-asserting balances. On the reseeded chain every old certificate/payment every node pooled or gossiped is signature-valid again at its old sequence/BlockID; it applies whenever its value guard matches (a prev=0 newcomer grant matches immediately if the grantee holds 0). The doc says only 'the cryptography (and the genesis hash) change' \u2014 but a plain software upgrade keeps the scheme and networkId, so nothing stops the replay.",
+    "failure_scenario": "On the old chain, seq 0 grants a newcomer 500; the newcomer later spends it. The community does a documented software-upgrade re-genesis from the captured state (same networkId, same keys). On the new chain the GovernanceSequence starts at 0 again. Anyone holding the old grant certificate (it was gossiped network-wide) resubmits it verbatim; it is Valid at sequence 0 (newcomer holds 0 on the new chain) and re-mints 500 with no new vote. PoC also shows the old height-2 payment replaying at height 2 of the new chain. Supply inflates by every historically-ratified grant and every re-submittable old payment.",
+    "attacker": "anyone retaining an old-chain certificate or payment (all nodes pooled/gossiped them), after an operator-run re-genesis",
+    "known_status": "New. The within-chain cycle replay is correctly closed by the sequence (verified: TestReassignmentSequenceGuardBlocksCycleReplay, TestChaosGovernanceCycleReplayStaysInert). This is the CROSS-genesis reset the sequence does not cover; the re-genesis procedure in operating-a-network.md does not warn of it (docs-drift component).",
+    "poc": "<scratch>/governance/ledger/zz_govreview_poc_test.go (TestPoCGovCertificateReplaysAcrossReGenesis) \u2014 FAILs: old grant re-mints 500 and old payment replays on the reseeded chain",
+    "fix": "Bind a genesis identifier (genesis digest / an epoch counter) into every signed preimage (votes and payments), or mandate a fresh networkId on every re-genesis and say so prominently in operating-a-network.md. Then old signatures are invalid on the new chain.",
+    "confidence": "high"
+   },
+   {
+    "id": "GOV-7",
+    "title": "Unauthenticated governance vote stalls the single event loop ~9s via big.Rat exponent amplification",
+    "severity": "medium",
+    "category": "dos",
+    "locations": [
+     "ledger/governance.go:31",
+     "ledger/reassignment.go:265",
+     "node/governance.go:64",
+     "node/reassignment.go:302",
+     "node/node.go:289"
+    ],
+    "description": "Governance amounts travel as JSON strings parsed into *big.Rat. big.Rat.SetString accepts exponent notation, so the ~12-byte string '1p10000000' decodes (~2ms) to a 10-Mbit integer whose RatString() costs ~1.8s. parameterVoteFields/reassignmentVoteFields (governance.go:31-35, reassignment.go:265-273) call RatString to build the preimage, and this happens BEFORE signature verification: VerifyParameterVote/VerifyReassignmentVote receive the preimage as an already-evaluated argument (node/governance.go:64, reassignment.go:302), and addParameterVotes only dedups POOLED voters \u2014 so one message can repeat a (public) validator key thousands of times, each triggering a RatString, before any bad signature is rejected. All of this runs on the single event-loop goroutine (node.go:289-296). The pooled entry (GOV-3) then re-stringifies on EVERY startHeight via pendingParameterChange\u2192Valid. Unlike the recorded 1MiB/ApplyBlock DoS, a ~500-byte packet suffices and the damage persists.",
+    "failure_scenario": "Attacker (no key) reads GET /hdls/governance for the current digest/sequence, then POSTs a 521-byte ParameterChange whose NewParameters.TransactionCost is '1p10000000' and whose Votes repeat the public validator key 3x with empty signatures. PoC: the event loop stalls ~9s (~2.25s per carried vote); a 1MiB body holds ~14,000 such votes \u2192 ~8.8 hours of single-loop stall from one request. The entry then pools (binds current sequence/digest, never pruned) and every height re-processes it: observed block rate collapses from 64 to 2 per 2s and stays there. Repeatable/stackable \u2192 sustained throughput denial of the whole node from tiny unauthenticated packets.",
+    "attacker": "anyone who can reach the node's HTTP port (unauthenticated)",
+    "known_status": "Strengthens deferred #10 and the recorded MEDIUM 'unauthenticated write API + single-loop serialization'. New angle: specific amplification (RatString on attacker rationals, pre-verification, repeated per carried vote and per height) makes it a ~500-byte PERSISTENT stall, materially worse than the 1MiB one-shot recorded.",
+    "poc": "<scratch>/governance/node/zz_govreview_poc_test.go (TestPoCGovHugeRationalStallsEventLoop) \u2014 FAILs: 9.02s loop stall, block rate 64\u21922 per 2s",
+    "fix": "Verify the signature before building the RatString preimage (or bound the serialized size / numerator+denominator bit-length of a submitted amount at intake, and reject exponent notation); dedup a message's carried voters before verifying; and apply GOV-3's don't-pool-until-verified fix.",
+    "confidence": "high"
+   }
+  ],
+  "checked_ok": [
+   "Governance sequence correctly blocks the within-chain value-cycle replay (A\u2192B\u2192A then replay A\u2192B stays inert) \u2014 ledger TestReassignmentSequenceGuardBlocksCycleReplay and node TestChaosGovernanceCycleReplayStaysInert both pass; GOV-6 is specifically the cross-re-genesis reset the sequence cannot cover",
+   "At-most-one-governance-action-per-block is enforced: ProposeBlock prefers the parameter change, and ApplyBlock (block.go:211) rejects a block carrying both a ParameterChange and a Reassignment (they would bind the same sequence)",
+   "ParameterChange.Valid / Reassignment.Valid correctly require each vote to be a DISTINCT CURRENT validator (seen map + Contains) and combined power >= Quorum (strict >\u2154); unknown-validator and double-counted votes are rejected",
+   "The non-negative reassignment guard holds (NewAmount.Sign()<0 rejected) and nil validator set / nil amounts are rejected",
+   "Every governed field is under both the committed digest and the vote preimage: LedgerParameters.fields() covers TransactionCost, BlockIntervalMs, StepTimeoutMs, MaxPeers, MaxMessageBytes, and LedgerState.Digest folds in the GovernanceSequence \u2014 no governed field is omitted from the digest",
+   "proposalKey/reassignmentKey key the FULL proposed profile + previous digest + sequence (the C5 fix), so two proposals sharing only a cost pool separately; pendingParameterChange/pendingReassignment scan sorted keys (deterministic)",
+   "MinMessageBytes floor is enforced in Acceptable and at config load, so governance cannot vote the message cap below a payable size (the one timing/size field that IS brick-proofed \u2014 unlike the interval/timeout of GOV-2)",
+   "Negative transaction cost is refused at config load (config.go:88) and clamped to zero in ProcessPayments, and Acceptable rejects it \u2014 the C3 mint class stays closed",
+   "Reassignment vote preimage binds the raw account key (not a name), so a dishonest node cannot retarget a reassignment at vote-collection time; the \u2154 quorum only forms if voters independently signed the same key+amounts",
+   "ApplyBlock re-verifies every governance certificate against the validator set independently of ProposeBlock, and recomputes the result digest \u2014 a proposer cannot smuggle an unratified change past honest nodes"
+  ],
+  "notes": "Burned-key matrix (GOV-4) \u2014 does a proven double-signer keep power after slashing?\n\n| validator mode | offender's own account | effective voting power after slash | re-entry |\n|---|---|---|---|\n| static set (config) | balance confiscated | UNCHANGED \u2014 full consensus + governance power forever (set is config, slash can't touch it) | n/a (never left) |\n| dynamic, self-staked | deleted | drops to 0, ejected | one incoming payment re-creates the account (ValidatorNode defaults to self) and re-admits it; evidence already pruned, so no re-slash |\n| dynamic, delegated (\"bank\") | deleted (tiny) | KEEPS ~all delegated power \u2014 stays a validator (contradicts docs/consensus.md \"ejecting them from a dynamic set\") | never left |\n\nIn no mode is the key durably burned, so the owner's \"two different signings means the key is burned\" principle is unmet. A tombstone set under the state digest (exclude from derivation AND from the static set's effective power, refuse re-funding/re-admission, keep evidence actionable against a recreated key) is the single fix that makes it hold in all three modes."
+ },
+ {
+  "area": "NODE TRUST ANCHORS \u2014 onboarding, catch-up, snapshot and backup (node/sync.go, node/persist.go, node/node.go, node/peerdns.go, node/topology.go, cmd/server/config.go)",
+  "summary": "The adoption plumbing is mostly solid: all three paths (adopt, catchUp, loadSnapshot) gate on a real >2/3 Commit.Verify, bind the commit to the full LedgerState digest (accounts+params+governance sequence), enforce strict height monotonicity (never roll back), reject other-network snapshots via network-bound vote signatures, and the going-forward validator set is re-derived from verified state. Peer DNS correctly uses only CURRENT validators' addresses, so a flood of non-validator accounts cannot eclipse. BUT the trust ANCHOR for any fresh or (re)starting node is the GENESIS validator set, permanently and with no weak-subjectivity pin \u2014 which is exactly the eMudhra blind spot. An attacker holding >1/3 (by genesis power) of the genesis validators' keys \u2014 keys that may have LEFT the active set (zero stake, nothing to slash, invisible to live consensus) or been weakly generated \u2014 can forge a fully attacker-controlled checkpoint that a joiner adopts (SYNC-1, HIGH). The owner's \"two signings burns the key\" principle cannot fire because the forgery is shown only to the victim, never to the live network. The same genesis-anchoring, flipped, permanently bricks onboarding/recovery once the set rotates fully past the founders (SYNC-3). Separately, the catch-up client reads a peer's checkpoint with no size bound (SYNC-2).",
+  "findings": [
+   {
+    "id": "SYNC-1",
+    "title": "Long-range checkpoint forgery: joiners trust genesis validator keys forever (no weak subjectivity)",
+    "severity": "high",
+    "category": "key-management",
+    "locations": [
+     "node/node.go:388-401",
+     "node/node.go:374-379",
+     "node/sync.go:98",
+     "node/persist.go:31",
+     "node/sync.go:15-18"
+    ],
+    "description": "A fresh or restarting node anchors checkpoint trust on the GENESIS validator set forever: bestCheckpoint passes cfg.Genesis (sync.go:98), adopt/loadSnapshot pass pre-start n.accounts (=genesis). verifyCheckpoint accepts any checkpoint whose Commit is a >2/3 quorum of the PEER-SUPPLIED signing set (cp.Validators, dynamic mode) and whose signers cover >1/3 of the genesis anchor's power. cp.Validators is never cross-checked against what cp.Accounts would derive. So an attacker holding >1/3 (by genesis power) of the GENESIS validators' private keys can fabricate arbitrary accounts, advertise those same keys as the signing set, self-sign the commit, and the joiner adopts attacker-controlled state. Those genesis keys may have left the active set (zero current stake, not slashable, ignored by live consensus) or been weakly generated (eMudhra). There is no weak-subjectivity checkpoint or pinning to retire the anchor.",
+    "failure_scenario": "Dynamic-validator village. Founders A,B,C leave over a year; their old laptops/keys are discarded or were weakly generated. Attacker recovers A,B's keys (2 of 3 = >1/3). It builds a checkpoint at height 100: accounts crediting itself 9e9 (founders at 0), Validators=[A,B], a 2-of-2 self-signed commit over that digest. A new merchant node (or a founder's rebuilt node) boots with the original genesis config, polls a peer/attacker, verifyCheckpoint returns true, fastForward adopts it: the node now believes the attacker's balance and height. 'Two signings burns the key' never triggers \u2014 the forged commit is shown only to the victim, so the live network sees no equivocation and the keys hold no stake to slash.",
+    "attacker": "holder of >1/3 (by genesis power) of the former/weak genesis validators' stolen or cracked keys",
+    "known_status": "new \u2014 findings.md calls onboarding 'sound ... with the full-rotation limit documented, not glossed'; no prior round considered compromise of FORMER/weak anchor keys (the eMudhra lens). Not deferred #7 (ledger height) or #10 (open API).",
+    "poc": "<scratch>/sync-trust/node/synctrust_poc_test.go \u2014 TestPoCLongRangeCheckpointForgeryAcceptedByJoiner and TestPoCLongRangeNeedsOnlyOverOneThirdOfGenesisKeys: both PASS, printing that a genesis-anchored joiner accepts and adopts (height 101, attacker balance 9e9) a checkpoint signed only by former/abandoned keys, with 2-of-3 keys sufficing; the same checkpoint is rejected against a live-set anchor.",
+    "fix": "Add a weak-subjectivity pin: let operators configure a recent trusted (height, stateDigest) and its validator-set hash, refreshed out-of-band, and anchor verifyCheckpoint to that instead of genesis for joiners \u2014 so abandoned genesis keys cannot authorise a checkpoint past the pin. Defense-in-depth: require cp.Validators to equal deriveValidators(cp.Accounts) in dynamic mode so a peer cannot advertise an arbitrary signing set. Document that the anchor keys are a root of trust that must stay secure (and be re-pinned when founders leave).",
+    "confidence": "high"
+   },
+   {
+    "id": "SYNC-3",
+    "title": "Full validator rotation past genesis permanently bricks onboarding and crash-recovery",
+    "severity": "medium",
+    "category": "liveness",
+    "locations": [
+     "node/node.go:395-400",
+     "node/sync.go:87-106",
+     "node/persist.go:28-34",
+     "docs/consensus.md:126-128"
+    ],
+    "description": "The flip side of SYNC-1. Because the joiner/restart anchor is always the genesis set, verifyCheckpoint's >1/3-overlap test (vouched*3 > trusted.TotalPower) fails once the live validator set has rotated fully past the genesis validators \u2014 even for a perfectly honest, >2/3-signed, digest-bound current checkpoint. bestCheckpoint fetches exactly ONE checkpoint per peer; there is no bisection/chain-walk and no weak-subjectivity pin, so the 'chain of intermediate checkpoints to walk' that consensus.md:126-128 says would be needed does not exist. A node also re-verifies its OWN on-disk snapshot against genesis (persist.go:31), so after rotation it cannot even reload its own state and falls back to genesis (height 1), then cannot catch up either. Onboarding and recovery silently break for good.",
+    "failure_scenario": "A long-lived village currency: over time the 8 founding laptops are all replaced and the founders' accounts drop below the validator threshold, so none of the genesis validators remain in the live set. Everything runs fine for existing up-to-date nodes (their catch-up anchor tracks the live set). Then someone adds a new node, or a running node crashes and restarts: it boots on the original genesis config, fetches the current honest checkpoint, verifyCheckpoint rejects it (zero genesis overlap), and the node sits stuck at genesis forever. No error explains why; there is no documented knob to move the anchor forward.",
+    "attacker": "no attacker \u2014 triggered by ordinary validator rotation over the network's lifetime",
+    "known_status": "sharper angle on the 'full-rotation limit' findings.md calls 'documented, not glossed': shown here to be a hard onboarding/recovery brick with no implemented bisection or pin, and to also block reloading a node's OWN snapshot \u2014 materially worse than a mere note.",
+    "poc": "<scratch>/sync-trust/node/synctrust_poc_test.go \u2014 TestPoCFullRotationBricksOnboarding: PASS. A genuine >2/3-signed current checkpoint signed by a fully-rotated set (X,Y,Z; founder A below threshold) is rejected by a genesis-anchored joiner.",
+    "fix": "Implement the weak-subjectivity pin from SYNC-1 (also the fix here): a periodically-refreshed trusted recent checkpoint lets joiners/restarts anchor to the live-ish set. Alternatively implement the documented checkpoint bisection (walk intermediate checkpoints so each step overlaps the previous anchor). Persist the last-trusted signing-set hash alongside the snapshot so a node can at least reload its own state. Until then, document loudly that replacing all genesis validators disables onboarding/recovery.",
+    "confidence": "high"
+   },
+   {
+    "id": "SYNC-2",
+    "title": "Catch-up checkpoint fetch has no response-size bound (memory DoS)",
+    "severity": "medium",
+    "category": "dos",
+    "locations": [
+     "node/sync.go:108-119",
+     "node/sync.go:50-52",
+     "node/httptransport.go:308"
+    ],
+    "description": "fetchCheckpoint reads a peer's /hdls/checkpoint reply with a bare json.NewDecoder(resp.Body).Decode(&cp) and no size limit (sync.go:115), while the node's own server intake caps every request body at 1 MiB via http.MaxBytesReader (httptransport.go:308). catchUpLoop polls catch-up sources every few seconds (sync.go:38-55) and bestCheckpoint fetches from each. A malicious source can stream an arbitrarily large (or slow) body within the 5s client timeout, forcing the polling node to allocate it into memory, repeatedly. For a node with no bootstrap configured, catch-up sources are its gossip peers = the on-chain validator addresses (peerdns.go), so a single validator that publishes its Address becomes a source \u2014 one dishonest validator can memory-pressure its peers, which the BFT model should tolerate.",
+    "failure_scenario": "A validator (dynamic mode) publishes an on-chain Address pointing at an attacker-controlled HTTP server (or a bootstrap operator turns malicious). Victim nodes without bootstrap peers resolve that address as a catch-up source and poll /hdls/checkpoint every few seconds. The server answers each poll with a multi-hundred-MB JSON body (streamed fast for <5s). Each victim decodes the whole thing into a Checkpoint, spiking RSS on the single event-loop machine on every tick; sustained, it drives nodes to OOM or GC thrash while honest traffic starves. No signature or verification runs until AFTER the full body is decoded, so the cost is paid before any check.",
+    "attacker": "one validator (via a published on-chain address) or any configured bootstrap/sync peer",
+    "known_status": "new \u2014 distinct from deferred #10 (open mutating endpoints + event-loop DoS, guarded by the 1 MiB intake bound and server timeouts): this is the CLIENT-side checkpoint read, a different code path not covered by fronting the server with a TLS/rate-limit proxy.",
+    "poc": "<scratch>/sync-trust/node/synctrust_poc_test.go \u2014 TestPoCUnboundedCheckpointFetch: PASS. An httptest server returns a 4 MiB checkpoint (4x the 1 MiB server bound); fetchCheckpoint decodes it with no error and the full oversized field survives, proving no cap.",
+    "fix": "Wrap the response body in an io.LimitReader (or set resp.Body via a MaxBytesReader-equivalent) with a generous but bounded cap sized for the largest legitimate account set, mirroring the 1 MiB server intake; reject and move on if exceeded. Consider a configurable max-checkpoint-bytes and bounding bestCheckpoint's total work per tick.",
+    "confidence": "high"
+   },
+   {
+    "id": "SYNC-4",
+    "title": "Docs claim onboarding is 'safe even from an untrusted bootstrap peer' without the weak-subjectivity caveat",
+    "severity": "low",
+    "category": "docs-drift",
+    "locations": [
+     "docs/consensus.md:108-110",
+     "docs/consensus.md:124-125",
+     "docs/operating-a-network.md:116-117",
+     "docs/security.md:106-114"
+    ],
+    "description": "consensus.md states a joiner is 'safe even from an untrusted bootstrap peer' and that 'an honest anchored validator only signs valid commits, and a fabricated all-stranger set has no anchor overlap and is rejected'; operating-a-network.md says 'the bootstrap peer does not have to be trusted.' These are true only under an unstated assumption the code bakes in: that the ANCHOR (genesis) validators' keys remain honest and uncompromised forever, including after those validators leave the active set. SYNC-1 shows that assumption is the whole vulnerability \u2014 abandoned or weakly-generated genesis keys (the eMudhra case) still authorise any checkpoint for a joiner. The docs present certificate verification as the complete trust story and omit that the trust ultimately reduces to those specific keys staying secure for the network's whole life.",
+    "failure_scenario": "An operator reads 'the bootstrap peer does not have to be trusted' and 'safe even from an untrusted bootstrap peer', concludes onboarding needs no special key hygiene, and treats retired founder keys casually (deletes backups carelessly, reuses hardware, never re-pins). An attacker later recovers or finds a set of those retired keys and forges checkpoints per SYNC-1. The operator had no warning from the docs that the retired genesis keys were still a live root of trust.",
+    "attacker": "no attacker \u2014 documentation gap",
+    "known_status": "new docs-drift, the documentation face of SYNC-1; findings.md's doc spot-checks did not cover the onboarding trust-assumption wording.",
+    "poc": "none \u2014 documentation claim; the underlying code behavior is proven by the SYNC-1 PoC in <scratch>/sync-trust/node/synctrust_poc_test.go.",
+    "fix": "State plainly that onboarding trust rests on the anchor (genesis, or a configured weak-subjectivity pin) validator keys staying uncompromised for the network's lifetime; that retired/founder keys remain a root of trust for joiners until a pin moves the anchor forward; and that losing/leaking >1/3 of them lets an attacker forge checkpoints for new or rebooting nodes. Tie the guidance to the planned pin/bisection fix.",
+    "confidence": "high"
+   }
+  ],
+  "checked_ok": [
+   "All three adoption paths (adopt node.go:327, catchUp node.go:357, loadSnapshot persist.go:16) call verifyCheckpoint, which requires a real >2/3 Commit.Verify of the signing set before fastForward \u2014 no path adopts state without the quorum it claims (brief point 6).",
+   "verifyCheckpoint binds the commit to the FULL state: LedgerState{Accounts,Parameters,GovernanceSequence}.Digest() == cp.Commit.BlockDigest (node.go:392) \u2014 tampered/truncated accounts, params or sequence are rejected.",
+   "Height monotonicity enforced on every path: adopt/catchUp/loadSnapshot all return early when cp.Commit.Height+1 <= n.height (node.go:331, 361; persist.go:28) \u2014 a stale checkpoint cannot roll a node back.",
+   "Cross-network snapshots/checkpoints are rejected: commit votes are verified with cfg.NetworkID and the network is bound into each vote's signing preimage, so votes signed for another network fail Verify.",
+   "Going-forward validator set is re-derived from verified state (startHeight -> validatorsFor(n.accounts), node.go:472); cp.Validators is used only to verify the adopting commit, not kept as authority.",
+   "Snapshot write is crash-safe (writeAtomic fsyncs temp then dir, persist.go:73-96); a parse failure or verify failure on load is ignored and the node starts at genesis rather than adopting garbage.",
+   "BackupPath mirror writes the identical verified Checkpoint JSON; on load it goes through loadSnapshot's certificate verification like any snapshot \u2014 the backup is not a separate trust bypass.",
+   "Peer DNS uses only CURRENT validators' published addresses (resolvedPeerAddresses, peerdns.go:30 filters currentValidators.Contains) \u2014 a flood of non-validator accounts claiming addresses cannot influence peer selection or eclipse a node.",
+   "Topology neighbor selection (Neighbors/toCoord/fromCoord) is deterministic over sorted validator keys; eclipse would require validator-level stake AND key-grinding into a victim's Hamming-graph positions, and relay is trusted only to relay (signatures protect safety), so the damage ceiling is censorship/liveness, not fund theft.",
+   "cmd/server/config.go load() validates key lengths, non-negative cost, and genesis Acceptable() (C3/C4 fixes intact); bootstrap/snapshot/backup paths are plumbed through unchanged.",
+   "The >1/3 anchor-overlap arithmetic (vouched*3 > trusted.TotalPower, node.go:400) is correct for the BFT skipping rule and does not overflow for any realistic set."
+  ],
+  "notes": ""
+ },
+ {
+  "area": "NODE UNTRUSTED-INPUT BOUNDARY (node/httptransport.go, node/node.go event loop, mempool/updatepool, relay, governance/reassignment intake, cmd/server)",
+  "summary": "The intake boundary is mostly disciplined: payments and account-updates are signature-verified before admission/relay, checkpoints are quorum-verified off-loop before touching the event loop, far-future heights/rounds are dropped (onProposal height gate, ReceiveVote maxRoundLookahead), proposals are proposer-authenticated, and the mempool/update pools are size-bounded and content-deduped. But three cheap, unauthenticated amplification/state-growth vectors earlier rounds missed survive, all reachable by anyone who can reach the port (the documented trust boundary): (1) a ~60-byte payment whose Amount is an exponent literal like \"1e1000000\" expands to a 3.3M-bit rational and burns ~100-150ms of single-event-loop time per request via big.Rat RatString/Marshal \u2014 slipping entirely under the 1 MiB body bound that security.md claims prevents JSON DoS; (2) consensus votes are relayed and stored in heightVotes before any signature/validator check, so junk is amplified to every peer and grows an uncapped map; (3) governance vote pools create a slot before verifying any vote, letting 64 vote-less junk proposals permanently brick parameter/reassignment voting. The /hdls/resolve answer is anchored to a committed digest but not provably bound to it, and the documented \"compare digests across nodes\" cross-check is weaker than claimed. All four are code-fixable and extend deferred #10 with concrete new angles. No mint/steal/fork vector was found at this boundary.",
+  "findings": [
+   {
+    "id": "NODE-IN-1",
+    "title": "Tiny exponent-form big.Rat amounts cause superlinear per-request work on the single event loop (1 MiB body bound does not bound the work)",
+    "severity": "medium",
+    "category": "dos",
+    "locations": [
+     "node/node.go:439",
+     "node/node.go:450",
+     "ledger/block.go:17-23",
+     "ledger/payment.go:18",
+     "ledger/payment.go:46",
+     "node/httptransport.go:308",
+     "node/governance.go:18-25",
+     "node/reassignment.go:15-27"
+    ],
+    "description": "Payment.Amount is a *big.Rat decoded from attacker JSON. big.Rat.UnmarshalText accepts exponent form, so the ~10-byte literal \"1e1000000\" (body ~60 bytes, far under the 1 MiB MaxBytesReader at httptransport.go:308) expands to a 3.3M-bit rational. admitPayment runs ON THE EVENT LOOP and pays superlinear big.Rat cost regardless of config: WithinMessageBound\u2192json.Marshal (block.go:21) when MaxMessageBytes>0, and mem.contains\u2192PaymentID\u2192RatString (payment.go:46) when it is 0. Measured ~135ms (bound=2000) / ~91ms (bound=0) vs ~70us normal \u2014 a >1000x amplification of serialized loop time from a cheap, replayable, self-signed request needing no balance or validator slot. Same vector via ParameterChange.NewParameters.TransactionCost (proposalKey\u2192Digest\u2192RatString, governance.go:18) and Reassignment amounts (reassignmentKey, reassignment.go:15), both before any auth.",
+    "failure_scenario": "Attacker signs one Payment{PublicKeyFrom: own key, Amount: \"1e1000000\", BlockID: huge} and POSTs it to /hdls/pay (or /hdls/payment) repeatedly. VerifyPayment passes (own key). Each request enqueues onto the loop; admitPayment spends ~100-150ms marshalling/RatStringing the expanded rational before refusing it. A few requests/second saturate the single consensus goroutine, stalling block production network-wide for the duration of the flood. security.md's \"Bounded request bodies ... avoiding the unbounded-JSON DoS\" guarantee does not hold.",
+    "attacker": "anyone reaching the port",
+    "known_status": "Extends deferred #10 (unauthenticated-API single-loop DoS) and GLM C6 (big.Rat JSON footgun, rated 'non-exploitable today'). New angle: the amplification is ~60 bytes -> ~150ms of serialized loop work, replayable, and it defeats the specific in-process guard #10 named as residual (the 1 MiB body bound) and the governed MaxMessageBytes cap. Materially worse and code-fixable, not just 'rate-limit the port'.",
+    "poc": "<scratch>/node-input/node/zz_poc_test.go (TestPoCHugeAmountStallsEventLoop) \u2014 PASS, logs normal=~70us vs huge=~135ms (bound=2000) and ~91ms (bound=0)",
+    "fix": "At intake, bound the decoded amount's magnitude cheaply before any RatString/Marshal \u2014 e.g. reject a Payment/TransactionCost/Reassignment amount whose Num().BitLen()+Denom().BitLen() exceeds a small cap (a few thousand bits covers any real balance). Do it in admitPayment, addParameterVotes, addReassignmentVotes and VerifyPayment's callers, and correct security.md's 'bounded bodies' claim to 'bounded decoded magnitude'.",
+    "confidence": "high"
+   },
+   {
+    "id": "NODE-IN-2",
+    "title": "Consensus votes are relayed and stored (heightVotes) before any signature/validator check \u2014 junk amplification + unbounded map",
+    "severity": "medium",
+    "category": "dos",
+    "locations": [
+     "node/node.go:268-273",
+     "node/node.go:548-553",
+     "node/node.go:562-570",
+     "node/relay.go:13-26",
+     "node/httptransport.go:139-146"
+    ],
+    "description": "handleVote (httptransport.go:139) decodes a Vote and calls SubmitVote with no verification \u2014 unlike handleGossipPayment (:156) and handleAccountUpdate (:175), which verify signatures first. In evVote (node.go:268) the node unconditionally rememberVote()s the vote into heightVotes (node.go:552, keyed by attacker-controlled Validator+Signature, NO size cap \u2014 the mempool has one, this map does not) and relay()s it to every peer (node.go:273). The driver's VoteSet.Add verifies only for TALLYING and silently drops non-validators/bad signatures, but relay and heightVotes storage happen regardless. So the 'verify before acting' rule the brief requires is violated for the relay/remember actions. reGossipVotes (node.go:562) then re-broadcasts the entire heightVotes set to all peers every timeout tick.",
+    "failure_scenario": "Attacker reads the live height from GET /hdls/status, then floods POST /hdls/vote with distinct junk Votes (Height=current, random Validator/Signature strings). Each is relayed once to all P peers (1->P amplification) and stored in heightVotes; the uncapped map grows for the whole commit window, and every re-gossip tick re-floods the entire junk set to all peers. If the loop is also stalled (e.g. via NODE-IN-1) the map never resets and grows until OOM. Non-validator, no key, no stake required.",
+    "attacker": "anyone reaching the port",
+    "known_status": "New. Within deferred #10's area but a distinct code defect: votes are the ONLY intake path that relays/persists before verifying (payments/updates/governance votes all verify first), and heightVotes is the only intake-fed map with no size bound. A front-door rate limiter does not stop the 1->P amplification or the per-tick re-gossip of each admitted junk vote.",
+    "poc": "<scratch>/node-input/node/zz_poc_test.go (TestPoCUnauthenticatedVoteFloodAmplifiesAndGrows) \u2014 PASS: 5000 unverified junk votes, all relayed, all stored in heightVotes, all re-gossiped per tick",
+    "fix": "In evVote, only rememberVote/relay a vote that passes v.Verify(scheme,networkID) AND heightVals.Contains(v.Validator) (cheap: ~50us Ed25519), mirroring the payment/update handlers. Add a size cap to heightVotes (validator count is the natural bound once membership is checked).",
+    "confidence": "high"
+   },
+   {
+    "id": "NODE-IN-3",
+    "title": "Governance vote pools create a proposal slot before verifying any vote \u2014 unauthenticated 64-slot fill permanently bricks parameter/reassignment voting",
+    "severity": "medium",
+    "category": "governance",
+    "locations": [
+     "node/governance.go:41-72",
+     "node/governance.go:49-53",
+     "node/reassignment.go:43-74",
+     "node/reassignment.go:51-55",
+     "node/httptransport.go:186-205"
+    ],
+    "description": "handleParameterVote/handleReassignmentVote are unauthenticated. addParameterVotes (governance.go:41) checks only NewParameters.Acceptable, then CREATES the pool entry (governance.go:52-53) before iterating/verifying any carried vote; a change with zero valid votes still occupies a slot. The pool is capped at 64 (governance.go:49), so once full, a genuine validator's valid vote for a new proposal is refused (return false, not pooled, not relayed, not counted). addReassignmentVotes (reassignment.go:43) is the same and has no Acceptable gate at all. GET /hdls/governance exposes the current parameters and GovernanceSequence, so an attacker sets PreviousParametersDigest/Sequence to the current values and the junk entries survive commit-time pruning (pruneParameterProposals/pruneReassignments only drop stale-digest/sequence entries).",
+    "failure_scenario": "Attacker POSTs 64 distinct, vote-less ParameterChange messages (varying BlockIntervalMs; PreviousParametersDigest=current, Sequence=current) to /hdls/parameter-vote on each node. Pools fill to 64 and survive pruning. Every subsequent genuine validator parameter-change vote is refused at intake, so no proposal ever reaches quorum and no proposer can carry one \u2014 governance (fee changes, reassignments/grants) is bricked until nodes restart, whereupon the attacker refills (64 tiny requests/node).",
+    "attacker": "anyone reaching the port",
+    "known_status": "New. Within deferred #10's area but a specific create-before-verify defect with a concrete governance-liveness impact and a persistence (pruning-evasion) twist that #10's generic 'rate-limit the port' framing does not capture.",
+    "poc": "<scratch>/node-input/node/zz_poc_test.go (TestPoCGovernancePoolFillBlocksLegitVotes) \u2014 PASS: 64 vote-less junk proposals fill + survive pruning; a real validator's valid vote is refused",
+    "fix": "Do not allocate a pool entry until at least one carried vote verifies as a current validator (move the create below the vote loop, or require >=1 verified vote before insertion). Count the 64 cap over proposals that hold >=1 verified validator vote.",
+    "confidence": "high"
+   },
+   {
+    "id": "NODE-IN-4",
+    "title": "/hdls/resolve answer is not provably bound to its digest; documented cross-check (compare digests) is insufficient, and Height is off by one",
+    "severity": "low",
+    "category": "docs-drift",
+    "locations": [
+     "node/httptransport.go:270-300",
+     "node/httptransport.go:253-266",
+     "docs/operating-a-network.md:198",
+     "docs/security.md:87"
+    ],
+    "description": "handleResolve returns a record (name, publicKey, address, description) read from committed accounts plus StateDigest=hex(snap.Decided) and Height=snap.Height. The fields are genuinely under that digest (Address was added to StateDigest by fix #4). But the answer carries NO commit certificate and NO inclusion proof, and the node simply asserts the 32-byte digest string. The ResolveRecord comment (:257) and operating-a-network.md:198 tell a distrustful client to 'query K nodes and compare \u2014 matching digests mean the same \u2154-agreed state'. That is weaker than claimed: a single dishonest node can return a fabricated record alongside the honest digest string it copied from others, and a client comparing only digests is fooled. The sound check is to compare the actual key/address FIELDS across nodes (which honest nodes agree on precisely because Address is in the digest). Also Height=snap.Height is the in-progress height (committed+1), while the digest finalizes committed height snap.Height-1.",
+    "failure_scenario": "A client follows the docs and resolves alice via its reference node, comparing the returned stateDigest against a couple of other nodes. The reference node returns {address: attacker-controlled, publicKey: alice, stateDigest: <value copied from honest nodes>}. All digests match, so the client concludes the answer is \u2154-agreed and uses the attacker's address (e.g. for peer/endpoint discovery). Impact is bounded for payments (the wallet pays by ToName, resolved on-chain at apply time \u2014 ui/wallet.go), so this is address/display integrity, not fund redirection.",
+    "attacker": "one dishonest reference node",
+    "known_status": "New (answers the brief's resolve question). Builds on fix #4 (Address now in the digest), which makes the correct cross-check possible but is not what the docs instruct.",
+    "poc": "none \u2014 mechanism is evident from httptransport.go:270-300 (no certificate/inclusion proof served; digest is an unverified node assertion) and the wallet pay-by-name path (ui/wallet.go:216-222) bounding impact; rated low/high-confidence without a failing test.",
+    "fix": "Either serve the Commit certificate (and ideally an inclusion proof) with the resolve answer so a client can verify the record against a \u2154 quorum, or correct the docs to say clients must compare the actual publicKey/address fields across independent nodes (digest equality alone is insufficient). Separately, label Height as the committed height the digest finalizes (snap.Height-1) or rename the field.",
+    "confidence": "high"
+   }
+  ],
+  "checked_ok": [
+   "handleGossipPayment (httptransport.go:156) verifies the payer signature before AdmitPayment \u2014 the finding-#9/mempool-flood gate is intact; junk payments are not admitted or relayed",
+   "handleAccountUpdate (httptransport.go:175) verifies the owner signature before SubmitUpdate/relay; evUpdate also enforces WithinMessageBound before relay (node.go:286)",
+   "Payments/updates/governance votes relay ONLY on successful verified+deduped+bounded admission (mem.add / updates.add / addParameterVotes returning true) \u2014 votes (NODE-IN-2) are the sole unconditional-relay path",
+   "onProposal drops proposals whose Height != n.height and verifies p.Proposer==driver.Proposer(round) and the proposer signature before relay/ApplyBlock (node.go:494-509); the held-duplicate fast path never relays (swapped-body guard)",
+   "ReceiveVote bounds rounds to d.round+maxRoundLookahead (256) and drops wrong-height/negative-round votes (driver.go:213-218), so per-round VoteSet allocation is bounded",
+   "Checkpoint intake (bestCheckpoint) quorum-verifies off-loop in a goroutine before enqueuing evAdopt/evCatchUp; verifyCheckpoint re-verifies against live state, so a malicious peer's junk checkpoint cannot drive loop work on attacker terms",
+   "mempool and updatePool are size-bounded (MaxMempool) and content-deduped by PaymentID/UpdateID; dropBelow/dropOverdrawn prune stale and newly-overdrawing entries each commit",
+   "blocks/heightProposals/relaySeen/pendingSlashes maps are reset or pruned each commit and keyed to bound growth across heights (node.go:650-669); only heightVotes (NODE-IN-2) lacks a cap",
+   "cmd/server/main.go sets ReadHeaderTimeout/ReadTimeout/WriteTimeout/IdleTimeout (C7), bounding handler-goroutine pile-up behind a saturated loop",
+   "decode() enforces POST and a 1 MiB MaxBytesReader on all mutating endpoints; handleResolve enforces GET and the raw-'+' key fix",
+   "Static and dynamic validator modes both route power through NewValidatorSet saturation (MaxValidatorPower) and validatorsFor; no nil-set panic on the dynamic path (C1 fix confirmed via validatorsLabel)"
+  ],
+  "notes": ""
+ },
+ {
+  "area": "WALLET + ADMIN UI (ui/ module: main.go, wallet.go, keyfile.go, admin.go, templates/*.html)",
+  "summary": "The wallet is well-structured and several prior findings are genuinely fixed (html/template is used so on-chain strings auto-escape; receipt verification checks signature+PaymentID+validator-membership; the CSRF guard blocks ordinary cross-site/same-site browser POSTs; the hand-rolled PBKDF2-HMAC-SHA256 matches the stdlib on 300 randomized vectors incl. >block-size passwords and multi-block output). But the localhost-only, auto-signing design leans entirely on the origin guard and on key-at-rest sealing, and both have gaps. The headline is a DNS-rebinding bypass of the CSRF guard (KEY-1, high): the guard compares Origin.Host==r.Host rather than a fixed expected host, so after a rebind a web page the user merely visits can drive signed payments and governance votes with the local key \u2014 exactly the \"key does harm without being leaked\" shape the owner is worried about. On the key-at-rest side, following the tool's own documented remediation (set GOLEDGER_WALLET_PASSPHRASE) silently does NOT seal an already-created plaintext wallet (KEY-2, medium), and the public key in the file is unauthenticated and trusted over the private key (KEY-5, low). Two more: the persisted payment-block counter is poisoned permanently by one bad/malicious height report or a documented re-genesis (KEY-3, medium), and reassignment (mint) votes still resolve the typed name to a key via the untrusted node, so a validator signs a certificate targeting a key they never saw (KEY-4, medium) \u2014 the same class that was fixed for the payment path but left in the mint path. All five are traced end-to-end with failing PoC tests.",
+  "findings": [
+   {
+    "id": "KEY-1",
+    "title": "DNS-rebinding bypasses the CSRF/origin guard \u2014 drive-by signed payments and governance votes with the local key",
+    "severity": "high",
+    "category": "ui-security",
+    "locations": [
+     "ui/main.go:76-86",
+     "ui/main.go:62-70",
+     "ui/main.go:48-51"
+    ],
+    "description": "sameOrigin() only checks that Sec-Fetch-Site is not cross/same-site and that Origin.Host == r.Host \u2014 it never compares against a FIXED expected host (e.g. 127.0.0.1:<listen>). Under a DNS-rebinding attack the victim loads http://evil.example:8090 (attacker IP), the attacker re-points the name to 127.0.0.1, and the page fetches /send. The browser now sees page-origin and request-URL as the SAME origin, sending Origin: http://evil.example:8090, Host: evil.example:8090, Sec-Fetch-Site: same-origin \u2014 all of which the guard accepts (Origin.Host==r.Host holds by construction; same-origin is the trusted branch). The wallet, which auto-signs with the local key and listens on localhost, then signs and submits whatever the page asks. The deliberate no-header 'curl' fallback (returns true) is a second, independent bypass for any non-browser client that can reach the port. The prior CSRF HIGH (#27) is recorded fixed; this is a concrete bypass of that fix still present in current code.",
+    "failure_scenario": "User runs the wallet (and, for governance, is a validator) and, while it runs, visits an attacker page. The page rebinds its hostname to 127.0.0.1:8090, reads GET / same-origin (balance, public key), then POSTs /send (pay the attacker) and /admin/reassignment (mint to the attacker via a \u2154 vote). PoC drives the real handlers through the real guard with Origin/Host = the rebound name and Sec-Fetch-Site: same-origin; the node receives a VALID wallet-signed payment and a VALID reassignment vote.",
+    "attacker": "a web page the user visits (while the wallet runs)",
+    "known_status": "new \u2014 the CSRF guard (#27 / findings 'External review G1') is recorded as fixed and is tested only against classic cross-site/same-site/foreign-Origin and the curl fallback; DNS rebinding (same Origin==Host after rebind) was never in the test table and bypasses the fix.",
+    "poc": "<scratch>/wallet-ui/ui/poc_rebind_test.go (TestPoCDNSRebindingBypassesGuard) \u2014 FAILS: logs 'BYPASS: node received a VALID payment signed by the wallet key ... amount=999' and a VALID reassignment vote 'set ... to 1000000', plus rebound GET / serving the wallet page+key.",
+    "fix": "Bind the guard to a fixed expected authority: reject any request whose Host header is not the configured -listen host:port (or an explicit allowlist), independently of Origin, and additionally require Origin/Referer to equal that same fixed value when present. Keep the server on 127.0.0.1. Consider dropping the blanket no-header allow in favor of a localhost-only + fixed-Host check; if a no-browser escape hatch is kept for curl, gate it behind a loopback-peer check. Set X-Frame-Options/CSP frame-ancestors 'none' as defense-in-depth.",
+    "confidence": "high"
+   },
+   {
+    "id": "KEY-2",
+    "title": "Setting GOLEDGER_WALLET_PASSPHRASE as instructed does NOT seal an existing plaintext wallet \u2014 key stays in plaintext, silently",
+    "severity": "medium",
+    "category": "key-management",
+    "locations": [
+     "ui/keyfile.go:90",
+     "ui/keyfile.go:228-237",
+     "ui/README.md:40-47",
+     "ui/USER_MANUAL.md:31"
+    ],
+    "description": "On a non-interactive first run the wallet stores the Ed25519 private key in base64 PLAINTEXT and warns 'Set GOLEDGER_WALLET_PASSPHRASE to seal it' (keyfile.go:236); README repeats 'Set it ... to keep the key sealed'. But the plaintext\u2192sealed upgrade is gated by `interactive() && os.Getenv(passphraseEnv) == \"\"` (keyfile.go:90): when the operator follows the advice and sets the env var, the upgrade branch is skipped and the file is left plaintext \u2014 and because the run is now non-interactive with the var set, no further warning is emitted on any later start. The env var only ever seals a FRESH key (newPassphrase at creation); it never seals an already-created plaintext one. So the documented remediation is a silent no-op, leaving a validator/governance key readable by anyone who can read the file or a backup.",
+    "failure_scenario": "Operator runs the wallet as a service once without the var (plaintext + warning), reads the warning, sets GOLEDGER_WALLET_PASSPHRASE in the unit, restarts. PoC: create wallet with empty env (plaintext), set env to a passphrase, reload \u2014 wallet.json still has privateKey in plaintext (Encrypted==nil). Operator believes the key is sealed; it is not.",
+    "attacker": "local user on the machine, or anyone who obtains a backup/disk image of wallet.json",
+    "known_status": "new \u2014 findings 'Third pass' records the sealing feature and the env var for services as the fix for plaintext storage; the gap that the env var does not upgrade an existing plaintext file (and suppresses the warning thereafter) is not recorded.",
+    "poc": "<scratch>/wallet-ui/ui/poc_keyfile_test.go (TestPoCEnvPassphraseDoesNotSealExistingPlaintext) \u2014 FAILS: 'after setting GOLEDGER_WALLET_PASSPHRASE as instructed, the wallet file still holds the private key in PLAINTEXT'.",
+    "fix": "When a plaintext key loads and a passphrase is available (env var OR interactive), re-seal in place and rewrite the file atomically \u2014 drop the `os.Getenv(passphraseEnv) == \"\"` condition from the upgrade gate. At minimum, keep printing the 'stored UNENCRYPTED' warning on every start while the on-disk form is plaintext, even when the env var is set, so the operator is not misled.",
+    "confidence": "high"
+   },
+   {
+    "id": "KEY-3",
+    "title": "Persisted payment-block counter is poisoned permanently by one bad/malicious height, and survives a documented re-genesis \u2014 payments then never land",
+    "severity": "medium",
+    "category": "liveness",
+    "locations": [
+     "ui/wallet.go:168-178",
+     "ui/wallet.go:180-191",
+     "ui/wallet.go:70-85",
+     "ui/USER_MANUAL.md:48-49"
+    ],
+    "description": "nextPaymentBlockID = max(height()+lookahead, lastPaymentBlockID+1), then persists the result to <wallet>.state. height() trusts the node's /hdls/status with no sanity bound, and the persisted counter is monotonic and NOT scoped to a network/genesis. One out-of-range height \u2014 a dishonest or buggy reference node reporting a huge value, or simply the OLD chain's height carried across a documented re-genesis (migration restarts at height 1, but the manual tells users to copy wallet.json AND wallet.json.state together) \u2014 latches lastPaymentBlockID to that large value forever. Every later payment, even against an honest node and across restarts, then names a far-future BlockID. The node accepts it (admitPayment only rejects BlockID < height, node/node.go:436) and signs a receipt, but the payment waits for a block that effectively never arrives (mempool.dropBelow only evicts past blocks), so it never commits: a 'receipt but money never moved' outcome the user cannot clear.",
+    "failure_scenario": "PoC: node reports height 2^40 once; wallet signs one payment (persists 2^40). Node then reports honest height 10; after restart the wallet still names block 1099511627780 \u2014 every future payment is unspendable. Re-genesis variant needs no attacker: after a migration to height 1, a wallet whose .state holds 5000 names block 5001+ and cannot pay on the new chain until it reaches 5001.",
+    "attacker": "the wallet's reference node (one bad /hdls/status), or no attacker at all (a documented re-genesis / chain reset)",
+    "known_status": "materially worse than #29 (height() returns 0 on node error, accepted as benign). Here a non-zero out-of-range height is PERSISTED and poisons all future payments across restarts and across a switch to honest infrastructure; the re-genesis interaction (with the manual's copy-both-files guidance) gives a no-attacker trigger.",
+    "poc": "<scratch>/wallet-ui/ui/poc_blockid_test.go (TestPoCPersistedBlockIDCounterUnbounded) \u2014 FAILS: 'with the honest tip at height 10 the next payment names block 1099511627780'.",
+    "fix": "Clamp/sanity-check height(): ignore a status height that is wildly beyond the last observed one, and never let a single report jump the counter by more than a bounded window. Scope the .state file to (networkID, genesis digest) so it resets on a new chain. Cap nextPaymentBlockID at height()+lookahead+small-slack and detect/log when the persisted counter is far ahead of the live tip.",
+    "confidence": "high"
+   },
+   {
+    "id": "KEY-4",
+    "title": "Admin reassignment (mint) votes resolve the typed name to a key via the untrusted node \u2014 validator signs a certificate targeting a key it never saw",
+    "severity": "medium",
+    "category": "governance",
+    "locations": [
+     "ui/admin.go:156-167",
+     "ui/admin.go:172-200",
+     "ui/admin.go:203-209"
+    ],
+    "description": "VoteReassignment maps the operator's typed name to a key with resolveAccountKey, which trusts whatever /hdls/accounts returns, and binds PreviousAmount from balanceOf (same untrusted source). It then signs the reassignment vote over the node-supplied Account key and PreviousAmount without ever showing the resolved key to the operator or checking it is a key they intended. A malicious/compromised reference node returns a fabricated account {Name:'coop', PublicKey: attacker, Amount: X}; the validator, intending to vote 'coop', signs a certificate targeting the attacker's key with a node-chosen previous amount. Because reassignment is the MINT path, if \u2265\u2154 of validators share that node (plausible when a village points every wallet at the founder's node) the quorum forms on the attacker's key and mints to it. The payment path was explicitly hardened (payments sign the NAME and nodes resolve on-chain \u2014 findings 'Third pass') to kill exactly this node-remap vector; the mint path was left resolving client-side, guarded only by the comment's assumption that every validator uses an independent honest node.",
+    "failure_scenario": "PoC: a node whose /hdls/accounts maps 'coop'\u2192attackerKey. Operator calls VoteReassignment('coop','1000000'); the submitted vote has Account == attackerKey and PreviousAmount == the node's fabricated 7. The UI showed/accepted only the name 'coop'. With a shared/compromised reference node across a \u2154 validator set, the mint enacts.",
+    "attacker": "the wallet's reference node (a single dishonest/compromised node, amplified if validators share it)",
+    "known_status": "new angle on an accepted design (admin.go:151-155 comment argues the \u2154/independent-node quorum makes this safe). The new angle: the identical node-remap class was fixed for payments but remains in the reassignment/mint path, the UI never surfaces the resolved key before signing, and the 'independent honest node per validator' premise fails for the common shared-node village deployment.",
+    "poc": "<scratch>/wallet-ui/ui/poc_admin_test.go (TestPoCReassignmentVoteTargetsNodeChosenKey \u2014 FAILS: 'user typed \"coop\" but signed a reassignment vote targeting the node-supplied attacker key'; also TestPoCReassignmentVoteSignsUnresolvedNameLiterally for the unregistered-name case).",
+    "fix": "Do not let the node choose the target key for a signed mint vote. Require the operator to enter/confirm a raw public key for reassignment (or display the resolved key + current balance and require explicit confirmation before signing), and/or resolve names on-chain the way payments do. At minimum refuse to sign when resolveAccountKey falls through to a non-key literal.",
+    "confidence": "medium"
+   },
+   {
+    "id": "KEY-5",
+    "title": "Wallet trusts the stored publicKey over the private key; GCM uses empty associated data (KDF params / version / pubkey unauthenticated)",
+    "severity": "low",
+    "category": "key-management",
+    "locations": [
+     "ui/keyfile.go:141",
+     "ui/keyfile.go:74-84",
+     "ui/keyfile.go:145-170",
+     "ui/USER_MANUAL.md:31"
+    ],
+    "description": "sealPrivateKey calls gcm.Seal(nil, nonce, priv, nil) \u2014 empty associated data \u2014 so none of the surrounding fields are authenticated: KDF name, Iterations, Salt, and especially the plaintext publicKey live outside the AEAD. loadOrCreateKey decodes k.PublicKey and uses it as the wallet identity WITHOUT deriving/checking it against the private key (an Ed25519 private key embeds its public key, so this is checkable). A tampered or corrupted publicKey field therefore yields a wallet whose displayed 'your account' / receive-address and whose PublicKeyFrom on outgoing payments is a substituted key, with no error at load. The manual tells users a sealed backup is 'safe to store anywhere', implying integrity as well as confidentiality, which the format does not provide for the public part.",
+    "failure_scenario": "An attacker who can get the victim to restore a tampered (but still sealed) backup flips publicKey to the attacker's own key. The wallet shows and the victim shares the attacker's key as their receive address, so inbound payments are misdirected to the attacker. (Outgoing payments then fail node verification \u2014 a loud signal \u2014 which bounds stealth; a bit-flip in publicKey from disk corruption produces the same silent wrong-identity with no attacker.)",
+    "attacker": "holder of a stolen/tampered backup the victim later restores, or no attacker (file corruption of the unauthenticated field)",
+    "known_status": "new \u2014 the brief asks about GCM associated-data binding; findings records the sealing feature but not that KDF params/pubkey are outside the AEAD or that the stored pubkey is trusted over the private key.",
+    "poc": "<scratch>/wallet-ui/ui/poc_keyfile_test.go (TestPoCPublicKeyNotBoundToPrivateKey) \u2014 FAILS: 'a key file whose publicKey does not match its private key loaded without error; wallet identity is now ...'.",
+    "fix": "Derive the public key from the decrypted Ed25519 private key and either ignore the stored publicKey or verify equality and error on mismatch. Bind version + KDF params (kdf name, iterations, salt) and the public key into the GCM associated data so tampering any of them fails Open. Correct the 'safe to store anywhere' wording to note integrity of the public header is not cryptographically protected.",
+    "confidence": "medium"
+   }
+  ],
+  "checked_ok": [
+   "Template escaping: ui/main.go imports html/template and uses template.Must(ParseFS) (main.go:16,26), so on-chain names in wallet.html/admin.html get contextual auto-escaping; Description and Comment are never rendered in any template (grep confirms only .Name/.PublicKey/.Amount and numeric governance fields appear). No text/template anywhere. A malicious node's reflected error text lands only in escaped HTML-text context (<p class=err>{{.Error}}</p>).",
+   "Receipt verification (wallet.go:242-245) correctly requires node signature valid AND PaymentID==PaymentID(p) AND node \u2208 validator set; the four security_test.go cases (validator, non-validator, wrong-payment, bad-sig) pass. Fix for #28 holds.",
+   "PBKDF2-HMAC-SHA256 (keyfile.go:183-207) matches crypto/pbkdf2 (stdlib) on 300 randomized inputs including passwords > 64-byte HMAC block size, empty password/salt, multi-block output (keyLen up to 100 > hashLen) and at the production 600k-iteration/32-byte setting \u2014 the hand-rolled KDF is correct beyond the four shipped vectors (poc_pbkdf2_crosscheck_test.go, PASS).",
+   "Salt (16B) and GCM nonce (12B) are freshly crypto/rand per seal (keyfile.go:124-135); no fixed/reused IV; iterations stored per-file so they can be raised. open() returns a uniform wrong-passphrase-or-corrupt error and never yields garbage key bytes (AEAD-authenticated); confirmed by TestSealedKeyRoundTrip.",
+   "GET endpoints have no side effects: / (index) and /admin only render; /send,/register,/admin/* redirect to GET on non-POST. The guard is POST-only, which is correct given no mutating GETs.",
+   "Listen address defaults to 127.0.0.1:8090 and is passed straight to ListenAndServe; it can only become 0.0.0.0 by explicit operator -listen flag (documented 'keep it local'). Not a code-chosen exposure, but note the no-header guard fallback means any client reaching the port needs no browser headers \u2014 see KEY-1 fix.",
+   "Payment construction: recipient is signed as a NAME on-chain for pay-by-name (wallet.go:216-225) and the network resolves it, so a malicious node cannot remap a payment recipient (the third-pass fix holds for payments \u2014 contrast KEY-4 for reassignments). looksLikePublicKey trims and requires exactly 32 decoded bytes.",
+   "Mutating routes /send,/register,/admin/parameter,/admin/reassignment are all wrapped in guard() (main.go:48-51), and TestMutatingHandlersAreGuarded confirms a cross-site POST is blocked before the nil wallet is touched. The classic cross-site/same-site/foreign-Origin cases are blocked (it is only the rebind/same-origin-after-rebind and no-header paths that slip through \u2014 KEY-1)."
+  ],
+  "notes": "Severity ranking for the wallet-ui area: KEY-1 (high) > KEY-3, KEY-2, KEY-4 (medium) > KEY-5 (low). eMudhra relevance / the owner's 'two different signings = burned key' principle: KEY-1, KEY-2 and KEY-5 are all 'the key does harm or is exposed without ever being leaked in the obvious sense' \u2014 KEY-1 makes the live key sign attacker-chosen statements from a drive-by page, KEY-2/KEY-5 leave it exposed/substitutable at rest despite the operator believing it protected. Note the owner's burn rule is a LEDGER-side mitigation (equivocation evidence slashes a validator that double-signs consensus votes); it would NOT have stopped a leaked eMudhra-style signing key here, because a wallet/validator key signing two *different, individually-valid* payments or governance votes is normal activity, not equivocation \u2014 only two conflicting consensus votes for the same (height,round,type) are slashable (consensus/voteset.go). So KEY-1's attacker-driven payments/votes are not 'burnable'. Minor docs-drift (info, folded into findings, not separately listed): USER_MANUAL.md:69 still shows 'receipt from node abc\u2026 verified \u2713' while the code now prints 'receipt from validator \u2026' (main.go:118). All PoC files are under <scratch>/wallet-ui/ui/ (poc_rebind_test.go, poc_keyfile_test.go, poc_blockid_test.go, poc_admin_test.go, poc_helpers_test.go, poc_pbkdf2_crosscheck_test.go); run e.g. `cd <scratch>/wallet-ui && go test -C ui -run TestPoC -v .`. poc_pbkdf2_crosscheck_test.go carries a //go:build go1.24 tag (uses crypto/pbkdf2) \u2014 it is a checked-OK cross-check, not a bug. The original tree at <repo> was not modified (mtimes unchanged)."
+ },
+ {
+  "area": "flake-suite \u2014 TestPaymentGossipReceiptAndReplay root-cause + full-suite -race runs (node liveness)",
+  "summary": "TestPaymentGossipReceiptAndReplay is NOT a test-timing artifact. It reliably detects a real node liveness bug: a block proposal that arrives in the post-commit window \u2014 after commit(H) increments the height but before startHeight(H+1) builds the new driver (the MinBlockInterval gap) \u2014 is authenticated against the OLD height's proposer schedule, dropped, and never re-processed. The height's first proposal attempt is simply lost; recovery waits for the proposer's next reGossipProposal tick (every cfg.Timeout: 5s in the test, default 3s in production). When \u22652 of 4 nodes hit the window the whole height stalls ~one step-timeout, and the test fails when enough heights stall to blow the 20s deadline. A deterministic PoC (one hand-driven node, no reliance on scheduling) reproduces the drop with a >1s margin, and a throughput PoC shows an all-honest, zero-loss 4-validator LAN commits only ~25% of the blocks it should, spending ~2/3 of wall time stalled. A second, independent defect (timeouts are not height-scoped: a propose timer armed at height H fires into height H+1's driver and prevotes nil prematurely) adds variance and rejects timely proposals. A third, unauthenticated defect surfaced while tracing: the proposal signature does not cover the block body, and onProposal records/relays/re-gossips the first-seen authentic-signature copy even when its body fails ApplyBlock, then dedups every genuine copy \u2014 so one keyless swapped-body copy delivered first poisons a node's view of the round. A prototype fix (height-scoped timeouts + hold-and-replay the window proposal into the new driver) takes the same network to ~100% of ideal throughput and keeps the whole suite -race green. The full suite (no -short) ran twice under -race with GOLEDGER_CHAOS_SLACK=4 plus the ui module under -race: all green, no data races, no fork/supply violations.",
+  "findings": [
+   {
+    "id": "LIVE-1",
+    "title": "Block proposal arriving in the post-commit window is dropped and the height's first round is lost",
+    "severity": "medium",
+    "category": "liveness",
+    "locations": [
+     "node/node.go:495",
+     "node/node.go:466",
+     "node/node.go:656",
+     "node/node.go:587",
+     "node/sync.go:67"
+    ],
+    "description": "commit() does n.height++ then schedules startHeight(H+1) one MinBlockInterval later (node.go:656,678). In that window the new driver does not exist yet, but n.driver still points at the decided height-H driver. onProposal (node.go:495) requires n.driver!=nil and checks p.Proposer against n.driver.Proposer(round), which uses the OLD height; for H+1's proposal that is the wrong proposer (or, when consecutive proposers coincide, it is fed to the decided driver and then dedups every genuine copy). Either way the proposal is dropped, not relayed, and never re-processed. startHeight(H+1) builds a fresh driver with no proposal. The only recovery is the proposer's reGossipProposal every cfg.Timeout (sync.go:67). When >=2 of 4 nodes hit the window the height needs no quorum and stalls ~one step-timeout.",
+    "failure_scenario": "4 equal validators, localhost, no loss. N commits H at t, sets height=H+1, schedules startHeight at t+300ms. H+1's proposer broadcasts at ~its own t+300ms; the copy lands on N at ~t+312ms, before N's startHeight runs. onProposal checks it against the height-H schedule -> wrong proposer -> dropped, not relayed. N then starts H+1 with no proposal and cannot prevote. If a second node also dropped it, <3 nodes hold the proposal, so round 0 cannot reach quorum; every node waits ~cfg.Timeout for reGossipProposal, then commits at round 0/1 that many seconds late. Enough such heights before block 5 blow the test's 20s deadline (observed 5.6/10.6/15.9/20.0s).",
+    "attacker": "no attacker (bug; normal operation, no faults needed)",
+    "known_status": "new \u2014 not in findings.md/TODO.md. Distinct from the 2026-07-31 'duplicate proposal re-relayed unverified' fix and from the vote/proposal re-gossip work (TODO 'Vote re-gossip'), which masks this by eventually re-sending; the first attempt is still always lost in the window.",
+    "poc": "<scratch>/flake-suite/node/flake_poc_test.go (TestPoCDeadWindowProposalDropped, TestPoCDeadWindowProposalHeldNeverProcessed \u2014 both FAIL, print the dropped/held proposal) and flake-suite/node/flake_throughput_poc_test.go (TestPoCThroughput3Validators/4Validators \u2014 FAIL: ~17-31 of ~104 ideal heights, ~8s/12s stalled). Prototype fix in /tmp/.../scratchpad/flake-suite-fix makes both PASS (105-111/104) and keeps the whole -race suite green.",
+    "fix": "In commit() set n.driver=nil after the height advances, and in onProposal handle n.driver==nil during the window: authenticate against the NEW height's schedule (validatorsFor(n.accounts).ProposerAt(p.Height,p.Round)) and buffer the proposal in heightProposals; then have startHeight replay the buffered proposals (and heightVotes) into the freshly-built driver. See flake-suite-fix/node/node.go.",
+    "confidence": "high"
+   },
+   {
+    "id": "LIVE-2",
+    "title": "Consensus timeouts are not height-scoped: a stale timer fires into a later height's driver",
+    "severity": "low",
+    "category": "liveness",
+    "locations": [
+     "node/node.go:599",
+     "node/node.go:274",
+     "node/node.go:602"
+    ],
+    "description": "arm() (node.go:599) posts event{kind:evTimeout, step, round} carrying no height, and the handler (node.go:274) feeds it to whatever n.driver currently is as long as n.driver!=nil. The driver only guards round!=d.round (driver.go:233), and round numbers restart each height, so a propose/prevote timer armed at height H (e.g. round 0) fires into height H+1's brand-new driver (also round 0) after the height advanced. The node then prevotes nil far earlier than its own H+1 propose timeout is due, and rejects a valid, timely H+1 proposal that arrives within the intended window. Impact is bounded (one burned round, self-healing) but it compounds LIVE-1 and independently costs rounds whenever fan-out latency is a meaningful fraction of the step timeout \u2014 the documented multi-hop / slow-LAN case.",
+    "failure_scenario": "cfg.Timeout=1s, MinBlockInterval small. Node arms (propose, round 0) for height H at t (due t+1s). Height H commits and H+1 starts at t+0.68s. At t+1s the height-H timer fires; the handler feeds it to the height-H+1 driver (round 0, propose step) and the node prevotes NIL, though its own height-H+1 propose timeout is not due until ~t+1.68s. A valid height-H+1 proposal delivered at ~t+1.1s (0.42s into a 1s budget) is then refused, burning round 0.",
+    "attacker": "no attacker (bug)",
+    "known_status": "new \u2014 not recorded in findings.md/TODO.md.",
+    "poc": "<scratch>/flake-suite/node/flake_poc_test.go (TestPoCStaleTimeoutFiresIntoLaterHeight \u2014 FAIL, prints the premature nil prevote) and flake-suite/node/flake_staletimer_poc_test.go (TestPoCStaleTimersUnderSlowFanout \u2014 measurement: pristine ~30 heights with round>=1 occurrences vs ~55 clean under the full fix). Height-scoping the timer (flake-suite-fix) removes the premature prevote.",
+    "fix": "Tag each armed timer with the current height (arm captures n.height) and drop the evTimeout in handle() unless e.height==n.height, as the catch-up/commit guards already do for messages.",
+    "confidence": "high"
+   },
+   {
+    "id": "LIVE-3",
+    "title": "Swapped-body proposal under a genuine signature poisons a round (signature does not cover the block body)",
+    "severity": "medium",
+    "category": "liveness",
+    "locations": [
+     "node/messages.go:155",
+     "node/node.go:498",
+     "node/node.go:507",
+     "node/node.go:510",
+     "node/relay.go:29"
+    ],
+    "description": "proposalSignFields (messages.go:155) signs height/round/validRound/StateDigest but NOT the block body. onProposal accepts the first copy whose signature verifies and whose p.Proposer is the scheduled proposer (node.go:507), stores p.Block under its StateDigest and remembers/relays it even when ApplyBlock says the body is invalid (node.go:510-513) \u2014 the held fast path (node.go:498) and relay dedup (relay.go:29) then key only on StateDigest, so every later genuine copy is discarded. Because the signature omits the body, a 'genuinely invalid block the proposer signed' and 'a swapped body under a copied signature' are indistinguishable. Any peer/relay (no key, not a validator) can replay a seen proposal with a swapped body; if its copy arrives first the node prevotes nil against the real block, re-floods the forgery every cfg.Timeout, ignores genuine copies, and can only advance via height catch-up.",
+    "failure_scenario": "N1 proposes a valid block B for height H (digest D, signature S over D). A keyless observer that saw it re-sends ProposalMsg{same H,R,VR,Proposer=N1,Signature=S, Block=forged body, StateDigest=D}. VerifyProposal passes (body not signed). It reaches honest node N first: N runs ApplyBlock(forged)->invalid, stores forged under D, remembers it, relays it, feeds the driver Valid=false -> N prevotes nil. The 4 genuine copies that follow hit the held/relay dedup on D and are dropped. Even after 3/4 validators precommit B, N's stored proposal is Valid=false so it never decides H via consensus; it stalls until checkpoint catch-up. On a multi-hop topology a relay node can forward only the forged copy, spreading the stall.",
+    "attacker": "anyone reaching the port / a gossip peer (no key, no validator slot)",
+    "known_status": "new angle on a findings.md item recorded as FIXED. The 2026-07-31 RC review fixed 'a duplicate proposal re-relayed unverified' by making the held-proposal fast path never relay a duplicate; that closed the proposer-refloods-a-copied-digest path. It did NOT address the FIRST-sight copy: an invalid-body proposal under a genuine signature is still recorded, relayed, re-gossiped, and used to dedup the genuine block. Materially new: keyless, poisons the round rather than merely re-flooding.",
+    "poc": "<scratch>/flake-suite/node/flake_swapbody_poc_test.go (TestPoCSwappedBodyFirstSightPoisonsRound \u2014 FAIL: node prevotes nil against the valid block, relays the forgery, ignores 4 genuine copies, stays at the height though 3/4 precommitted).",
+    "fix": "Bind the block body into the proposal signature (add StateDigest's preimage or a body hash to proposalSignFields), so a swapped body fails VerifyProposal and is distinguishable from a proposer's own invalid block; or in onProposal refuse to let an ApplyBlock-invalid first copy occupy the round's held/relay slot (verify body->digest before remember/relay). Ties to the owner's 'two signings = burned key' principle: a one-shot signature that under-binds its payload lets a forgery through with no second signing to detect.",
+    "confidence": "high"
+   },
+   {
+    "id": "DOC-1",
+    "title": "Docs claim healthy-network cadence and self-heal that the proposal-window drop contradicts",
+    "severity": "low",
+    "category": "docs-drift",
+    "locations": [
+     "docs/consensus.md:58",
+     "docs/governance.md:118",
+     "docs/security.md:106",
+     "README.md:215"
+    ],
+    "description": "docs/consensus.md and docs/governance.md describe timeouts as a fallback for an unreliable network ('under an unreliable network the rounds eventually stretch past message latency'), implying a healthy network commits at the block-interval cadence. In fact LIVE-1 makes an all-honest, zero-loss network lose round 0 of most heights to the post-commit-window drop and wait ~one step-timeout (default 3s) for reGossipProposal on the majority of blocks \u2014 a ~4x throughput shortfall with no faults. security.md:106 frames periodic re-gossip purely as partition self-heal; it is in fact the routine recovery path that masks the window bug every height. The claims are not false in principle but materially overstate steady-state liveness; worth correcting alongside the LIVE-1 fix (after which the cadence claim holds).",
+    "failure_scenario": "An operator reads docs/governance.md's timing-profile section, sets minBlockIntervalMs=1000/timeoutMs=3000 as documented, and expects ~1 block/s on a healthy LAN. The network instead produces roughly one block per ~3s because nearly every height burns round 0 in the window and waits for reGossipProposal \u2014 contradicting the documented expectation, with no fault present.",
+    "attacker": "no attacker (documentation vs behaviour)",
+    "known_status": "new \u2014 the docs do not mention the post-commit-window drop; this surfaces with LIVE-1.",
+    "poc": "<scratch>/flake-suite/node/flake_throughput_poc_test.go (ideal vs actual height counts quantify the cadence gap).",
+    "fix": "Either fix LIVE-1 (then the cadence claim is accurate) or note in docs/consensus.md and docs/operating-a-network.md that current steady-state block time is governed by the step timeout, not the block interval, until the window drop is addressed.",
+    "confidence": "high"
+   }
+  ],
+  "checked_ok": [
+   "Full suite without -short ran twice under -race with GOLEDGER_CHAOS_SLACK=4 (suite-run1.log, suite-run2.log): all packages ok, no data races, no fork/supply-cap violations from the chaos checkers. Seeds logged per scenario in both runs.",
+   "ui module under -race (go test -C ui -race ./...): ok, 17 tests pass, no data races.",
+   "The replay test's REPLAY assertion (resubmitting a past-block payment) is sound \u2014 mempool.dropBelow + the BlockID==height inclusion rule correctly make a cleared payment non-re-includable; the flake is entirely in reaching the first commit, not in replay.",
+   "Safety held throughout: every slow/failing run of the flaky test still committed one digest per height and conserved supply; the bug is liveness-only (the chaos fork/supply checkers were green across both -race suite runs).",
+   "The 2026-07-31 held-proposal re-relay fix (findings.md) is present and correct for its stated case (a held duplicate is not re-relayed); LIVE-3 is a different, first-sight path.",
+   "Prototype fix (height-scoped timeouts + window hold-and-replay) passes the full node package under -race with GOLEDGER_CHAOS_SLACK=4 and all chaos scenarios (flake-suite-fix), and the flaky test ran 30x short + 15x short post-fix with max 1.94s and zero >2s outliers.",
+   "ProposerAt is correctly deterministic and stake-weighted (verified the FNV seeding over many heights); with 3 equal validators consecutive heights share a round-0 proposer ~86% of the time, which selects the 'held' variant of LIVE-1 \u2014 not itself a bug, but it governs which LIVE-1 path fires."
+  ],
+  "notes": "ROOT CAUSE (verdict: real node liveness bug, not a timing artifact). The payment in the test names BlockID = h+3 (h=2) => block 5, so the network must reach height 5 within the 20s (xslack) deadline. Instrumented trace of the real 4-node HTTP stack (GOLEDGER_TRACE in /tmp/.../scratchpad/flake-suite-trace; captured slow/failing traces in /tmp/.../scratchpad/flake-suite-logs/traces) shows the exact sequence at every slow/failed run:\\n  1. Node commits height H (commit(): n.height++ then time.AfterFunc(MinBlockInterval, evNextHeight); node.go:656,678). The decided height-H driver is still installed as n.driver.\\n  2. Height H+1's scheduled proposer also waited its own MinBlockInterval, so its proposal lands on peers at ~the same moment their startHeight(H+1) is due \u2014 a race. When the proposal wins the race it is in the 'post-commit window'.\\n  3. onProposal (node.go:495,507) checks p.Proposer against n.driver.Proposer(round) \u2014 the OLD height-H driver. For H+1 the scheduled proposer differs (4 equal validators: round-robin, consecutive proposers differ ~99.8% of the time), so the check fails: 'proposal DROPPED wrong-proposer/bad-sig ... expected(driver h=H)=...'. The proposal is NOT relayed and NOT buffered.\\n  4. startHeight(H+1) then builds a fresh driver with heldVotes but heldProposals empty; the node cannot prevote. Genuine re-sends are dedup-dropped (held fast path / relaySeen, keyed on digest) until reGossipProposal re-floods on the cfg.Timeout cadence (5s in the test). With >=2 of 4 nodes having dropped it, <3 hold the proposal => round 0 cannot reach the 3-of-4 quorum => the WHOLE height waits ~5s (then commits at round 0, or at round 1 after the growing timeout). Traces show commits landing at round 1 after 15s.\\n  5. Stacked across heights 2->5, each poisoned height costs ~one step timeout; 3-4 poisoned heights = 15-20s, tripping the deadline. Observed durations (40-run traced loop): bimodal at ~1.9s (no height hit the window) and 5.6/6.2/10.6/11.3/15.6/15.9/16.6/18.6/20.0s (1..4 heights poisoned); 5 of 40 exceeded 20s and FAILED with exactly 'payment submitted to one node did not gossip and commit across a quorum'. This matches the owner-reported 2s-usual / 15.7s-once / 20s-fail profile precisely, and is independent of machine load (the deterministic single-node PoCs reproduce the drop with >1s margins while the box was busy with concurrent reviewers).\\n  A second, independent defect amplifies it: timeouts are not height-scoped (LIVE-2). A propose/prevote timer armed at height H fires into height H+1's new driver (round numbers restart), causing premature nil prevotes that burn additional rounds; traces show 'TIMEOUT step=0 round=0 (driver round 0 step 1)' arriving right after a height change.\\n  A third defect surfaced while tracing the drop logic (LIVE-3): the proposal signature omits the block body, so onProposal's first-sight record+relay of an invalid body lets a keyless swapped-body copy poison a round. Not the flake's cause but the same subsystem and directly on-theme for the eMudhra 'two signings = burned key' review (a one-shot signature that under-binds its payload needs no second signing to forge).\\n\\nThe single necessary-and-sufficient fix for the flake is LIVE-1 (buffer the window proposal and replay it into the new driver); LIVE-2's height-scoping removes the remaining variance. Prototype in /tmp/.../scratchpad/flake-suite-fix (diff at /tmp/.../scratchpad/flake-suite-logs/fix-node.go.diff): flake test 30x short + 15x short, all <2s; throughput PoC 105-111 of ~104 ideal heights (was ~17-31); full node package under -race + GOLEDGER_CHAOS_SLACK=4 green. The fix touches only the node layer (no ledger/consensus digest or signature change), so it is not a wire-format break.\\n\\nSUITE RESULTS (-race, no -short, GOLEDGER_CHAOS_SLACK=4, pristine tree):\\n  Run 1 (suite-run1.log): all packages ok. node 27.0s, consensus 10.8s, ledger 1.2s, signing 1.0s, cmd/server 1.0s. No data race, no checker violation. chaos seeds (node): 1793083325817902739, ...329918994129, ...331989037523, ...333426273584, ...336440266334, ...339840006290, ...342261591227, ...344276882097, ...345770590484.\\n  Run 2 (suite-run2.log): all packages ok. node 27.9s. chaos seeds: 1793084081023282611, ...085176516244, ...088091057996, ...090318572591, ...093342080386, ...096901535932, ...099367404959, ...101369409275, ...101975871598.\\n  ui -race (ui-race-run1.log): ok, 16.4s, 17 tests, no data race.\\n  No chaos scenario (loss/dup/reorder, 2x2 and 3x1 partitions, gossip-isolated catch-up, equivocator-slashed, governance-cycle replay, dynamic admission, soak) failed in either run; the fork and supply invariants held throughout. TestPaymentGossipReceiptAndReplay itself passed in both -race runs (2.2s) because -race slows every node equally and widens the window-vs-startHeight race in the common direction \u2014 another sign the failure is a wall-clock race in the drop logic, not a race condition on shared memory."
+ }
+]

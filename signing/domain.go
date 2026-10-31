@@ -7,16 +7,24 @@ import "encoding/binary"
 // new constant for each new signable payload type; never sign anything untagged.
 type Domain string
 
+// The domains. A name request's requestor signs in the domain named by the request's kind (registration,
+// key-change, bank-change or freeze), so a signer that sees only the domain can tell a bank paying for
+// a customer's registration from a holder changing its own key or bank.
 const (
-	DomainPayment          Domain = "payment"
-	DomainValidatorMsg     Domain = "validator-message"
-	DomainAccountUpdate    Domain = "account-update"
-	DomainServerAuth       Domain = "server-auth"
-	DomainBlockRevision    Domain = "block-revision"
-	DomainReceipt          Domain = "receipt"
-	DomainParameterVote    Domain = "parameter-vote"
-	DomainReassignmentVote Domain = "reassignment-vote"
-	DomainProposal         Domain = "proposal"
+	DomainPayment            Domain = "payment"
+	DomainAccountUpdate      Domain = "account-update"
+	DomainRegistration       Domain = "registration"
+	DomainKeyChange          Domain = "key-change"
+	DomainBankChange         Domain = "bank-change"
+	DomainFreeze             Domain = "freeze"
+	DomainNameRequestBank    Domain = "name-request-bank"    // the co-signing bank, over a name request
+	DomainNameRequestNewKey  Domain = "name-request-new-key" // the new key, as proof of possession, over a registration or key change
+	DomainBlockRevision      Domain = "block-revision"
+	DomainReceipt            Domain = "receipt"
+	DomainParameterVote      Domain = "parameter-vote"
+	DomainReassignmentVote   Domain = "reassignment-vote"
+	DomainReassignmentNewKey Domain = "reassignment-new-key" // the new key, as proof of possession, over a ⅔ name action
+	DomainProposal           Domain = "proposal"
 )
 
 // protocolTag is a fixed prefix so a hypernode signature can never collide with a signature
@@ -39,22 +47,22 @@ func Preimage(networkID string, domain Domain, fields ...[]byte) []byte {
 	// Pre-size: 4-byte length header per component (3 fixed + fields) plus the bytes.
 	size := 4 * (3 + len(fields))
 	size += len(protocolTag) + len(networkID) + len(domain)
-	for _, f := range fields {
-		size += len(f)
+	for _, field := range fields {
+		size += len(field)
 	}
-	buf := make([]byte, 0, size)
+	preimage := make([]byte, 0, size)
 
-	write := func(b []byte) {
-		var n [4]byte
-		binary.BigEndian.PutUint32(n[:], uint32(len(b)))
-		buf = append(buf, n[:]...)
-		buf = append(buf, b...)
+	write := func(component []byte) {
+		var lengthPrefix [4]byte
+		binary.BigEndian.PutUint32(lengthPrefix[:], uint32(len(component)))
+		preimage = append(preimage, lengthPrefix[:]...)
+		preimage = append(preimage, component...)
 	}
 	write([]byte(protocolTag))
 	write([]byte(networkID))
 	write([]byte(domain))
-	for _, f := range fields {
-		write(f)
+	for _, field := range fields {
+		write(field)
 	}
-	return buf
+	return preimage
 }

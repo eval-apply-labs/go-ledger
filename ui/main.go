@@ -1,6 +1,7 @@
 // Command go_ledger_ui is a friendly local wallet for a go_ledger network. It holds the user's
-// key locally, shows their balance and the accounts on the ledger, and lets them send a payment
-// with a simple form -- instead of hand-editing JSON and signatures, as the original required.
+// key locally, shows their name, their balance and the accounts on the ledger, and lets them pay by
+// name, freeze their name, and draft and sign name requests (a bank's desk included) and governance
+// votes with simple forms -- instead of hand-editing JSON and signatures, as the original required.
 //
 // Usage:
 //
@@ -15,222 +16,427 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
-	"sort"
+
+	"github.com/eval-apply-labs/go-ledger/consensus"
+	"github.com/eval-apply-labs/go-ledger/ledger"
+	"github.com/eval-apply-labs/go-ledger/node"
 )
 
 //go:embed templates/*.html
-var tmplFS embed.FS
+var templateFiles embed.FS
 
-var tmpl = template.Must(template.ParseFS(tmplFS, "templates/*.html"))
+var pageTemplates = template.Must(template.New("pages").Funcs(template.FuncMap{"fingerprint": fingerprint}).ParseFS(templateFiles, "templates/*.html"))
 
 func main() {
-	node := flag.String("node", "http://127.0.0.1:8080", "node base URL")
+	nodeURL := flag.String("node", "http://127.0.0.1:8080", "node base URL")
 	listen := flag.String("listen", "127.0.0.1:8090", "address to serve the wallet UI on")
-	network := flag.String("network", "village", "network id (must match the node)")
+	network := flag.String("network", "village", "network name (the node's network id must start with it and a slash)")
 	keyfile := flag.String("wallet", "wallet.json", "wallet key file (created if absent)")
-	lookahead := flag.Int64("lookahead", 3, "blocks ahead a payment names (raise if payments miss their block)")
+	lookahead := flag.Int64("lookahead", 3, fmt.Sprintf("blocks ahead a payment or a freeze names, at most %d (raise if they miss their block)", node.MaxBlockIDLookahead-blockSlack))
 	flag.Parse()
 
-	w, err := LoadOrCreateWallet(*keyfile, *network, *node, *lookahead)
+	wallet, err := LoadOrCreateWallet(*keyfile, *network, *nodeURL, *lookahead)
 	if err != nil {
 		log.Fatalf("wallet: %v", err)
 	}
 
-	h := &handler{w: w}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", h.index)
-	mux.HandleFunc("/admin", h.admin)
-	// Mutating endpoints auto-sign with the local key, so they are guarded against cross-site
-	// (CSRF / drive-by) requests — a page the user merely visits must not be able to submit a
-	// payment or a governance vote.
-	mux.HandleFunc("/send", guard(h.send))
-	mux.HandleFunc("/register", guard(h.register))
-	mux.HandleFunc("/admin/parameter", guard(h.proposeParameter))
-	mux.HandleFunc("/admin/reassignment", guard(h.voteReassignment))
-
-	log.Printf("go_ledger wallet on http://%s  (account %s…, node %s)", *listen, first(w.PublicKey(), 12), *node)
-	log.Fatal(http.ListenAndServe(*listen, mux))
+	log.Printf("go_ledger wallet on http://%s  (key %s…, node %s)", *listen, first(wallet.PublicKey(), 12), *nodeURL)
+	log.Fatal(http.ListenAndServe(*listen, routes(wallet, *listen)))
 }
 
-type handler struct{ w *Wallet }
+type handler struct{ wallet *Wallet }
 
-// guard blocks cross-site POSTs to a mutating endpoint. The wallet listens on localhost and
-// auto-signs with the local key, so without this any web page the user visits while the wallet runs
-// could silently trigger a signed payment or governance vote (CSRF / drive-by).
-func guard(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && !sameOrigin(r) {
-			http.Error(w, "cross-site request blocked", http.StatusForbidden)
+// routes is the wallet's HTTP surface. Every route sits behind guard: the mutating ones auto-sign
+// with the local key, so a page the user merely visits must not be able to submit a payment, a freeze,
+// a name request or a governance vote (CSRF / drive-by / DNS rebinding).
+func routes(wallet *Wallet, listen string) http.Handler {
+	walletHandler := &handler{wallet: wallet}
+	serveMux := http.NewServeMux()
+	serveMux.HandleFunc("/", walletHandler.index)
+	serveMux.HandleFunc("/send", walletHandler.send)
+	serveMux.HandleFunc("/update", walletHandler.updateAccount)
+	serveMux.HandleFunc("/freeze", walletHandler.freeze)
+	serveMux.HandleFunc("/requests", walletHandler.requests)
+	serveMux.HandleFunc("/admin", walletHandler.admin)
+	serveMux.HandleFunc("/admin/parameter", walletHandler.proposeParameter)
+	serveMux.HandleFunc("/admin/reassignment", walletHandler.voteReassignment)
+	return guard(listen, serveMux)
+}
+
+// guard refuses any request sameOrigin does not accept, and forbids framing the wallet's pages, so
+// another site cannot overlay its buttons either.
+func guard(listen string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		responseWriter.Header().Set("X-Frame-Options", "DENY")
+		responseWriter.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		if !sameOrigin(request, listen) {
+			http.Error(responseWriter, "cross-site request blocked", http.StatusForbidden)
 			return
 		}
-		h(w, r)
-	}
+		next.ServeHTTP(responseWriter, request)
+	})
 }
 
-// sameOrigin reports whether a request is same-origin. It trusts the browser's Sec-Fetch-Site label
-// (a cross-site form post is marked "cross-site") and, if an Origin header is present, requires it to
-// match the served host. A request with neither header (a non-browser client like curl, or a
-// top-level form navigation) is allowed — the local operator, not a foreign page.
-func sameOrigin(r *http.Request) bool {
-	switch r.Header.Get("Sec-Fetch-Site") {
+// sameOrigin reports whether a request comes from the wallet's own pages. Its Host must be one of the
+// wallet's own authorities (ownHost), whatever the Origin says: a DNS-rebinding page reaches the
+// wallet under the attacker's host name, with a matching Origin. A read needs nothing more. Anything
+// else must not be labelled cross-site by the browser (Sec-Fetch-Site), and must carry an Origin (or,
+// failing that, a Referer) naming the same host: browsers send Origin on every POST, so a request
+// with neither is not the operator's browser.
+func sameOrigin(request *http.Request, listen string) bool {
+	if !ownHost(request.Host, listen) {
+		return false
+	}
+	if request.Method == http.MethodGet || request.Method == http.MethodHead {
+		return true
+	}
+	switch request.Header.Get("Sec-Fetch-Site") {
 	case "cross-site", "same-site":
 		return false
 	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		u, err := url.Parse(origin)
-		return err == nil && u.Host == r.Host
+	source := request.Header.Get("Origin")
+	if source == "" {
+		source = request.Header.Get("Referer")
 	}
-	return true
+	sourceURL, err := url.Parse(source)
+	return source != "" && err == nil && sourceURL.Host == request.Host
 }
 
-type pageData struct {
-	PublicKey string
-	Name      string // this wallet's registered name, if any
-	Balance   string
-	Height    int64
-	Accounts  []acctRow
-	Message   string
-	Error     string
-}
-
-type acctRow struct{ Name, PublicKey, Amount string }
-
-func (h *handler) index(wr http.ResponseWriter, r *http.Request) {
-	h.render(wr, r.URL.Query().Get("msg"), r.URL.Query().Get("err"))
-}
-
-func (h *handler) send(wr http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(wr, r, "/", http.StatusSeeOther)
-		return
-	}
-	receipt, verified, err := h.w.Send(r.FormValue("to"), r.FormValue("amount"))
+// ownHost reports whether host (a Host header) names the wallet on its -listen port: the listen host
+// itself, localhost or a loopback address, or, when listening on every interface, any IP address
+// (the operator then reaches it by address). Any other host name is refused: it is how a
+// DNS-rebinding page addresses the wallet, and a page can never rebind an IP address.
+func ownHost(host, listen string) bool {
+	listenHost, port, err := net.SplitHostPort(listen)
 	if err != nil {
-		http.Redirect(wr, r, "/?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return false
+	}
+	name, requestPort, err := net.SplitHostPort(host)
+	if err != nil || requestPort != port {
+		return false
+	}
+	if name == listenHost || name == "localhost" {
+		return true
+	}
+	hostIP := net.ParseIP(name)
+	wildcard := listenHost == "" || net.ParseIP(listenHost).IsUnspecified()
+	return hostIP != nil && (hostIP.IsLoopback() || wildcard)
+}
+
+// pageData is the wallet's main page. Every page reads one verified state, and shows and acts on it.
+type pageData struct {
+	PublicKey     string // the wallet's key in full: render finds the wallet's name by it, and the copy button copies it
+	Fingerprint   string // the first 16 hex digits of the key's SHA-256 (fingerprint)
+	Name          string // the name whose current key is this wallet's key, if any (spec 7.2)
+	Becomes       string // else the name whose pending key change is to this wallet's key, if any
+	BecomesAt     int64  // and the block at whose end that change takes effect
+	LastName      string // the last name this wallet held, when its key holds none now
+	FreezeName    string // the name the freeze button freezes: Name, or LastName when no state verifies
+	Frozen        bool   // Name is frozen
+	PendingChange string // a pending change on Name (pendingChange)
+	PendingAt     int64  // and the block at whose end it takes effect
+	FreezeStatus  string // what became of the freeze this wallet sent (Wallet.freezeStatus)
+	Balance       string
+	Verified      bool  // a state verified: the page shows it, and only then says "not registered"
+	Height        int64 // the height of the verified state the page shows
+	Accounts      []accountRow
+	Review        *paymentReview // a payment to confirm before it is signed
+	ConfirmFreeze bool           // the freeze button was pressed: confirm before it signs
+	Message       string
+	Error         string
+}
+
+// accountRow is one account in the page's table: never its key in full, only its fingerprint.
+type accountRow struct {
+	Name, Bank, Fingerprint, Amount string
+	Frozen                          bool
+}
+
+// index is the main page. The "/" pattern matches every path no other route takes, so any other path,
+// /favicon.ico included, is not found, and reads no checkpoint.
+func (walletHandler *handler) index(responseWriter http.ResponseWriter, request *http.Request) {
+	if request.URL.Path != "/" {
+		http.NotFound(responseWriter, request)
 		return
 	}
-	msg := "payment submitted"
+	checkpoint, err := walletHandler.wallet.verifiedState()
+	walletHandler.render(responseWriter, pageData{Message: request.URL.Query().Get("msg"), Error: request.URL.Query().Get("err")}, checkpoint, err)
+}
+
+// send reviews a payment (the default step): the page shows the payee's name and bank of record from the
+// verified state, and signs nothing. Its "confirm" step signs the payment and submits it.
+func (walletHandler *handler) send(responseWriter http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		http.Redirect(responseWriter, request, "/", http.StatusSeeOther)
+		return
+	}
+	if request.FormValue("step") != "confirm" {
+		checkpoint, err := walletHandler.wallet.verifiedState()
+		data := pageData{}
+		if err == nil {
+			review, reviewErr := walletHandler.wallet.ReviewPayment(checkpoint, request.FormValue("to"), request.FormValue("amount"))
+			if reviewErr != nil {
+				http.Redirect(responseWriter, request, "/?err="+url.QueryEscape(reviewErr.Error()), http.StatusSeeOther)
+				return
+			}
+			data.Review = &review
+		}
+		walletHandler.render(responseWriter, data, checkpoint, err)
+		return
+	}
+	receipt, verified, err := walletHandler.wallet.Send(request.FormValue("to"), request.FormValue("amount"))
+	if err != nil {
+		http.Redirect(responseWriter, request, "/?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	message := "payment submitted"
 	if verified {
 		// Surface the node's signed receipt — provisional proof a VALIDATOR accepted and queued THIS
-		// payment (signature valid, PaymentID matches, node is in the validator set).
-		msg = fmt.Sprintf("payment queued for block %d — receipt from validator %s… verified ✓", receipt.BlockID, first(receipt.Node, 12))
+		// payment (it names a pinned validator, verifies under its pinned key, and its PaymentID matches).
+		message = fmt.Sprintf("payment queued for block %d — receipt from validator %s verified ✓", receipt.BlockID, receipt.Node)
 	}
-	http.Redirect(wr, r, "/?msg="+url.QueryEscape(msg), http.StatusSeeOther)
+	http.Redirect(responseWriter, request, "/?msg="+url.QueryEscape(message), http.StatusSeeOther)
 }
 
-func (h *handler) register(wr http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(wr, r, "/", http.StatusSeeOther)
+func (walletHandler *handler) updateAccount(responseWriter http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		http.Redirect(responseWriter, request, "/", http.StatusSeeOther)
 		return
 	}
-	if err := h.w.RegisterName(r.FormValue("name"), r.FormValue("description")); err != nil {
-		http.Redirect(wr, r, "/?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+	update, err := walletHandler.wallet.UpdateAccount(request.FormValue("description"), request.FormValue("delegate"), request.FormValue("address"))
+	if err != nil {
+		http.Redirect(responseWriter, request, "/?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	http.Redirect(wr, r, "/?msg="+url.QueryEscape("name registration submitted — it appears once its block commits"), http.StatusSeeOther)
+	message := "account update submitted — it appears once its block commits"
+	if update.Delegate != "" && update.Delegate != ledger.ClearField {
+		message = "account update submitted, delegating to " + update.Delegate + " — it appears once its block commits" // the name as the wallet read it
+	}
+	http.Redirect(responseWriter, request, "/?msg="+url.QueryEscape(message), http.StatusSeeOther)
 }
 
-func (h *handler) render(wr http.ResponseWriter, msg, errMsg string) {
-	data := pageData{PublicKey: h.w.PublicKey(), Message: msg, Error: errMsg}
-	if bal, err := h.w.Balance(); err == nil {
-		data.Balance = bal.FloatString(2)
-	} else if data.Error == "" {
-		data.Error = "cannot reach node: " + err.Error()
+// freeze asks to confirm (the default step), and its "confirm" step signs a freeze of the wallet's own
+// name and submits it (spec 7.3).
+func (walletHandler *handler) freeze(responseWriter http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		http.Redirect(responseWriter, request, "/", http.StatusSeeOther)
+		return
 	}
-	data.Height = h.w.height()
-	if accts, err := h.w.accounts(); err == nil {
-		sort.Slice(accts, func(i, j int) bool { return accts[i].Name < accts[j].Name })
-		for _, a := range accts {
-			amt := "0"
-			if a.Amount != nil {
-				amt = a.Amount.FloatString(2)
-			}
-			if a.PublicKey == data.PublicKey {
-				data.Name = a.Name
-			}
-			data.Accounts = append(data.Accounts, acctRow{Name: a.Name, PublicKey: a.PublicKey, Amount: amt})
+	if request.FormValue("step") != "confirm" {
+		checkpoint, err := walletHandler.wallet.verifiedState()
+		walletHandler.render(responseWriter, pageData{ConfirmFreeze: true}, checkpoint, err)
+		return
+	}
+	freeze, err := walletHandler.wallet.Freeze()
+	if err != nil {
+		http.Redirect(responseWriter, request, "/?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	message := fmt.Sprintf("freeze of %s sent for block %d", freeze.Name, freeze.BlockID)
+	http.Redirect(responseWriter, request, "/?msg="+url.QueryEscape(message), http.StatusSeeOther)
+}
+
+// render shows the main page from one verified state, or, when none verifies (readErr), what the wallet
+// still knows: its key, its last name, and the freeze button for that name.
+func (walletHandler *handler) render(responseWriter http.ResponseWriter, data pageData, checkpoint node.Checkpoint, readErr error) {
+	wallet := walletHandler.wallet
+	data.PublicKey, data.Fingerprint = wallet.PublicKey(), fingerprint(wallet.PublicKey())
+	if readErr != nil {
+		if data.Error == "" {
+			data.Error = "cannot read a verified state from the node: " + readErr.Error()
+		}
+		data.FreezeName, data.FreezeStatus = wallet.lastName(), wallet.freezeStatus(nil)
+		walletHandler.execute(responseWriter, "wallet.html", data)
+		return
+	}
+	state := checkpoint.State
+	data.Verified, data.Height, data.FreezeStatus = true, state.Height, wallet.freezeStatus(&state)
+	for _, account := range state.Accounts {
+		data.Accounts = append(data.Accounts, accountRow{Name: account.Name, Bank: account.Bank, Fingerprint: fingerprint(account.PublicKey),
+			Amount: ledger.FormatAmount(account.Amount), Frozen: account.Frozen})
+		switch {
+		case account.PublicKey == data.PublicKey:
+			data.Name, data.FreezeName, data.Frozen = account.Name, account.Name, account.Frozen
+			data.Balance, data.PendingChange, data.PendingAt = ledger.FormatAmount(account.Amount), pendingChange(account), account.PendingHeight
+		case account.PendingKey == data.PublicKey:
+			data.Becomes, data.BecomesAt = account.Name, account.PendingHeight
 		}
 	}
-	if err := tmpl.ExecuteTemplate(wr, "wallet.html", data); err != nil {
-		log.Printf("render: %v", err)
+	if data.Name == "" {
+		data.LastName = wallet.lastName() // its key holds no name now: the page says that name has another key
 	}
+	walletHandler.execute(responseWriter, "wallet.html", data)
+}
+
+// execute writes the page from its template.
+func (walletHandler *handler) execute(responseWriter http.ResponseWriter, page string, data any) {
+	if err := pageTemplates.ExecuteTemplate(responseWriter, page, data); err != nil {
+		log.Printf("render %s: %v", page, err)
+	}
+}
+
+// requestsPageData is the Requests page (spec 7.3), which is also a bank's desk (spec 7.4).
+type requestsPageData struct {
+	PublicKey   string // the wallet's key in full, for its copy button only
+	Fingerprint string
+	HashName    string // this wallet's hash name (spec 7.7)
+	Verified    bool   // a state verified: Name, Fee and Customers come from it
+	Name        string // the wallet's name, if any
+	Fee         string // the network's new-key fee
+	Lead        int64  // the signers' time a draft gives by default
+	MaxLead     int64  // the most it can give: how far ahead a node takes a request (node.MaxRequestLookahead)
+	Customers   []pendingRow
+	Step        *requestStep // what the draft or sign step made
+	Message     string
+	Error       string
+}
+
+// requests is the Requests page. Its "draft" step (the default) drafts a request and signs nothing, its
+// "sign" step signs pasted request text in the roles this wallet holds, and its "submit" step posts a
+// complete request to the node.
+func (walletHandler *handler) requests(responseWriter http.ResponseWriter, request *http.Request) {
+	wallet := walletHandler.wallet
+	step := request.FormValue("step")
+	if request.Method == http.MethodPost && step == "submit" {
+		if err := wallet.SubmitNameRequest(request.FormValue("request")); err != nil {
+			http.Redirect(responseWriter, request, "/requests?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+			return
+		}
+		http.Redirect(responseWriter, request, "/requests?msg="+url.QueryEscape("request submitted — it applies in the block it names"), http.StatusSeeOther)
+		return
+	}
+	data := requestsPageData{PublicKey: wallet.PublicKey(), Fingerprint: fingerprint(wallet.PublicKey()), HashName: hashName(wallet.PublicKey()),
+		Lead: defaultRequestLead, MaxLead: node.MaxRequestLookahead, Message: request.URL.Query().Get("msg"), Error: request.URL.Query().Get("err")}
+	checkpoint, err := wallet.verifiedState()
+	if err == nil && request.Method == http.MethodPost {
+		var made requestStep
+		if step == "sign" {
+			made, err = wallet.SignNameRequest(checkpoint, request.FormValue("request"))
+		} else {
+			made, err = wallet.DraftNameRequest(checkpoint, requestForm{Kind: request.FormValue("kind"), Name: request.FormValue("name"),
+				Requestor: request.FormValue("requestor"), NewKey: request.FormValue("newKey"), Bank: request.FormValue("bank"), Lead: request.FormValue("lead")})
+		}
+		if err != nil {
+			http.Redirect(responseWriter, request, "/requests?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+			return
+		}
+		data.Step = &made
+	}
+	if err != nil {
+		data.Error = "cannot read a verified state from the node: " + err.Error()
+	} else {
+		data.Verified = true
+		data.Name = nameOfKey(checkpoint.State.Accounts, wallet.PublicKey())
+		data.Fee = ledger.FormatAmount(checkpoint.State.Parameters.NewKeyFee)
+		data.Customers = customerChanges(checkpoint.State.Accounts, data.Name)
+	}
+	walletHandler.execute(responseWriter, "requests.html", data)
 }
 
 type adminPageData struct {
-	PublicKey          string
+	Verified           bool // a state verified: IsValidator comes from it
 	IsValidator        bool
-	TransactionCost    string
-	BlockIntervalMs    int64
-	StepTimeoutMs      int64
-	MaxPeers           int
-	MaxMessageBytes    int
+	Parameters         node.ParametersView // the parameters in force
 	TotalPower         int64
-	Quorum             int64
-	ParameterProposals []parameterProposalView
-	Reassignments      []reassignmentView
+	Quorum             int64 // 0 when the node's governance view could not be read
+	ParameterProposals []node.ParameterProposalView
+	Reassignments      []node.ReassignmentView
+	Draft              *voteDraft // a vote to check before signing
+	SignedVote         *voteDraft // a signed vote to hand to the other validators, and what it binds
 	Message            string
 	Error              string
 }
 
-func (h *handler) admin(wr http.ResponseWriter, r *http.Request) {
-	data := adminPageData{
-		PublicKey: h.w.PublicKey(),
-		Message:   r.URL.Query().Get("msg"),
-		Error:     r.URL.Query().Get("err"),
+func (walletHandler *handler) admin(responseWriter http.ResponseWriter, request *http.Request) {
+	checkpoint, err := walletHandler.wallet.verifiedState()
+	walletHandler.renderAdmin(responseWriter, adminPageData{Message: request.URL.Query().Get("msg"), Error: request.URL.Query().Get("err")}, checkpoint, err)
+}
+
+// renderAdmin shows the admin page: the node's governance view, around what a vote step put in data.
+// Whether this wallet is a validator comes from the verified state the page read.
+func (walletHandler *handler) renderAdmin(responseWriter http.ResponseWriter, data adminPageData, checkpoint node.Checkpoint, readErr error) {
+	wallet := walletHandler.wallet
+	if readErr != nil && data.Error == "" {
+		data.Error = "cannot read a verified state from the node: " + readErr.Error()
 	}
-	if view, err := h.w.Governance(); err != nil {
+	name := nameOfKey(checkpoint.State.Accounts, wallet.PublicKey())
+	data.Verified = readErr == nil
+	data.IsValidator = name != "" && consensus.NewValidatorSet(checkpoint.Validators).Contains(name)
+	if view, err := wallet.Governance(); err != nil {
 		if data.Error == "" {
 			data.Error = "cannot reach node: " + err.Error()
 		}
 	} else {
-		data.IsValidator = h.w.IsValidator(view)
-		data.TransactionCost = view.TransactionCost
-		data.BlockIntervalMs = view.BlockIntervalMs
-		data.StepTimeoutMs = view.StepTimeoutMs
-		data.MaxPeers = view.MaxPeers
-		data.MaxMessageBytes = view.MaxMessageBytes
+		data.Parameters = view.Parameters
 		data.TotalPower = view.TotalPower
 		data.Quorum = view.Quorum
 		data.ParameterProposals = view.ParameterProposals
 		data.Reassignments = view.Reassignments
 	}
-	if err := tmpl.ExecuteTemplate(wr, "admin.html", data); err != nil {
-		log.Printf("admin render: %v", err)
+	walletHandler.execute(responseWriter, "admin.html", data)
+}
+
+func (walletHandler *handler) proposeParameter(responseWriter http.ResponseWriter, request *http.Request) {
+	walletHandler.vote(responseWriter, request, func(checkpoint node.Checkpoint) (voteDraft, error) {
+		return walletHandler.wallet.DraftParameters(checkpoint, parameterForm{
+			TransactionCost: request.FormValue("cost"), BlockIntervalMs: request.FormValue("blockIntervalMs"),
+			StepTimeoutMs: request.FormValue("stepTimeoutMs"), MaxPeers: request.FormValue("maxPeers"),
+			MaxMessageBytes: request.FormValue("maxMessageBytes"), NewKeyFee: request.FormValue("newKeyFee"),
+			ChangeDelayBlocks: request.FormValue("changeDelayBlocks"), RetainBlocks: request.FormValue("retainBlocks"),
+			MaxPaymentAmount: request.FormValue("maxPaymentAmount"), MaxAccountBalance: request.FormValue("maxAccountBalance"),
+		})
+	}, walletHandler.wallet.SignParameters, walletHandler.wallet.SubmitParameters)
+}
+
+func (walletHandler *handler) voteReassignment(responseWriter http.ResponseWriter, request *http.Request) {
+	walletHandler.vote(responseWriter, request, func(checkpoint node.Checkpoint) (voteDraft, error) {
+		return walletHandler.wallet.DraftReassignment(checkpoint, nameActionForm{Name: request.FormValue("name"), NewAmount: request.FormValue("amount"),
+			NewKey: request.FormValue("newKey"), Bank: request.FormValue("bank"), Freeze: request.FormValue("freeze")})
+	}, walletHandler.wallet.SignReassignment, walletHandler.wallet.SubmitReassignment)
+}
+
+// vote runs the step of a governance vote the form names. "review" (the default) drafts the vote and
+// shows exactly what it would sign; "sign" signs a draft, the one just reviewed or one pasted, and shows
+// the signed vote to hand to the other validators, sending nothing (unless this key alone is a quorum:
+// then it submits); "submit" assembles the pasted votes into one certificate and submits it.
+func (walletHandler *handler) vote(responseWriter http.ResponseWriter, request *http.Request, draft func(node.Checkpoint) (voteDraft, error),
+	sign func(node.Checkpoint, string) (voteDraft, bool, error), submit func(string) error) {
+	if request.Method != http.MethodPost {
+		http.Redirect(responseWriter, request, "/admin", http.StatusSeeOther)
+		return
+	}
+	var page adminPageData
+	var checkpoint node.Checkpoint
+	var err error
+	submitted := false
+	if step := request.FormValue("step"); step == "submit" {
+		err = submit(request.FormValue("votes"))
+		submitted = true
+	} else if checkpoint, err = walletHandler.wallet.verifiedState(); err == nil && step == "sign" {
+		var signed voteDraft
+		signed, submitted, err = sign(checkpoint, request.FormValue("draft"))
+		page.SignedVote = &signed
+	} else if err == nil {
+		var drafted voteDraft
+		drafted, err = draft(checkpoint)
+		page.Draft = &drafted
+	}
+	switch {
+	case err != nil:
+		http.Redirect(responseWriter, request, "/admin?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+	case submitted:
+		http.Redirect(responseWriter, request, "/admin?msg="+url.QueryEscape("certificate submitted — it enacts in the next block"), http.StatusSeeOther)
+	default:
+		walletHandler.renderAdmin(responseWriter, page, checkpoint, nil)
 	}
 }
 
-func (h *handler) proposeParameter(wr http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(wr, r, "/admin", http.StatusSeeOther)
-		return
+func first(text string, count int) string {
+	if len(text) <= count {
+		return text
 	}
-	err := h.w.ProposeParameters(
-		r.FormValue("cost"), r.FormValue("blockIntervalMs"), r.FormValue("stepTimeoutMs"),
-		r.FormValue("maxPeers"), r.FormValue("maxMessageBytes"))
-	if err != nil {
-		http.Redirect(wr, r, "/admin?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
-		return
-	}
-	http.Redirect(wr, r, "/admin?msg="+url.QueryEscape("parameter vote submitted — it enacts once ⅔ of validators agree"), http.StatusSeeOther)
-}
-
-func (h *handler) voteReassignment(wr http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(wr, r, "/admin", http.StatusSeeOther)
-		return
-	}
-	if err := h.w.VoteReassignment(r.FormValue("account"), r.FormValue("amount")); err != nil {
-		http.Redirect(wr, r, "/admin?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
-		return
-	}
-	http.Redirect(wr, r, "/admin?msg="+url.QueryEscape("reassignment vote submitted — it enacts once ⅔ of validators agree"), http.StatusSeeOther)
-}
-
-func first(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
+	return text[:count]
 }

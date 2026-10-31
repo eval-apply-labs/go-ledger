@@ -1,97 +1,214 @@
 # Architecture
 
-`go_ledger` is a delegated-proof-of-stake ledger built as a small stack of pure, independently
-testable layers, with a thin networked shell on top. It is the Go port of the Java Hypernode ledger
-(see the [README](../README.md#origins)); the design principle throughout is the one that motivated
-the port from the JVM: **keep the rules pure and auditable, isolate the I/O.** A reader should be
-able to understand any layer without holding the others in their head.
+Area: **node**, the engine that Phase 3 runs in a container of its own. Code: `ledger/`,
+`consensus/`, and `node/` but its HTTP side. This doc maps the packages, then describes the ledger's
+rules, the block, the pools, the event loop, the idle chain and the signature record. Consensus is
+in [consensus.md](consensus.md) and the ⅔ certificates in [governance.md](governance.md).
 
-## Package dependency graph
+The principle is the one that motivated the port from the Java original (see the
+[README](../README.md#origins)): keep the rules pure and auditable, and isolate the I/O. The parts
+that must be correct (money, signatures, agreement) are pure functions with tests; the part that is
+hard to test (timing, networking) is a thin shell with one concurrency model.
+
+## Packages and areas
 
 ```
-                 cmd/server ── cmd/keygen
-                     │
-                    node                 (the running validator: I/O, timers, HTTP)
-                   /    \
-             consensus   \                (safety core + round driver: pure)
-                 │        │
-              signing    ledger           (crypto; money + block application: pure)
-                 └────────┘
+  cmd/keygen   cmd/server   cmd/demo        ui/  (the wallet, its own Go module)
+       │            │           │             │
+       │            └─── node ──┴─────────────┘   the running node: event loop, pools, HTTP
+       │                   │
+       │                 ledger                    the state and its rules (pure)
+       │                   │
+       │               consensus                   validator set, votes, commit, driver (pure)
+       │                   │
+       └────────────── signing                     ML-DSA-65 and the domains (pure)
 ```
 
-Dependencies point downward only. `ledger`, `signing` and `consensus` are pure — no I/O, no
-networking, no clocks — so each is exercised by ordinary unit tests. Everything time- and
-network-dependent lives in `node`.
+Imports point down only. `ledger` uses the consensus validator set, the ⅔ certificate tally
+(`CertificateTally`) and the two evidence types, never the driver. `ledger`, `consensus` and
+`signing` do no I/O and read no clock.
 
-## Layers
+| Area | Code |
+|---|---|
+| signature ([signature.md](signature.md)) | `signing/`, `cmd/keygen/`, the sign log in `node/persist.go` |
+| node (this doc) | `ledger/`, `consensus/`, `node/` but its HTTP side |
+| API/CDN ([api.md](api.md)) | `node/httptransport.go` (the record routes too), `node/relay.go`, `node/topology.go`, `node/peerdns.go`, the fetches in `node/sync.go`, `cmd/server/`, `cmd/demo/` |
+| UI ([`ui/README.md`](../ui/README.md)) | `ui/` |
 
-### `ledger` — the money and the state transition (pure)
+`cmd/keygen` prints a fresh ML-DSA-65 key pair, the private key as the 32-byte seed it derives
+from. `cmd/server` runs one node from a config file and a genesis file. `cmd/demo` runs one node and
+one wallet on one machine.
 
-- `Account`, `Payment` — the domain types. Amounts are `math/big.Rat` (exact, arbitrary-precision
-  rationals); there is no floating point anywhere in the money path.
-- `ProcessPayments` — applies a batch of payments to a set of accounts. It enforces the audited
-  supply-integrity invariants up front (a payment moves value only if its amount is at least the
-  transaction cost — hence strictly positive — and its payer exists), so neither the
-  negative-amount mint nor the phantom-payer mint is representable.
-- `StateDigest` — a deterministic SHA-256 digest of the sorted, length-prefixed account set.
-  `LedgerState.Digest` combines it with the parameters and the governance sequence into the single
-  value consensus commits (a block's `StateDigest`), so agreement binds the balances/registry, the
-  parameters in force, and the governance sequence together.
-- `Block`, `ProposeBlock`, `ApplyBlock` — the deterministic state transition. `ApplyBlock`
-  re-executes a block and accepts it only if it builds on the prior state, every payment is
-  signature-valid, and the recomputed digest equals the block's claimed digest.
+## The state
 
-### `signing` — domain-separated signatures (pure)
+`ledger.LedgerState` is the whole committed state: `Accounts`, `Parameters`, `GovernanceSequence`
+and `Height`, the height of the last block applied (0 at genesis). Its `Digest` hashes all four,
+so agreement on a block is agreement on the accounts, the parameters in force, the sequence and the
+height. The accounts are kept in strictly ascending byte order of name; a decoded state out of that
+order is refused before anything else (`LedgerState.NamesAscending`).
 
-Every signature is scoped to a `Domain` and bound to a network via a canonical, length-prefixed
-preimage. There is deliberately no "sign raw bytes" primitive. A `Scheme` interface abstracts the
-algorithm (Ed25519 by default). See [consensus.md](consensus.md) and [security.md](security.md).
+`ledger.Account` holds one name: `Name`, `PublicKey` (the name's current key), `Amount`, `Bank`
+(its bank of record), `Delegate` (the name its balance backs as stake), `Description`, `Address`
+(a validator's gossip URL), `Frozen`, and at most one pending change: `PendingKey` or
+`PendingBank`, due at the end of block `PendingHeight`.
 
-### `consensus` — agreement (pure)
+- **Names.** 1 to 32 lowercase ASCII letters, digits and hyphens, starting and ending with a letter
+  or a digit (`ledger.CanonicalName`). Nothing is normalised: `Alice` is not a name. A name is
+  registered once and never deleted. `-` (`ledger.ClearField`) is never a name; it clears a field.
+- **Amounts.** Exact rationals (`big.Rat`), each a whole number of 0.00000001 units. They are read
+  only as plain decimals, 1 to 18 digits and up to 8 decimals (`ledger.ParseAmount`), and written
+  in one canonical form such as `0.5` or `12` (`ledger.FormatAmount`), in JSON as strings. There is
+  no floating point in the money path.
+- **Caps.** `MaxPaymentAmount` bounds each payment. `MaxAccountBalance` bounds the balance a
+  payment or the ⅔ raise a name to; a balance already above a lowered cap may stay and shrink.
 
-- The **safety core**: `ValidatorSet` (stake-weighted power, ⅔ quorum), `Vote`, `VoteSet`
-  (tally + equivocation `Evidence`), and `Commit` (a ⅔ precommit certificate binding a digest).
-- The **round driver** (`Driver`): a Tendermint-style state machine — proposer selection,
-  prevote→precommit with locking, and timeout-driven round advancement. It is event-driven
-  (`Start`/`ReceiveProposal`/`ReceiveVote`/`Timeout`) and returns `Action`s for the caller to
-  execute, so it has no dependency on real clocks or sockets and is fully unit-tested.
+## What changes the state
 
-### `node` — the running validator (I/O)
+- **Payments** (`ledger.Payment`): `From`, `To`, `Amount`, `Comment`, `BlockID`,
+  `PreviousStateDigest`, `Signature`. A payment names its payer and its payee; the payer's current
+  key signs it. It applies only in the block whose height is its `BlockID`, which is the replay
+  guard. The payer pays `Amount`; the payee gets `Amount` less the transaction cost, which is
+  burned. `ledger.ProcessPayments` moves value only for a payment of at least the cost between two
+  existing names (audit B1, B2), applies identical content once, and bans a payer whose payments in
+  one block overdraw it: its pre-block balance is destroyed. Honest intake never lets that happen.
+- **Account updates** (`ledger.AccountUpdate`): set `Delegate`, `Description` and `Address`. `""`
+  leaves a field, `-` clears it. An update is free. It never names or renames an account.
+- **Name requests** (`ledger.NameRequest`), four kinds, all in one pool and one route:
+  - a *registration* binds a free name to a new key. The requestor pays the fee and signs; a seated
+    bank, which is the requestor itself or the requestor's bank of record, co-signs and becomes the
+    name's bank of record; the new key signs to prove its holder has it. It applies at once.
+  - a *key change* moves a name to a new key. The holder, its bank of record and the new key sign;
+    the holder pays the fee. A sale is a key change to the buyer's key.
+  - a *bank change* moves a name to another seated bank. The holder and the new bank sign; the
+    holder pays the fee. The old bank is not asked.
+  - a *freeze*. The holder alone signs it; it is free and applies at once.
 
-`Node` is an **actor**: a single goroutine (the run loop) owns *all* mutable state — the ledger
-accounts, the payment mempool, and the current-height `Driver`. Every input arrives as an event on
-a channel:
+  A key change or a bank change waits `ChangeDelayBlocks` (about a day at the default) as the
+  name's pending change. A seated name cannot file one: its key and bank change only by the ⅔. At
+  the end of its block the change lapses if the name is seated in that block's set, or if the new
+  key is by then another name's key; otherwise it applies. The fee is never refunded.
+- **A freeze**, from the holder, from a double-sign, or from the ⅔, sets `Frozen`. A frozen name
+  pays nothing, is paid nothing, sends no update or request, takes no delegation, backs no
+  delegate with its balance, and leaves the validator set. Its own pending change is cleared, and
+  so is every pending change it co-signed: the key change of a name whose bank of record it is,
+  and a bank change to it. Its balance stays. Only the ⅔ name action unfreezes it, with a new key.
+- **Governance**: a parameter change or a ⅔ name action, each a certificate signed by validators
+  holding more than ⅔ of the power ([governance.md](governance.md)).
 
-- `SubmitProposal` / `SubmitVote` — from peers (via the transport / HTTP handlers).
-- `SubmitPayment` — from clients.
-- timer fires — armed via `time.AfterFunc`, delivered back as an event.
-- `Snapshot` — a query, answered from within the loop.
+`ledger.ValidatorRule.SetFor` derives the validator set from the state. Static mode: each listed
+name whose account exists and is not frozen, with its listed power. Dynamic mode: each unfrozen
+account's balance backs its `Delegate`, and a name whose total reaches the threshold is seated with
+power floor(total), at most 2^40. A frozen name is never seated.
 
-Because only the loop touches state, the node is **race-free by construction** — the deliberate
-fix for lock-free shared mutable state, where a scheduler thread and HTTP workers can mutate the
-same unsynchronised sets. This is verified: the multi-node integration tests pass under Go's
-`-race` detector.
+## The block and its hashes
 
-The loop drives consensus per height: build a candidate block from the mempool, run the `Driver`,
-execute its actions (broadcast a proposal/vote, arm a timeout, or on decide apply the block and
-advance to the next height). A `Transport` abstracts message delivery; `HTTPTransport` +
-`Server` are the HTTP implementation. A `Message` carries one of several payloads — a signed
-`ProposalMsg` (a full block, so peers can validate it), a self-contained signed `Vote`, a gossiped
-`Payment` or `AccountUpdate`, or a governance `ParameterChange` / `Reassignment` vote — each on its
-own `/hdls/*` endpoint.
+`ledger.Block` holds `Height`, `PreviousBlockHash`, `ValidatorsHash` (of the set that signs it),
+`Nonce` (32 random bytes the proposer draws), `Content` and `StateDigest` (of the resulting
+state). `ledger.BlockContent` holds payments, account updates, name requests, vote evidence,
+proposal evidence, and at most one governance action.
 
-### `cmd/server`, `cmd/keygen`
+| Hash (`ledger/hash.go`) | Over |
+|---|---|
+| `ContentHash` | the content's JSON |
+| `SealedDigestOf` | the nonce, the state digest and the content hash |
+| `ValidatorsHash` | each member's name, key and power, in name order |
+| `BlockHashOf` | the height, the previous block hash, the validators hash and the sealed digest |
 
-`server` loads a JSON config (see [operating-a-network.md](operating-a-network.md)), starts a
-`Node`, and serves the HTTP API. `keygen` prints a fresh Ed25519 key pair. Both are thin.
+Votes, commits and proposals sign the block hash. So a signature covers the block's body and the
+set that signs it, and the nonce keeps the state digest out of the signature record.
 
-## Why this shape
+`ledger.ApplyBlock(chain, previousState, previousBlockHash, block)` returns the next state or an
+error naming the broken rule. It checks, all against the pre-block state: the height is the next
+one and the block builds on the last block hash; the validators hash is that of the set the state
+seats; the governance action is valid; evidence and freezes are valid; the other name requests,
+then the payments, then the updates are valid; and no evidence brings the frozen names to a third
+or more of the power. A name that the block freezes, and the ⅔ action's name, send and receive
+nothing else in that block. It then applies, in order: payments, updates, name requests other than
+freezes, freezes from every source, then the governance action (a parameter change, or the ⅔
+action's other parts), then the changes that fall due.
+The result must keep each risen balance within the pre-block cap, must seat at least one name,
+and must have the digest the block claims.
 
-Mixing consensus math, crypto, HTTP handlers and shared mutable state together is what lets subtle
-bugs (a minting payment, an unsigned account rewrite, a fork under partition, data races) hide.
-Splitting the pure rules from the I/O means:
+`ledger.ProposeBlock` builds a block that passes those checks from what the node's pools hold. It
+checks each entry's cheap rules first and its signatures only when it is about to add it. It stops
+adding freezes, requests, payments and updates at 768 KiB of JSON, and carries at most 8 evidence
+items. If the result would seat no name, it takes items out, the last added first, until it seats
+one; those lapse or wait. Known behaviour: if two seated banks freeze themselves in one block and
+together would empty the set, the block's other items come out before the second freeze does.
 
-- the parts that *must* be correct (money, signatures, agreement) are pure functions with tests;
-- the part that is *hard to test* (timing, networking) is a thin shell with one obvious
-  concurrency model (one owning goroutine);
-- each piece is small enough to audit on its own — the point of the whole project.
+## Intake and the pools
+
+The node publishes a committed view when it opens and after each commit and each catch-up: the
+committed state, its digest, and the set of the next height. HTTP handlers check messages against
+it, signatures included, off the event loop. The loop runs the cheap checks again against its live
+state, confirms the signer's key has not changed, and pools the message. Payments (`mempool`),
+updates (`updatePool`) and name requests (`requestPool`) each hold at most `maxMempool` entries. A
+payer's pending outgoing is its pooled payments plus its pooled fees, and intake refuses anything
+that would take it past the balance. A payer's name request wins its block: intake refuses a
+payment and a fee of one payer for the same block. Intake also refuses a freeze, or a ⅔ action,
+that alone would leave no name seated.
+
+After each commit or catch-up `Node.reconcilePools` drops what can no longer apply: entries whose
+block has passed, entries whose signer now has another key, entries that fail intake against the
+new state, and, in arrival order, whatever no longer fits a payer's balance.
+
+## The event loop
+
+`node.Node` is an actor: one goroutine owns all mutable state, and every input arrives as an
+event. So the node is race-free by construction, and the tests run under `-race`.
+
+At each height `Node.startHeight` draws a nonce, builds a candidate block with `ProposeBlock`, and
+starts a consensus driver for the height. The driver's actions are executed by `Node.process`:
+send a proposal or a vote, arm a timer, or commit. `Node.commit` applies the decided block, saves
+the snapshot, empties the sign log once the snapshot is on disk, writes the signature record,
+publishes the committed view, reconciles the pools, re-resolves peers, sends the last commit to
+peers still at that height, and starts the next height after `BlockIntervalMs`.
+
+The snapshot file, at `snapshotPath`, holds the network id, the committed checkpoint and the
+node's pending proofs (`node.savedSnapshot`). `backupPath` mirrors it, one write at a time.
+
+## The idle chain
+
+A height starts only when there is work (`Node.hasWork`). Work is any of:
+
+- no block committed yet, so block 1 always commits and a new wallet has a commit to pin;
+- the candidate block carries something;
+- a pool holds an entry for a later block, which lands only if the chain reaches that block;
+- some account has a pending change, which falls due only if the chain reaches its height;
+- the sign log holds a vote or proposal for the height (a restart mid-height);
+- a peer's proposal or countable vote for the height has arrived.
+
+Otherwise the node sets `idle` and runs no driver. An idle node signs, re-gossips and records
+nothing. `Node.wakeIfIdle` starts the height once a payment, update, name request or certificate is
+pooled, a proposal is taken, a countable vote is kept, or a late double-sign is kept as a proof.
+
+What this costs: a pending change keeps the chain moving at `BlockIntervalMs` for
+`ChangeDelayBlocks` blocks, about a day. Updates are free and count as work, so one name can keep
+the chain busy for nothing; the ⅔ can freeze such a name. A late double-sign wakes an idle chain.
+A proof that the one-third cap holds back does not keep the chain moving, and while the chain
+idles it lives only in memory until the next commit writes the snapshot.
+
+## The signature record
+
+For each block it commits, a node with a `snapshotPath` writes a rolling entry
+(`node.RecordEntry`): the height, the previous block hash, the sealed digest, the proposal of the
+deciding round, the commit, the signing set (when it differs from the entry before, and in the
+first entry of each unit file), and `KeepUntilHeight`. From these anyone recomputes each block hash
+and checks the chain. For a block that carries a governance action or evidence it also writes a
+lifelong entry (`node.LifelongRecordEntry`), with the name, key and power of each signer. Payments,
+updates, name requests, nonces and state digests are never written.
+
+- Files, beside the snapshot, named by network (the genesis hash's first 16 hex digits):
+  `<snapshotPath>.<network>.record/<first height, 20 digits>.jsonl`, one unit file per 100
+  aligned heights, and `<snapshotPath>.<network>.lifelong.jsonl`, never pruned. A node of another
+  genesis on the same path neither reads nor extends them.
+- Retention: an entry's `KeepUntilHeight` is its height plus the `RetainBlocks` in force before
+  its block, and never less than the entry before it in its unit file. The oldest unit file is
+  deleted, whole, once the new height passes both its last entry's `KeepUntilHeight` and its last
+  height plus the current `RetainBlocks`. So a longer retention applies at once and a cut only to
+  later entries. The node remembers how the oldest unit file ended, and lists the folder only once
+  that unit is due.
+- Each height is recorded once. A node that catches up records nothing for the heights it skipped.
+  A failed write is logged, never fatal, and a partial last line is skipped when read.
+
+The routes that serve it are in [api.md](api.md#the-record-routes).

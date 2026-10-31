@@ -1,0 +1,12 @@
+?   	github.com/eval-apply-labs/go-ledger/cmd/demo	[no test files]
+?   	github.com/eval-apply-labs/go-ledger/cmd/keygen	[no test files]
+ok  	github.com/eval-apply-labs/go-ledger/cmd/server	0.012s
+ok  	github.com/eval-apply-labs/go-ledger/consensus	1.956s
+ok  	github.com/eval-apply-labs/go-ledger/ledger	0.024s
+--- FAIL: TestChaosDynamicAdmissionConverges (60.18s)
+    chaos_test.go:750: chaos seed 1793089981724946527 (set GOLEDGER_CHAOS_SEED=1793089981724946527 to replay this fault schedule)
+    chaos_test.go:780: newcomer was not admitted as a validator on all nodes under chaos
+FAIL
+FAIL	github.com/eval-apply-labs/go-ledger/node	98.516s
+ok  	github.com/eval-apply-labs/go-ledger/signing	0.008s
+FAIL

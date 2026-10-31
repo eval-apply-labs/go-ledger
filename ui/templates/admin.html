@@ -12,7 +12,8 @@
  .big { font-size: 1.8rem; font-weight: 600; }
  .key { font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; color: #555; }
  label { display: block; margin: 0.6rem 0 0.15rem; font-size: 0.9rem; }
- input[type=text] { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+ input[type=text], textarea { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+ textarea { font-family: ui-monospace, monospace; font-size: 0.8rem; }
  button { margin-top: 0.9rem; padding: 0.55rem 1.1rem; border: 0; border-radius: 6px; background: #2d6cdf; color: #fff; font-size: 1rem; cursor: pointer; }
  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.75rem; }
  th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #eee; }
@@ -21,9 +22,9 @@
  .err { background: #fdecea; border: 1px solid #f5c6cb; padding: 0.5rem 0.75rem; border-radius: 6px; }
  .warn { background: #fff8e1; border: 1px solid #ffe082; padding: 0.5rem 0.75rem; border-radius: 6px; }
  .muted { color: #888; font-size: 0.85rem; }
- .inline { margin: 0; display: inline; }
- .vote { margin: 0; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
  .ready { color: #2e7d32; font-weight: 600; }
+ .review { border-color: #ffe082; background: #fffdf5; }
+ .review li { margin: 0.25rem 0; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -32,43 +33,98 @@
  {{if .Message}}<p class="msg">{{.Message}}</p>{{end}}
  {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
 
+ {{with .Draft}}
+ <div class="card review">
+   <h2>Check your vote before signing</h2>
+   <p class="muted">Your signature binds exactly these values. Nothing is signed or sent until you click
+   "Sign vote".</p>
+   <ul>{{range .Facts}}<li>{{.}}</li>{{end}}</ul>
+   <form method="post" action="{{.Action}}">
+     <input type="hidden" name="step" value="sign">
+     <input type="hidden" name="draft" value="{{.Certificate}}">
+     <button type="submit">Sign vote</button> <a href="/admin">cancel</a>
+   </form>
+   <p class="muted">The draft as text.{{if eq .Action "/admin/reassignment"}} An action with a new key goes to the new key's wallet
+   first, which signs its proof of possession on its own admin page; the validators then sign the text it hands back.{{end}}</p>
+   <textarea readonly rows="4">{{.Certificate}}</textarea>
+ </div>
+ {{end}}
+
+ {{with .SignedVote}}
+ <div class="card review">
+   <h2>Your signature</h2>
+   <ul>{{range .Facts}}<li>{{.}}</li>{{end}}</ul>
+   {{if .NewKeyProof}}
+   <p class="muted">Nothing was sent to the network. Hand this text to the validators: each signs it with
+   "Sign", under "sign a draft handed to you", on their own admin page.</p>
+   {{else}}
+   <p class="muted">Nothing was sent to the network. Hand this text to the validators. Whoever
+   collects votes for the same values from validators holding &gt; ⅔ of the power pastes them all into
+   "Submit certificate" below.</p>
+   {{end}}
+   <textarea readonly rows="5">{{.Certificate}}</textarea>
+ </div>
+ {{end}}
+
  <div class="card">
    <div class="muted">current network parameters</div>
-   <div class="big">cost {{.TransactionCost}}</div>
-   <div class="muted" style="margin-top:0.4rem;">timing profile — block interval {{.BlockIntervalMs}} ms · step timeout {{.StepTimeoutMs}} ms · max peers {{.MaxPeers}} (0 = all-to-all) · max message {{.MaxMessageBytes}} bytes (0 = unbounded)</div>
+   {{if .Quorum}}
+   <div class="big">cost {{.Parameters.TransactionCost}}</div>
+   <div class="muted" style="margin-top:0.4rem;">timing profile — block interval {{.Parameters.BlockIntervalMs}} ms · step timeout {{.Parameters.StepTimeoutMs}} ms · max peers {{.Parameters.MaxPeers}} (0 = all-to-all) · max message {{.Parameters.MaxMessageBytes}} bytes (0 = unbounded)</div>
+   <div class="muted" style="margin-top:0.3rem;">new key fee {{.Parameters.NewKeyFee}} · change delay {{.Parameters.ChangeDelayBlocks}} blocks · record kept {{.Parameters.RetainBlocks}} blocks · largest payment {{.Parameters.MaxPaymentAmount}} · largest balance {{.Parameters.MaxAccountBalance}}</div>
    <div class="muted" style="margin-top:0.3rem;">validators — total power {{.TotalPower}}, quorum (&gt; ⅔) {{.Quorum}}</div>
-   {{if not .IsValidator}}<p class="warn" style="margin-top:0.6rem;">This wallet is not a validator. You can submit votes, but only a validator's vote counts toward the quorum.</p>{{end}}
+   {{else}}
+   <div>not available: the node's governance view could not be read.</div>
+   {{end}}
+   {{if and .Verified (not .IsValidator)}}<p class="warn" style="margin-top:0.6rem;">This wallet is not a validator: its own vote does not count toward the quorum, but it can submit a certificate the validators signed.</p>{{end}}
  </div>
 
  <div class="card">
    <h2>Change network parameters</h2>
-   <p class="muted">Propose a new operating profile, or add your vote to an existing proposal — it takes
-   effect once &gt; ⅔ of validator power agrees. Leave a field blank to keep its current value. The
-   timing is coupled: the <em>step timeout</em> must be long enough for gossip to reach every node at
-   the chosen <em>max peers</em> fan-out, or the node rejects the profile.</p>
+   <p class="muted">Draft new parameters, check them and sign your vote; they take effect once
+   validators holding &gt; ⅔ of the power have signed the same parameters and their votes are submitted
+   together. Leave a field blank to keep its current value. The timing is coupled: the <em>step
+   timeout</em> must be long enough for gossip to reach every node at the chosen <em>max peers</em>
+   fan-out, and every parameter has bounds, or the node rejects the vote.</p>
    <form method="post" action="/admin/parameter">
+     <input type="hidden" name="step" value="review">
      <label for="cost">transaction cost</label>
-     <input type="text" id="cost" name="cost" placeholder="current: {{.TransactionCost}}">
+     <input type="text" id="cost" name="cost" placeholder="current: {{.Parameters.TransactionCost}}">
      <label for="blockIntervalMs">block interval, ms (the exchange-window cadence)</label>
-     <input type="text" id="blockIntervalMs" name="blockIntervalMs" placeholder="current: {{.BlockIntervalMs}}">
+     <input type="text" id="blockIntervalMs" name="blockIntervalMs" placeholder="current: {{.Parameters.BlockIntervalMs}}">
      <label for="stepTimeoutMs">step timeout, ms (must cover the gossip fan-out)</label>
-     <input type="text" id="stepTimeoutMs" name="stepTimeoutMs" placeholder="current: {{.StepTimeoutMs}}">
+     <input type="text" id="stepTimeoutMs" name="stepTimeoutMs" placeholder="current: {{.Parameters.StepTimeoutMs}}">
      <label for="maxPeers">max peers (0 = all-to-all; the gossip fan-out)</label>
-     <input type="text" id="maxPeers" name="maxPeers" placeholder="current: {{.MaxPeers}}">
+     <input type="text" id="maxPeers" name="maxPeers" placeholder="current: {{.Parameters.MaxPeers}}">
      <label for="maxMessageBytes">max message bytes (caps one serialized payment/update; 0 = unbounded)</label>
-     <input type="text" id="maxMessageBytes" name="maxMessageBytes" placeholder="current: {{.MaxMessageBytes}}">
-     <button type="submit">Submit vote</button>
+     <input type="text" id="maxMessageBytes" name="maxMessageBytes" placeholder="current: {{.Parameters.MaxMessageBytes}}">
+     <label for="newKeyFee">new key fee (paid for a registration, a key change or a bank change)</label>
+     <input type="text" id="newKeyFee" name="newKeyFee" placeholder="current: {{.Parameters.NewKeyFee}}">
+     <label for="changeDelayBlocks">change delay, blocks (how long a key or bank change waits)</label>
+     <input type="text" id="changeDelayBlocks" name="changeDelayBlocks" placeholder="current: {{.Parameters.ChangeDelayBlocks}}">
+     <label for="retainBlocks">record retention, blocks (how long the signature record keeps a block)</label>
+     <input type="text" id="retainBlocks" name="retainBlocks" placeholder="current: {{.Parameters.RetainBlocks}}">
+     <label for="maxPaymentAmount">largest payment</label>
+     <input type="text" id="maxPaymentAmount" name="maxPaymentAmount" placeholder="current: {{.Parameters.MaxPaymentAmount}}">
+     <label for="maxAccountBalance">largest balance (a payment or a vote may raise an account to)</label>
+     <input type="text" id="maxAccountBalance" name="maxAccountBalance" placeholder="current: {{.Parameters.MaxAccountBalance}}">
+     <button type="submit">Review vote</button>
+   </form>
+   <form method="post" action="/admin/parameter">
+     <input type="hidden" name="step" value="submit">
+     <label for="parameterVotes">submit certificate: paste the signed votes, one after another</label>
+     <textarea id="parameterVotes" name="votes" rows="3" required></textarea>
+     <button type="submit">Submit certificate</button>
    </form>
    {{if .ParameterProposals}}
    <table>
-     <thead><tr><th>proposed profile</th><th class="amt">power</th><th>status</th><th></th></tr></thead>
+     <thead><tr><th>submitted parameters</th><th class="amt">power</th><th>status</th></tr></thead>
      <tbody>
      {{range .ParameterProposals}}
        <tr>
-         <td>cost {{.NewTransactionCost}} · {{.NewBlockIntervalMs}}/{{.NewStepTimeoutMs}} ms · peers {{.NewMaxPeers}} · msg {{.NewMaxMessageBytes}} B</td>
+         <td>{{with .NewParameters}}cost {{.TransactionCost}} · {{.BlockIntervalMs}}/{{.StepTimeoutMs}} ms · peers {{.MaxPeers}} · msg {{.MaxMessageBytes}} B · key fee {{.NewKeyFee}} · delay {{.ChangeDelayBlocks}} · kept {{.RetainBlocks}} · payment ≤ {{.MaxPaymentAmount}} · balance ≤ {{.MaxAccountBalance}}{{end}}</td>
          <td class="amt">{{.VotedPower}} / {{$.Quorum}}</td>
          <td>{{if .Reached}}<span class="ready">ready ✓</span>{{else}}pending{{end}}{{if not .AmendsCurrent}} <span class="muted">(stale)</span>{{end}}</td>
-         <td><form class="inline" method="post" action="/admin/parameter"><input type="hidden" name="cost" value="{{.NewTransactionCost}}"><input type="hidden" name="blockIntervalMs" value="{{.NewBlockIntervalMs}}"><input type="hidden" name="stepTimeoutMs" value="{{.NewStepTimeoutMs}}"><input type="hidden" name="maxPeers" value="{{.NewMaxPeers}}"><input type="hidden" name="maxMessageBytes" value="{{.NewMaxMessageBytes}}"><button class="vote" type="submit">vote</button></form></td>
        </tr>
      {{end}}
      </tbody>
@@ -77,28 +133,52 @@
  </div>
 
  <div class="card">
-   <h2>Reassign a balance</h2>
-   <p class="muted">A &gt; ⅔-ratified override of an account's balance — the community's deliberate
-   exception to ordinary payments (it can mint or reduce). Bound to the balance the account holds now,
-   so a stale certificate can't replay. Use with care.</p>
+   <h2>⅔ name action</h2>
+   <p class="muted">A &gt; ⅔-ratified change to one name, the community's deliberate exception to the
+   rules: set its balance (it can mint or reduce), give it a new key, set or clear its bank of record,
+   freeze or unfreeze it, or create a new name with a key and a balance. Every unfreeze gives a new key.
+   Leave a field blank to keep that part as it is. Votes are collected off the network and submitted
+   together, so the name's holder learns of it only once it can enact. Use with care.</p>
    <form method="post" action="/admin/reassignment">
-     <label for="account">account (name or public key)</label>
-     <input type="text" id="account" name="account" placeholder="a registered name like 'coop', or a public key" required>
+     <input type="hidden" name="step" value="review">
+     <label for="name">name</label>
+     <input type="text" id="name" name="name" placeholder="a name like 'coop'" required>
      <label for="amount">new balance</label>
-     <input type="text" id="amount" name="amount" placeholder="e.g. 500.00" required>
-     <button type="submit">Submit vote</button>
+     <input type="text" id="amount" name="amount" placeholder="e.g. 500.00">
+     <label for="newKey">new key (the full key the new wallet copied)</label>
+     <textarea id="newKey" name="newKey" rows="2"></textarea>
+     <label for="bank">bank of record (a bank's name, or - for none)</label>
+     <input type="text" id="bank" name="bank" placeholder="e.g. bank-a">
+     <label for="freeze">frozen mark</label>
+     <select id="freeze" name="freeze">
+       <option value="">leave it</option>
+       <option value="freeze">freeze</option>
+       <option value="unfreeze">unfreeze (needs a new key)</option>
+     </select>
+     <button type="submit">Review vote</button>
+   </form>
+   <form method="post" action="/admin/reassignment">
+     <input type="hidden" name="step" value="sign">
+     <label for="reassignmentDraft">sign a draft handed to you (as the new key's wallet, or as a validator)</label>
+     <textarea id="reassignmentDraft" name="draft" rows="3" required></textarea>
+     <button type="submit">Sign</button>
+   </form>
+   <form method="post" action="/admin/reassignment">
+     <input type="hidden" name="step" value="submit">
+     <label for="reassignmentVotes">submit certificate: paste the signed votes, one after another</label>
+     <textarea id="reassignmentVotes" name="votes" rows="3" required></textarea>
+     <button type="submit">Submit certificate</button>
    </form>
    {{if .Reassignments}}
    <table>
-     <thead><tr><th>account</th><th class="amt">change</th><th class="amt">power</th><th>status</th><th></th></tr></thead>
+     <thead><tr><th>name</th><th>change</th><th class="amt">power</th><th>status</th></tr></thead>
      <tbody>
      {{range .Reassignments}}
        <tr>
-         <td class="key">{{.Account}}</td>
-         <td class="amt">{{.PreviousAmount}} → {{.NewAmount}}</td>
+         <td><strong>{{.Name}}</strong></td>
+         <td>{{if .NewAmount}}balance {{.PreviousAmount}} → {{.NewAmount}} {{end}}{{if .NewKey}}new key {{fingerprint .NewKey}} {{end}}{{if .Bank}}bank {{.Bank}} {{end}}{{if .Freeze}}freeze {{end}}{{if .Unfreeze}}unfreeze{{end}}</td>
          <td class="amt">{{.VotedPower}} / {{$.Quorum}}</td>
          <td>{{if .Reached}}<span class="ready">ready ✓</span>{{else}}pending{{end}}{{if not .AmendsCurrent}} <span class="muted">(stale)</span>{{end}}</td>
-         <td><form class="inline" method="post" action="/admin/reassignment"><input type="hidden" name="account" value="{{.Account}}"><input type="hidden" name="amount" value="{{.NewAmount}}"><button class="vote" type="submit">vote</button></form></td>
        </tr>
      {{end}}
      </tbody>
@@ -106,7 +186,8 @@
    {{end}}
  </div>
 
- <p class="muted">Votes are signed with your wallet key. A change enacts only when &gt; ⅔ of validator
- power has voted for the same proposal; each node re-verifies the certificate when it applies the block.</p>
+ <p class="muted">Votes are signed with your wallet key. A change enacts only when validators holding
+ &gt; ⅔ of the power have signed the same proposal; each node re-verifies the certificate when it pools it
+ and when it applies the block.</p>
 </body>
 </html>

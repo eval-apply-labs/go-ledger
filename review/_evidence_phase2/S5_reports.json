@@ -1,0 +1,256 @@
+{
+ "slice": "S5",
+ "report": {
+  "branchHead": "20c44ce5291976c15ccda20e5461846fd9b71a77",
+  "commits": [
+   {
+    "hash": "7d66d34",
+    "subject": "phase 2 S5: name requests, the ⅔ name action, locked names and rule 24"
+   },
+   {
+    "hash": "b64845e",
+    "subject": "phase 2 S5: tests for name requests, the ⅔ name action and the pools"
+   },
+   {
+    "hash": "01c225c",
+    "subject": "phase 2 S5: node comments call the reassignment the ⅔ name action"
+   },
+   {
+    "hash": "20c44ce",
+    "subject": "phase 2 S5: reflow the admitPayment comment"
+   }
+  ],
+  "summary": "Slice S5 (name requests and the ⅔ name action) is built on branch p2-s5, in the worktree <scratch>/wt/p2-s5, on top of post-emudhra-phase2 (3891341). The final head passes the whole required check list.\n\nLedger:\n- **New file ledger/name_request.go.**\n  - `NameRequest` with its four kinds: registration, key change, bank change and freeze. Its fee is written as a plain decimal, or null for a freeze.\n  - The requestor signs in the domain named by the kind. The bank signs in `name-request-bank`, and the new key signs in `name-request-new-key`.\n  - The shape check (`NameRequestShapeError`) runs before anything else.\n  - `NameRequestFitsState` checks the rules of each kind (spec 4.4 to 4.7) except the signatures, and that the fee payer can pay the fee.\n  - `FeesFit` is the one shared fee rule (spec 5.5).\n  - Registrations take effect at once. Key and bank changes wait `ChangeDelayBlocks`.\n  - Due changes are applied in name order, each judged against the state the ones before it left. A change lapses if its name is seated or its new key is taken.\n  - The freeze step also clears every pending change the frozen name co-signed (R11).\n- **ledger/reassignment.go.** `Reassignment` is now the ⅔ name action of spec 4.8:\n  - optional amounts, a new key with its proof (`reassignment-new-key`), a bank or \"-\", freeze and unfreeze, and creation of a new name;\n  - it clears the name's pending change (R7);\n  - `FitsState` holds the cheap rules and `Valid` adds the signatures;\n  - `ReassignmentID` hashes every field the votes sign.\n- **ledger/block.go.**\n  - `BlockContent.NameRequests` is added.\n  - `ApplyBlock` checks steps C to G one rule at a time, each refusal naming its rule. That covers the locked names L (R6), one request per name (rule 13), one use per new key (rule 14), fees (rules 16 and 19), payments touching locked names (rule 18) and one update per name (rule 21). It then applies in the step I order and checks rule 23, rule 24 (R9) and the state digest.\n  - `ProposeBlock` follows spec 5.4. It checks signatures only for an entry about to be added, counts the action's new key as used, and takes items out, the last added first, until a name stays seated.\n  - Evidence still slashes until S6; the slash now runs in step I.4, after the request fees are burned.\n\nNode:\n- New file node/requestpool.go:\n  - the request pool, one request per name and block;\n  - `maxRequestLookahead` (3600 blocks);\n  - `AdmitNameRequest`: cheap checks and R9 before any signature, then the loop's re-check of the signers' keys.\n- `/hdls/name-request` answers 202, or 409 with the reason. `MessageNameRequest` is gossiped under the relay key `\"request:\"` plus the request id.\n- Pending fees count in payment intake and request intake, and each refuses the other for the same payer and block.\n- `reconcilePools` now uses one `keep` filter per pool. It drops entries whose block has passed, whose signer, requestor or bank has a new key or is frozen, that fail their intake check (R9 included), or that no longer fit the payer's balance.\n- Certificate pools:\n  - a name action is keyed by every signed field;\n  - a relayed copy with the same votes is dropped before any signature check, for both kinds of certificate;\n  - `MaxMessageBytes` no longer applies to certificates;\n  - an action that alone would leave no name seated is refused, and pruned after each commit.\n- `/hdls/resolve` adds pendingKey, pendingBank and pendingHeight. The governance view shows each action's new key, bank, freeze and unfreeze.\n- New file node/idle.go holds the stubs (`hasWork` returns true, `wakeIfIdle` does nothing). `startHeight` checks `hasWork` and sets the new `idle` field, and `wakeIfIdle` is called at every point spec 6.6 lists.\n\nOther files:\n- signing/domain.go gets the seven new domains.\n- ui/admin.go gets a compile fix only.\n\nSize: production +1253 / −321 lines, tests +1391 / −91.\n\nProof that the new tests fail without the change: in an export of HEAD, 87 mutants (64 ledger, 23 node), each reverting one behaviour, were applied one at a time. Every one made its named test fail. Seven mutants first failed to compile; they were rewritten until they compiled, and then failed the test too.\n\nThe full suite list passed on 20c44ce:\n- gofmt, vet and build for both modules;\n- the root and ui suites with `-race`, each run twice;\n- `-count=3` on Chaos, Restart, SignLog, Resume and CatchUp.\n\nNo time limit was raised.",
+  "tests": [
+   {
+    "name": "TestRegistrationNeedsAllThreeSignatures (ledger)",
+    "failsWithoutChange": "yes: with the bank-signature or new-key-proof check removed in VerifyNameRequest, it fails"
+   },
+   {
+    "name": "TestRequestorSignsInTheDomainOfItsKind (ledger)",
+    "failsWithoutChange": "yes: it fails if the requestor signs in one domain for every kind, or if the fee is left out of the signed fields"
+   },
+   {
+    "name": "TestNameRequestShapeIsCheckedFirst (ledger)",
+    "failsWithoutChange": "yes: it fails if block 0 is allowed, if another requestor is allowed outside a registration, or if signature lengths go unchecked"
+   },
+   {
+    "name": "TestRegisteredNameCannotBeRegisteredAgain (ledger)",
+    "failsWithoutChange": "yes: it fails without the 'name is taken' rule"
+   },
+   {
+    "name": "TestRegistrationChargesTheRequestorAndSetsTheBankOfRecord (ledger)",
+    "failsWithoutChange": "yes: it fails without the fee burn, without the bank of record on the new account, without the requestor's-bank, seated-bank, fee or key-in-use rules"
+   },
+   {
+    "name": "TestSeatedRequestorMayBeItsOwnBank (ledger)",
+    "failsWithoutChange": "yes: it fails without R3 (bank must then be the bank of record) and without the fee burn"
+   },
+   {
+    "name": "TestKeyChangeWaitsChangeDelayBlocks (ledger)",
+    "failsWithoutChange": "yes: it fails when the due height drops the delay"
+   },
+   {
+    "name": "TestKeyChangeNeedsTheBankOfRecord (ledger)",
+    "failsWithoutChange": "yes: it fails without the bank-of-record rule, without the bank-not-frozen rule, and when a seat is wrongly required"
+   },
+   {
+    "name": "TestBankChangeNeedsOnlyTheNewSeatedBank (ledger)",
+    "failsWithoutChange": "yes: it fails without the seated-new-bank rule, and when a due bank change never applies"
+   },
+   {
+    "name": "TestSeatedNameCannotFileAChange (ledger)",
+    "failsWithoutChange": "yes: it fails without the seated-name rule, and without the one-pending-change rule"
+   },
+   {
+    "name": "TestPendingChangeLapsesWhenItsNameIsSeatedAtMaturity (ledger)",
+    "failsWithoutChange": "yes: it fails without the lapse for a name seated at maturity"
+   },
+   {
+    "name": "TestPendingKeyChangeLapsesWhenTheKeyIsTakenMeanwhile (ledger)",
+    "failsWithoutChange": "yes: it fails without the lapse when the key is taken"
+   },
+   {
+    "name": "TestTwoDueChangesToOneKeyApplyOnlyTheFirst (ledger)",
+    "failsWithoutChange": "yes: it fails when due changes are judged against the state before any of them, and without the key-taken lapse"
+   },
+   {
+    "name": "TestFreezeIsFreeImmediateAndCancelsThePendingChange (ledger)",
+    "failsWithoutChange": "yes: it fails when the freeze keeps the pending change, or does not freeze"
+   },
+   {
+    "name": "TestFreezingABankClearsTheChangesItCoSigned (ledger)",
+    "failsWithoutChange": "yes: it fails without R11, and with R11 limited to key changes"
+   },
+   {
+    "name": "TestFrozenNameNeitherPaysNorIsPaidAfterItsFreezeLands (ledger)",
+    "failsWithoutChange": "yes: it fails when the freeze does not set Frozen"
+   },
+   {
+    "name": "TestFreezeWinsOverASameBlockPayment (ledger)",
+    "failsWithoutChange": "yes: it fails without the locked-name check in ApplyBlock or in ProposeBlock (payments, requests, delegations)"
+   },
+   {
+    "name": "TestOneRequestPerNameAndPerNewKeyPerBlock (ledger)",
+    "failsWithoutChange": "yes: it fails without rule 13 (in ApplyBlock or ProposeBlock), rule 14, or the duplicate-freeze check"
+   },
+   {
+    "name": "TestProposeBlockSkipsARequestSharingTheActionsNewKey (ledger)",
+    "failsWithoutChange": "yes: it fails when the action's new key is not counted as used, and without rule 14"
+   },
+   {
+    "name": "TestFeePayerSendsNoPaymentInTheSameBlock (ledger)",
+    "failsWithoutChange": "yes: it fails when ProposeBlock carries the fee payer's payment, and when ApplyBlock ignores it"
+   },
+   {
+    "name": "TestFeesAddUpToAtMostTheBalance (ledger)",
+    "failsWithoutChange": "yes: it fails when fees are not summed, in ProposeBlock or in ApplyBlock"
+   },
+   {
+    "name": "TestNameActionRekeysAndUnfreezes (ledger)",
+    "failsWithoutChange": "yes: it fails when the action does not unfreeze, or does not re-key"
+   },
+   {
+    "name": "TestUnfreezeRequiresANewKey (ledger)",
+    "failsWithoutChange": "yes: it fails without rule 7, rule 8, or the freeze-with-unfreeze-or-key rule"
+   },
+   {
+    "name": "TestNameActionCreatesANewName (ledger; replaces TestReassignmentSetsOnlyAnExistingName)",
+    "failsWithoutChange": "yes: it fails without rule 6, without the account insert, or without the new-key proof check"
+   },
+   {
+    "name": "TestNameActionCanClearTheBank (ledger)",
+    "failsWithoutChange": "yes: it fails when the action ignores its bank, or without the bank validity rule"
+   },
+   {
+    "name": "TestNameActionWinsOverASameBlockRequest (ledger)",
+    "failsWithoutChange": "yes: it fails when the action's name is not locked in ProposeBlock, without rule 15, or without rule 10"
+   },
+   {
+    "name": "TestNameActionClearsThePendingChange (ledger)",
+    "failsWithoutChange": "yes: it fails without R7"
+   },
+   {
+    "name": "TestInBlockOrderIsFreezesThenActionThenDueChanges (ledger)",
+    "failsWithoutChange": "yes: it fails when due changes are applied before freezes and the action, and without R11"
+   },
+   {
+    "name": "TestNameActionSurvivesAnEarlierKeyChange (ledger)",
+    "failsWithoutChange": "no mutant reverts it: it guards the design (the vote preimage holds no key of the name, and a signer has no state to bind one). It would fail if a later change bound the action to the name's current key."
+   },
+   {
+    "name": "TestNoBlockLeavesTheSetEmpty (ledger)",
+    "failsWithoutChange": "yes: it fails without the R9 removal loop, without rule 24 in ApplyBlock, and when removal takes the first item instead of the last"
+   },
+   {
+    "name": "TestNoBlockLeavesTheSetEmpty (node)",
+    "failsWithoutChange": "yes: it fails without R9 at freeze intake, and without R9 in the action pool"
+   },
+   {
+    "name": "TestProposeBlockVerifiesOnlyWhatItCarries (ledger)",
+    "failsWithoutChange": "yes: it fails when payments or requests are verified before their cheap rules"
+   },
+   {
+    "name": "TestUpdateNamesItsBlock (ledger, rule 20)",
+    "failsWithoutChange": "yes: it fails without the update block-id check"
+   },
+   {
+    "name": "TestOneUpdatePerNameAndNoneForALockedName (ledger, rule 21)",
+    "failsWithoutChange": "yes: it fails without one-update-per-name, without the locked-delegate check, and when the action's name is not locked"
+   },
+   {
+    "name": "TestNameRequestFeeTravelsAsPlainDecimal (ledger)",
+    "failsWithoutChange": "yes: it fails without NameRequest.MarshalJSON"
+   },
+   {
+    "name": "TestIntakeRefusesAPaymentAndARequestOfOnePayerForOneBlock (node)",
+    "failsWithoutChange": "yes: it fails without either same-block refusal, and when a pooled payment holds back a freeze"
+   },
+   {
+    "name": "TestPoolCountsPendingFees (node)",
+    "failsWithoutChange": "yes: it fails when payment intake leaves out pooled fees, when request intake leaves out pooled payments, and when reconcilePools keeps unfunded fees"
+   },
+   {
+    "name": "TestRequestIntakeRunsCheapChecksBeforeSignatures (node)",
+    "failsWithoutChange": "yes: it fails when signatures are checked before the cheap checks, and without R9 at intake"
+   },
+   {
+    "name": "TestRequestWindowIsMaxRequestLookahead (node, over HTTP: 202 and 409)",
+    "failsWithoutChange": "yes: it fails when the request window is the 64-block payment window"
+   },
+   {
+    "name": "TestRegistrationEndToEnd (node, four nodes)",
+    "failsWithoutChange": "yes: it fails when a registration creates no account, and when name requests are not relayed"
+   },
+   {
+    "name": "TestLoopRefusesWhatWasCheckedUnderAReplacedKey (node: the loop's key re-check in admitPayment and admitUpdate, end to end; the pool drop after a key change; the pending fields of /hdls/resolve)",
+    "failsWithoutChange": "yes: it fails without the payment key re-check, without the update key re-check, when the pools keep entries under a replaced key, and without PendingKey in resolve"
+   },
+   {
+    "name": "TestNameActionPoolKeysEveryField (node)",
+    "failsWithoutChange": "yes: it fails when the pool is keyed by name and amounts only, and when the governance view leaves out the new key"
+   },
+   {
+    "name": "TestRelayedCertificateCopyCostsNoSignatureCheck (node)",
+    "failsWithoutChange": "yes: it fails without the relayed-copy drop (for actions or parameter changes), and when MaxMessageBytes bounds certificates again"
+   },
+   {
+    "name": "TestMempoolDropsOverdrawnOnBalanceDrop and TestUpdatePoolDropsUpdatesThatCanNoLongerApply (node, rewritten through reconcilePools)",
+    "failsWithoutChange": "yes: they fail when reconcile keeps overdrawn payments, and when it keeps updates whose block has passed"
+   }
+  ],
+  "deviations": "1. **node/updatepool.go was edited, though it is not in S5's file list.** Since the rename, `admitUpdate` lives in this file, and spec 6.6 needs a `wakeIfIdle` call there. The update pool's `dropStale` was replaced by a `keep` filter. No group-5 slice touches this file, so the merge stays clean.\n2. **ui/admin_test.go got a compile fix.** `SignReassignmentVote` and `VerifyReassignmentVote` now take the whole action, because the votes sign all eight fields.\n3. **The pools reconcile through one `keep` filter each.** `mempool.dropBelow`, `mempool.dropOverdrawn` and `updatePool.dropStale` are gone; `reconcilePools` re-runs each entry's intake check, its key check and the balance check. The two old tests that called the removed functions were rewritten to go through `reconcilePools`.\n4. **\"In arrival order, payments and fees together\" is read as: payments first, then requests, each pool in its own arrival order,** sharing one running total per payer. The two pools keep no common arrival order.\n5. **R9 at intake and in the action pool covers the whole action, not only its freeze.** It checks the state the action alone leaves, so an action whose new amount unseats the last validator is refused too. `ProposeBlock` would take such an action out anyway.\n6. **Rule 13 counts freezes too.** Two freezes of one name, or a freeze and another request about the name, are refused as one-request-per-name or locked-name violations. The spec lists rule 13 under the non-freeze step but says \"of any kind\".\n7. **Evidence stays as before S6:** it is checked and slashes the balance, and it is not part of F or L. The slash moved to step I.4, after the request fees are burned, so a slashed requestor cannot go negative.\n8. **The cheap check of a name request has two exported halves:** `NameRequestShapeError` and `NameRequestFitsState`. Callers run the shape check first.\n9. **Exported names added beyond the spec's list:**\n   - `SignAsRequestor`, `SignAsBank`, `SignAsNewKey`\n   - `VerifyNameRequest`, `NameRequestID`\n   - `LeavesANameSeated`, `ReassignmentID`, `Reassignment.FitsState`, `SignReassignmentNewKey`\n   - `FeesFit(balance, totalFees, sendsPayment)` (the spec's \"one function\" of 5.5)\n10. **A freeze is never held back at intake by its holder's payment pooled for the same block,** because a freeze pays no fee.\n11. **The governance view's `AmendsCurrent` now means \"fits the state in force\" (`FitsState`),** since an action may set no amount.\n12. **Ledger test fixtures on the no-validator dynamic test chain now carry a self-backed seat (`seatedAccount`),** because rule 24 refuses a state that seats no name. A probe that made rule 24 panic showed that no existing ledger test reaches it.\n13. **`TestNoBlockLeavesTheSetEmpty` exists in both packages:** the ledger one covers `ProposeBlock` and `ApplyBlock`, the node one covers intake and the action pool.\n14. **Tests added beyond the spec's list:**\n    - `TestNameRequestShapeIsCheckedFirst`\n    - `TestNameRequestFeeTravelsAsPlainDecimal`\n    - `TestUpdateNamesItsBlock` (rule 20)\n    - `TestOneUpdatePerNameAndNoneForALockedName` (rule 21)\n    - `TestLoopRefusesWhatWasCheckedUnderAReplacedKey`\n    - `TestNameActionPoolKeysEveryField`",
+  "suite": "All passed on HEAD 20c44ce:\n- `gofmt -l .` printed nothing outside review/.\n- `go vet ./...` and `go vet -C ui ./...` passed.\n- `go build ./...` and `go build -C ui -o /dev/null .` passed.\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./...`, run twice: every package ok. Node took 59.6 s and 59.2 s, consensus 56.6 s and 60.6 s.\n- `go test -C ui -race -count=1 ./...`, run twice: ok, 30.9 s and 30.2 s.\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/`: ok, 92.3 s.\n\nNo timing limit was changed.\n\nThe output is in <scratch>/p2-scratch/final/checklist.txt. The mutant runs are in <scratch>/p2-scratch/mut/ (ledger_results.txt, ledger_results2.txt, node_results.txt, node_results2.txt).",
+  "openIssues": "- **Two freezes that empty the set together cost innocent items.** `ProposeBlock` takes items out last-added first, as spec 5.4 says. Intake refuses each freeze only on its own, so if two seated banks freeze themselves in the same block and together empty the set, every payment, update and other request of that block lapses before the second freeze comes out.\n- **Pooled certificates are verified every height.** `pendingReassignment` (like `pendingParameterChange` before it) calls `Valid` on pooled certificates at each height, and `ProposeBlock` verifies the carried one again. This predates S5.\n- **The wallet only drafts balance actions (S9).** `SignReassignment` and `SubmitReassignment` still refuse an action without amounts, so the wallet cannot yet draft re-keys, bank changes or freezes.\n- **Stale wording outside S5's files** (for S11, or whoever passes by):\n  - ledger/amount.go's `errAmountMissing` says \"only a reassignment's amounts may be null\", though a freeze's fee may be null too. The `NameRequest` decoder never returns that error.\n  - ledger/parameters.go's comment on `GovernanceSequence` still says \"balance reassignment\".\n- **The docs (S11) do not describe name requests, the name action, `/hdls/name-request` or the resolve pending fields.**\n- **For S6:** evidence names should join F and L, and the evidence item should sit between freezes and requests in `withoutLastItem`'s order (it already does). The slash now runs in step I.4.\n- **For S10:** the `hasWork` and `wakeIfIdle` stubs are in node/idle.go. `wakeIfIdle` is called after a pooled payment, update, name request or certificate, after a taken proposal, and after a kept countable vote."
+ },
+ "verdict": {
+  "confirmed": true,
+  "problems": [
+   {
+    "severity": "minor",
+    "file": "node/requestpool.go",
+    "problem": "Free freezes can fill the request pool. A freeze pays no fee, and the pool keeps one request per name and block over the 3,600-block window, so one name can hold up to 3,601 slots at no cost. With the default MaxMempool of 10000, a few names fill the pool. Every other request, other holders' emergency freezes included, then gets 409 \"the request pool is full\" until the attacker's earliest freeze lands. Each name used this way is frozen when its first freeze lands, which bounds the cost. This is a gap in the spec, not a builder error: §4.3 says \"pending fees and one request per Name and BlockID still bound the pool\", and for freezes they do not.",
+    "evidence": "Probe TestVerifyFreeFreezesFillTheRequestPool in <scratch>/p2-scratch/verify-S5-2/node/verify_flood_test.go (MaxMempool 200 so it runs fast). mallory, with a zero balance, got 200 of 200 slots with freezes for blocks H+3301 to H+3600. alice's freeze for the next block was then refused: \"not admitted: the request pool is full\".",
+    "fix": "Needs the owner's OK, because it changes Q24's window for one kind. Smallest fix: a freeze has one signer, so give it the 64-block payment window (maxBlockIDLookahead) in nameRequestIntakeError, one line. That caps freezes at 65 per name, like free updates. The other option is one pooled freeze per name, where a freeze for an earlier block replaces the pooled one."
+   },
+   {
+    "severity": "minor",
+    "file": "node/requestpool_test.go",
+    "problem": "Three new S5 rules have no test that fails without them: (a) the loop's re-check that the requestor's and the bank's keys are unchanged in admitNameRequest (§4.3 step 4); (b) the refusal at intake of a second, different request for the same name and block (§4.3 step 4); (c) §4.8 rule 4, that the ⅔ action's NewKey is no name's current key (Reassignment.FitsState). The code for all three is correct.",
+    "evidence": "My mutants, in a scratch copy, each followed by the full package suite: (a) `if requestor.PublicKey != requestorKey || bank.PublicKey != bankKey` disabled: every node test passes. (b) the `node.requests.slotTaken(request)` branch disabled: every node test passes. (c) `keyInUse(state.Accounts, reassignment.NewKey)` removed from FitsState: every ledger test and every node test passes. Results in <scratch>/p2-scratch/verify-S5-logs/mutants_result.txt (N20, L25) and mutants2_result.txt (N19, L25 node).",
+    "fix": "Add one case to each of three existing tests. (a) In TestLoopRefusesWhatWasCheckedUnderAReplacedKey: a key change, checked off the loop, whose holder's key changes before admitNameRequest. (b) In TestIntakeRefusesAPaymentAndARequestOfOnePayerForOneBlock or a new small test: a second, different request for the same name and block gets an error. (c) In TestUnfreezeRequiresANewKey or TestNameActionCreatesANewName: an action whose NewKey is another name's key, which ProposeBlock does not carry and ApplyBlock refuses."
+   },
+   {
+    "severity": "minor",
+    "file": "node/requestpool_test.go",
+    "problem": "TestRequestWindowIsMaxRequestLookahead does not check the 3,600 value that spec §4.3 and Q24 require. It builds its block ids from the constant itself, so it still passes when the constant is set to 64. The builder's claim holds only for a mutant that swaps the identifier in the check.",
+    "evidence": "Mutant `const maxRequestLookahead = 64`: the test passes (N14 SURVIVED). Mutant that uses maxBlockIDLookahead in nameRequestIntakeError: the test fails (N14b KILLED).",
+    "fix": "Write 3600 as a literal in the test's block ids, or assert maxRequestLookahead == 3600."
+   },
+   {
+    "severity": "minor",
+    "file": "ledger/block.go",
+    "problem": "Some comments are stale or garbled. LeavesANameSeated's doc reads \"reports whether the state content alone leaves, applied to state, still seats a name\". maxBlockContentBytes and serializedSize still say they cover payments and updates only, though they now also cover freezes and name requests. node/node.go Config.MaxMempool still says \"cap on pending payments\", though it also caps the update and request pools.",
+    "evidence": "ledger/block.go lines 27, 35 and 300; node/node.go line 30.",
+    "fix": "Reword the four comments."
+   }
+  ],
+  "evidence": "I verified S5 on p2-s5 at 20c44ce against spec §0 (R1 to R11), §3, §4.0 to §4.9, §5.1 to §5.7, §6.5, §6.6, §6.10, §10.2 S5, §12 and the review record. I read all production changes (ledger/name_request.go, ledger/block.go, ledger/reassignment.go, signing/domain.go, the node/ files, ui/admin.go) and all test changes. The builder's report was not taken on trust.\n\n1. Scope: every S5 item in §10.2 is done.\n   - NameRequest has its four kinds and the seven new domains.\n   - The shape check runs first, then the checks against the state, then the signatures.\n   - Fees: FeesFit is the one fee rule, and intake refuses a payer's payment and its request for the same block, both ways.\n   - Pending changes fall due in name order, each judged after the ones before it, and lapse when the name is seated or the key is taken.\n   - Freezes come first in the block and clear the changes the frozen name co-signed (R11). Locked names follow R6.\n   - The ⅔ action: optional amounts, a new key with its proof, a bank or \"-\", freeze and unfreeze, name creation, and R7. Its vote preimage is the 8 fields of §4.8.\n   - ApplyBlock: steps C, D (no new evidence rules), E to G, I and J, each refusal naming its rule.\n   - ProposeBlock: signatures last; the action's new key counts as used; for R9, items come out last-added first.\n   - Node: R9 at intake and in the action pool; the request pool; /hdls/name-request answers 202 or 409; MessageNameRequest under relay key \"request:\"; pending fees; reconcilePools uses one keep filter per pool and checks keys; certificate pools keyed by every signed field; relayed copies dropped before Valid; MaxMessageBytes no longer bounds certificates.\n   - /hdls/resolve shows pending changes, and the governance view shows the action's fields.\n   - The idle stubs exist, and wakeIfIdle is called at every point §6.6 lists.\n   - Nothing from S6 is half-built: evidence still slashes, now at step I.4.\n   - All 14 deviations are justified. Deviation 1 (node/updatepool.go) is needed for the wakeIfIdle call. Deviation 4 (payments before fees in reconcilePools) is a reasonable smallest reading.\n   - The orchestrator's S5 notes are covered: TestUpdateNamesItsBlock (rule 20), TestOneUpdatePerNameAndNoneForALockedName (rule 21), the end-to-end loop key re-check, the full pool key.\n\n2. Adversarial probes, in <scratch>/p2-scratch/verify-S5-2:\n   - ledger/verify_property_test.go: 40 random chains (static and dynamic) of 30 blocks each. Each offers random requests of every kind (valid and invalid), payments, updates and voted ⅔ actions. The test checks that ApplyBlock always accepts ProposeBlock's block, and that after each block names are in order, keys are unique, no frozen account has a pending change, pending fields are consistent, no balance is negative and a name is seated. It passed while carrying 117 actions, 70 freezes, 44 key changes, 25 bank changes and 22 registrations.\n   - ledger/verify_edges_test.go: two self-freezes that would empty the set (one is kept); the ⅔ freeze applies R11; a registration takes a pending key; the order of requests in a block does not matter. All passed.\n   - ledger/verify_forged_test.go: 16 forged blocks, each breaking one rule, are all refused with the right rule.\n   - node/verify_flood_test.go: the pool flood in problem 1.\n   - Determinism: every map in ProposeBlock and ApplyBlock is used for lookups only, the error loop does not affect validity, and due changes run in slice order. Signed fields and ids match §4.3 and §4.8 (TestRequestorSignsInTheDomainOfItsKind and TestSignedFieldsCarryPlainDecimals check the preimages by hand).\n\n3. Mutants: I wrote 63 of my own, each run against its named test, or the whole package where marked (scripts mutants.py and mutants2.py, results mutants_result.txt and mutants2_result.txt in <scratch>/p2-scratch/verify-S5-logs). Every spec-listed S5 test exists and failed under its mutant. The survivors are only the test gaps in problems 2 and 3: N19, N20, L25 and N14.\n\n4. The full suite list passed, run by me on a scratch copy of HEAD (log: <scratch>/p2-scratch/verify-S5-logs/suite1.txt):\n   - gofmt printed nothing; vet and build passed for the root and ui modules.\n   - `GOLEDGER_CHAOS_SLACK=4 go test -race -count=1`, root and ui, twice: all ok (node 58.5 s and 58.8 s, consensus about 54 s, ui about 30 s).\n   - `-count=3` on Chaos, Restart, SignLog, Resume and CatchUp: ok in 93.3 s.\n\n   I also merged S8 (p2-s8, 6de9bca) into a scratch copy. No file overlaps, it builds and vets, and the root suite passes with -race.\n\n5. Names follow the rule, and every new function is used. The two new Sign helpers (SignAsRequestor, SignAsBank, SignAsNewKey and SignReassignmentNewKey) are called only from tests until S9's wallet uses them. There are no old-format paths, and the commit messages follow the format with the trailer."
+ },
+ "fix": {
+  "branchHead": "5ec28ddc206ce6370d1cfd7468b5e2c13a80acc1",
+  "fixed": [
+   "Missing test (a), the loop's key re-check in admitNameRequest (spec 4.3 step 4). Commit 523ceff extends TestLoopRefusesWhatWasCheckedUnderAReplacedKey in node/requestpool_test.go. In block 1 a ⅔ action makes alice bob's bank of record. Two requests are then checked off the loop under alice's old key: alice's registration of dave (alice is the requestor) and bob's key change (alice is the bank). After alice's key change lands, both must be refused on the loop. Each half of the check was disabled in its own mutant (requestor half, bank half), and each mutant fails the test. Logs: <scratch>/p2-scratch/s5-followup/a_results.txt",
+   "Missing test (b), one pooled request per name and block (spec 4.3 step 4). Commit 92c860b adds TestRequestPoolHoldsOneRequestPerNameAndBlock to node/requestpool_test.go. It checks three things: the same request sent again is accepted; another request for the same name and block is refused; the same name for another block is pooled. Three mutants each fail it: no slot check, the slot keyed by the name alone, and no idempotent branch. Before this, removing the idempotent branch also left every node test passing, so the test covers that rule too. Logs: <scratch>/p2-scratch/s5-followup/b_results.txt",
+   "Missing test (c), spec 4.8 rule 4. Commit db43d86 adds a case to TestUnfreezeRequiresANewKey in ledger/reassignment_test.go: unfreezing alice to bob's key, with that key's proof of possession, must be invalid. With keyInUse removed from Reassignment.FitsState, the test fails with \"an unfreeze to bob's key was valid\". Log: <scratch>/p2-scratch/s5-followup/c_results.txt",
+   "TestRequestWindowIsMaxRequestLookahead did not pin the 3,600-block window. Commit c5b5942 writes the block ids as the literals 2 + 3600 and 3 + 3600 instead of using maxRequestLookahead. The test now fails with the constant set to 64 (block 3602 gets 409) and with it set to 3601 (block 3603 gets 202). Log: <scratch>/p2-scratch/s5-followup/w_results.txt",
+   "Stale comments, commit 5ec28dd, comments only. LeavesANameSeated's doc is rewritten: \"reports whether applying content alone to state still leaves a name seated (R9)\". The comments on maxBlockContentBytes and serializedSize now include freezes and name requests. In node/node.go, Config.MaxMempool now says it caps each pool: payments, updates and name requests."
+  ],
+  "notFixed": [
+   "Free freezes can fill the request pool (minor, node/requestpool.go). Not fixed because it needs the owner's decision. The finding is correct: a freeze pays no fee, the pool takes one request per name and block, and the window is 3,600 blocks. So one name can hold up to 3,601 slots for nothing, and three names fill the server's default MaxMempool of 10000. Each name loses its other pooled freezes once its first freeze lands: it is then frozen, and reconcilePools drops the rest through nameRequestIntakeError. Q24 in §12 and §4.3 bind the window at 3,600 for every kind of name request. Giving freezes the 64-block payment window, or one pooled freeze per name, would change that binding default, which the task does not allow without the owner's OK. The smallest fix, if the owner agrees: in nameRequestIntakeError, use maxBlockIDLookahead when request.Kind == ledger.FreezeKind. That is one line, plus a test case in TestRequestWindowIsMaxRequestLookahead.",
+   "cmd/server/config.go, the comment on the MaxMempool config field still says \"cap on pending payments\". Not changed: in group 5 that file belongs to slice S8 (spec §10.2), so editing it in S5 would risk a merge conflict. The same rewording as node/node.go Config.MaxMempool should be made by S8, or after the merge."
+  ],
+  "suite": "Everything passed on HEAD 5ec28dd, branch p2-s5, in <scratch>/wt/p2-s5:\n- `gofmt -l .` printed nothing outside review/.\n- `go vet ./...` and `go vet -C ui ./...` passed.\n- `go build ./...` and `go build -C ui -o /dev/null .` passed.\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./...`, run twice: every package ok. Node took 58.1 s and 61.1 s, consensus 57.0 s and 55.9 s, ledger 12.4 s both times.\n- The same with `-C ui`, run twice: ok, 31.2 s and 29.8 s.\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/`: ok, 90.8 s.\n\nNo time limit was changed. All five follow-up commits stay inside S5's files: ledger/block.go, ledger/reassignment_test.go, node/node.go and node/requestpool_test.go. No production logic changed.\n\nThe full log is <scratch>/p2-scratch/s5-followup/checklist.txt. The mutant copies and their results are in <scratch>/p2-scratch/s5-followup/."
+ },
+ "recheck": null
+}

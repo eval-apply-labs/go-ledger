@@ -1,0 +1,254 @@
+?   	github.com/eval-apply-labs/go-ledger/cmd/demo	[no test files]
+?   	github.com/eval-apply-labs/go-ledger/cmd/keygen	[no test files]
+=== RUN   TestLoadValidConfig
+--- PASS: TestLoadValidConfig (0.01s)
+=== RUN   TestLoadDynamicValidatorModeLeavesStaticSetNil
+--- PASS: TestLoadDynamicValidatorModeLeavesStaticSetNil (0.00s)
+=== RUN   TestLoadRejectsNegativeTransactionCost
+--- PASS: TestLoadRejectsNegativeTransactionCost (0.00s)
+=== RUN   TestLoadRejectsMalformedTransactionCost
+--- PASS: TestLoadRejectsMalformedTransactionCost (0.00s)
+=== RUN   TestLoadRejectsTruncatedKeys
+--- PASS: TestLoadRejectsTruncatedKeys (0.00s)
+=== RUN   TestLoadRejectsMalformedGenesisAmount
+--- PASS: TestLoadRejectsMalformedGenesisAmount (0.00s)
+=== RUN   TestLoadRejectsNegativeBlockInterval
+--- PASS: TestLoadRejectsNegativeBlockInterval (0.00s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/cmd/server	1.037s
+=== RUN   TestQuorumIsTwoThirdsPlusOne
+--- PASS: TestQuorumIsTwoThirdsPlusOne (0.01s)
+=== RUN   TestVoteSetReachesMajority
+--- PASS: TestVoteSetReachesMajority (0.01s)
+=== RUN   TestVoteSetBelowQuorumNoMajority
+--- PASS: TestVoteSetBelowQuorumNoMajority (0.00s)
+=== RUN   TestWrongVoteAndNonValidatorRejected
+--- PASS: TestWrongVoteAndNonValidatorRejected (0.00s)
+=== RUN   TestEquivocationProducesEvidenceAndUncounts
+--- PASS: TestEquivocationProducesEvidenceAndUncounts (0.01s)
+=== RUN   TestCommitVerifies
+--- PASS: TestCommitVerifies (0.01s)
+=== RUN   TestCommitBelowQuorumRejected
+--- PASS: TestCommitBelowQuorumRejected (0.00s)
+=== RUN   TestCommitDuplicateVoterRejected
+--- PASS: TestCommitDuplicateVoterRejected (0.01s)
+=== RUN   TestCommitTamperedVoteRejected
+--- PASS: TestCommitTamperedVoteRejected (0.01s)
+=== RUN   TestCommitRejectsMixedRounds
+--- PASS: TestCommitRejectsMixedRounds (0.01s)
+=== RUN   TestConflictingCommitsRequireEquivocation
+--- PASS: TestConflictingCommitsRequireEquivocation (0.01s)
+=== RUN   TestDriverSkipsToHigherRoundOnFPlusOne
+--- PASS: TestDriverSkipsToHigherRoundOnFPlusOne (0.01s)
+=== RUN   TestDriverHappyPathDecides
+--- PASS: TestDriverHappyPathDecides (0.01s)
+=== RUN   TestDriverTimeoutAdvancesRound
+--- PASS: TestDriverTimeoutAdvancesRound (0.01s)
+=== RUN   TestDriverRejectsFarFutureAndNegativeRounds
+--- PASS: TestDriverRejectsFarFutureAndNegativeRounds (0.00s)
+=== RUN   TestDriverBrokenSignerDropsVoteQuietly
+--- PASS: TestDriverBrokenSignerDropsVoteQuietly (0.00s)
+=== RUN   TestDriverPOLUnlockReleasesLock
+--- PASS: TestDriverPOLUnlockReleasesLock (0.02s)
+=== RUN   TestDriverLockingPreventsConflictingPrevote
+--- PASS: TestDriverLockingPreventsConflictingPrevote (0.01s)
+=== RUN   TestDriverSurfacesEquivocationEvidence
+--- PASS: TestDriverSurfacesEquivocationEvidence (0.01s)
+=== RUN   TestValidatorSetSaturatesPower
+--- PASS: TestValidatorSetSaturatesPower (0.00s)
+=== RUN   TestProposerIsStakeWeightedAndDeterministic
+--- PASS: TestProposerIsStakeWeightedAndDeterministic (0.01s)
+=== RUN   TestSimAgreementAndLivenessUnderDelayAndSkew
+--- PASS: TestSimAgreementAndLivenessUnderDelayAndSkew (1.80s)
+=== RUN   TestSimAgreementUnderMessageLoss
+--- PASS: TestSimAgreementUnderMessageLoss (1.81s)
+=== RUN   TestSimAgreementWithEquivocatingValidator
+--- PASS: TestSimAgreementWithEquivocatingValidator (6.05s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/consensus	10.834s
+=== RUN   TestAccountUpdateRegistersNameAndReDelegates
+--- PASS: TestAccountUpdateRegistersNameAndReDelegates (0.01s)
+=== RUN   TestAccountNameLengthCapBlocksKeyMasking
+--- PASS: TestAccountNameLengthCapBlocksKeyMasking (0.00s)
+=== RUN   TestProposeAndApplyBlockRoundTrip
+--- PASS: TestProposeAndApplyBlockRoundTrip (0.00s)
+=== RUN   TestApplyBlockRejectsTamperedDigest
+--- PASS: TestApplyBlockRejectsTamperedDigest (0.00s)
+=== RUN   TestApplyBlockRejectsUnsignedPayment
+--- PASS: TestApplyBlockRejectsUnsignedPayment (0.00s)
+=== RUN   TestApplyBlockRejectsWrongPrev
+--- PASS: TestApplyBlockRejectsWrongPrev (0.00s)
+=== RUN   TestProposeBlockIncludesOnlyMatchingBlockID
+--- PASS: TestProposeBlockIncludesOnlyMatchingBlockID (0.00s)
+=== RUN   TestApplyBlockRejectsMismatchedBlockID
+--- PASS: TestApplyBlockRejectsMismatchedBlockID (0.00s)
+=== RUN   TestSupplyIsNeverMinted
+--- PASS: TestSupplyIsNeverMinted (0.00s)
+=== RUN   TestStateDigestOrderIndependent
+--- PASS: TestStateDigestOrderIndependent (0.00s)
+=== RUN   TestStateDigestChangesWithBalance
+--- PASS: TestStateDigestChangesWithBalance (0.00s)
+=== RUN   TestParameterChangeRequiresTwoThirds
+--- PASS: TestParameterChangeRequiresTwoThirds (0.01s)
+=== RUN   TestParameterChangeEnforcesTimingCoupling
+--- PASS: TestParameterChangeEnforcesTimingCoupling (0.01s)
+=== RUN   TestNegativeAmountPaymentDoesNotMint
+--- PASS: TestNegativeAmountPaymentDoesNotMint (0.00s)
+=== RUN   TestPhantomPayerPaymentDoesNotMint
+--- PASS: TestPhantomPayerPaymentDoesNotMint (0.00s)
+=== RUN   TestNegativeTransactionCostDoesNotMint
+--- PASS: TestNegativeTransactionCostDoesNotMint (0.00s)
+=== RUN   TestOverdrawBanDestroysPayerBalance
+--- PASS: TestOverdrawBanDestroysPayerBalance (0.00s)
+=== RUN   TestNilTransactionCostTreatedAsZero
+--- PASS: TestNilTransactionCostTreatedAsZero (0.00s)
+=== RUN   TestNormalPaymentStillWorks
+--- PASS: TestNormalPaymentStillWorks (0.00s)
+=== RUN   TestPaymentIDIgnoresSignature
+--- PASS: TestPaymentIDIgnoresSignature (0.00s)
+=== RUN   TestMalleatedDuplicateDebitsOnce
+--- PASS: TestMalleatedDuplicateDebitsOnce (0.00s)
+=== RUN   TestMessageSizeBoundEnforcedInProposeAndApply
+--- PASS: TestMessageSizeBoundEnforcedInProposeAndApply (0.02s)
+=== RUN   TestMaxMessageBytesGovernanceFloor
+--- PASS: TestMaxMessageBytesGovernanceFloor (0.00s)
+=== RUN   TestPayByNameResolvesAgainstCommittedRegistry
+--- PASS: TestPayByNameResolvesAgainstCommittedRegistry (0.00s)
+=== RUN   TestUnresolvablePaymentNeverEntersABlock
+--- PASS: TestUnresolvablePaymentNeverEntersABlock (0.00s)
+=== RUN   TestPaymentSignatureCoversToName
+--- PASS: TestPaymentSignatureCoversToName (0.01s)
+=== RUN   TestPayByNameUsesPreBlockOwnerWhenNameMovesInSameBlock
+--- PASS: TestPayByNameUsesPreBlockOwnerWhenNameMovesInSameBlock (0.01s)
+=== RUN   TestVerifyPaymentRoundTrip
+--- PASS: TestVerifyPaymentRoundTrip (0.00s)
+=== RUN   TestVerifyPaymentTamperedAmountRejected
+--- PASS: TestVerifyPaymentTamperedAmountRejected (0.00s)
+=== RUN   TestVerifyPaymentWrongNetworkRejected
+--- PASS: TestVerifyPaymentWrongNetworkRejected (0.00s)
+=== RUN   TestVerifyPaymentForgedPayerRejected
+--- PASS: TestVerifyPaymentForgedPayerRejected (0.00s)
+=== RUN   TestValidPaymentsFilters
+--- PASS: TestValidPaymentsFilters (0.00s)
+=== RUN   TestPrevStateBindingPinsToHistory
+--- PASS: TestPrevStateBindingPinsToHistory (0.01s)
+=== RUN   TestReassignmentRequiresTwoThirds
+--- PASS: TestReassignmentRequiresTwoThirds (0.01s)
+=== RUN   TestReassignmentSequenceGuardBlocksCycleReplay
+--- PASS: TestReassignmentSequenceGuardBlocksCycleReplay (0.01s)
+=== RUN   TestSlashRemovesEquivocator
+--- PASS: TestSlashRemovesEquivocator (0.01s)
+=== RUN   TestEvidenceAgeWindow
+--- PASS: TestEvidenceAgeWindow (0.01s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/ledger	1.176s
+=== RUN   TestNodeRegistersNameViaUpdate
+--- PASS: TestNodeRegistersNameViaUpdate (0.25s)
+=== RUN   TestDeriveValidatorsByStake
+--- PASS: TestDeriveValidatorsByStake (0.00s)
+=== RUN   TestDynamicValidatorAdmission
+--- PASS: TestDynamicValidatorAdmission (0.01s)
+=== RUN   TestIntakeRefusesOversizedPayment
+--- PASS: TestIntakeRefusesOversizedPayment (0.01s)
+=== RUN   TestBackupMirrorsSnapshot
+--- PASS: TestBackupMirrorsSnapshot (0.03s)
+=== RUN   TestMempoolBounds
+--- PASS: TestMempoolBounds (0.00s)
+=== RUN   TestStragglerCatchUp
+--- PASS: TestStragglerCatchUp (0.01s)
+=== RUN   TestChaosLossDupReorderKeepsAgreementAndProgress
+    chaos_test.go:325: chaos seed 1793083325817902739 (set GOLEDGER_CHAOS_SEED=1793083325817902739 to replay this fault schedule)
+--- PASS: TestChaosLossDupReorderKeepsAgreementAndProgress (4.10s)
+=== RUN   TestChaosLostProposalRecoversViaReGossip
+    chaos_test.go:403: chaos seed 1793083329918994129 (set GOLEDGER_CHAOS_SEED=1793083329918994129 to replay this fault schedule)
+--- PASS: TestChaosLostProposalRecoversViaReGossip (2.07s)
+=== RUN   TestChaosMinorityPartitionCannotProgressOrFork
+    chaos_test.go:468: chaos seed 1793083331989037523 (set GOLEDGER_CHAOS_SEED=1793083331989037523 to replay this fault schedule)
+--- PASS: TestChaosMinorityPartitionCannotProgressOrFork (1.44s)
+=== RUN   TestChaos2x2PartitionFreezesThenRecovers
+    chaos_test.go:518: chaos seed 1793083333426273584 (set GOLEDGER_CHAOS_SEED=1793083333426273584 to replay this fault schedule)
+--- PASS: TestChaos2x2PartitionFreezesThenRecovers (3.01s)
+=== RUN   TestChaosGossipIsolatedNodeTracksViaCheckpoints
+    chaos_test.go:553: chaos seed 1793083336440266334 (set GOLEDGER_CHAOS_SEED=1793083336440266334 to replay this fault schedule)
+--- PASS: TestChaosGossipIsolatedNodeTracksViaCheckpoints (3.40s)
+=== RUN   TestChaosEquivocatorIsSlashedWithoutFork
+    chaos_test.go:604: chaos seed 1793083339840006290 (set GOLEDGER_CHAOS_SEED=1793083339840006290 to replay this fault schedule)
+--- PASS: TestChaosEquivocatorIsSlashedWithoutFork (2.42s)
+=== RUN   TestChaosGovernanceCycleReplayStaysInert
+    chaos_test.go:677: chaos seed 1793083342261591227 (set GOLEDGER_CHAOS_SEED=1793083342261591227 to replay this fault schedule)
+--- PASS: TestChaosGovernanceCycleReplayStaysInert (2.01s)
+=== RUN   TestChaosDynamicAdmissionConverges
+    chaos_test.go:750: chaos seed 1793083344276882097 (set GOLEDGER_CHAOS_SEED=1793083344276882097 to replay this fault schedule)
+--- PASS: TestChaosDynamicAdmissionConverges (1.49s)
+=== RUN   TestChaosSoak
+    chaos_test.go:796: chaos seed 1793083345770590484 (set GOLEDGER_CHAOS_SEED=1793083345770590484 to replay this fault schedule)
+--- PASS: TestChaosSoak (2.09s)
+=== RUN   TestNodeEnactsParameterChangeByVote
+--- PASS: TestNodeEnactsParameterChangeByVote (0.05s)
+=== RUN   TestNodesReachConsensusOverHTTP
+--- PASS: TestNodesReachConsensusOverHTTP (0.20s)
+=== RUN   TestResolveEndpointServesNameAndAddress
+--- PASS: TestResolveEndpointServesNameAndAddress (0.02s)
+=== RUN   TestResolveToleratesRawPlusInKey
+--- PASS: TestResolveToleratesRawPlusInKey (0.02s)
+=== RUN   TestZeroBlockIntervalDoesNotRecurse
+--- PASS: TestZeroBlockIntervalDoesNotRecurse (0.15s)
+=== RUN   TestMempoolDedupsMalleatedDuplicate
+--- PASS: TestMempoolDedupsMalleatedDuplicate (0.00s)
+=== RUN   TestNodesReachConsensusAndApplyPayment
+--- PASS: TestNodesReachConsensusAndApplyPayment (0.12s)
+=== RUN   TestVerifyCheckpointSkippingTrust
+--- PASS: TestVerifyCheckpointSkippingTrust (0.02s)
+=== RUN   TestIntakeRefusesOverdraw
+--- PASS: TestIntakeRefusesOverdraw (0.01s)
+=== RUN   TestIntakeRefusesUnresolvableRecipient
+--- PASS: TestIntakeRefusesUnresolvableRecipient (0.01s)
+=== RUN   TestMempoolDropsOverdrawnOnBalanceDrop
+--- PASS: TestMempoolDropsOverdrawnOnBalanceDrop (0.00s)
+=== RUN   TestResolvePeersFromOnChainAddresses
+--- PASS: TestResolvePeersFromOnChainAddresses (0.00s)
+=== RUN   TestNodePersistsAndReloads
+--- PASS: TestNodePersistsAndReloads (0.11s)
+=== RUN   TestOnProposalRelaysFirstSightOnlyNeverDuplicates
+--- PASS: TestOnProposalRelaysFirstSightOnlyNeverDuplicates (0.01s)
+=== RUN   TestNodeEnactsReassignmentByVote
+--- PASS: TestNodeEnactsReassignmentByVote (0.05s)
+=== RUN   TestPaymentGossipReceiptAndReplay
+--- PASS: TestPaymentGossipReceiptAndReplay (2.20s)
+=== RUN   TestNodeSyncsFromCheckpoint
+--- PASS: TestNodeSyncsFromCheckpoint (0.05s)
+=== RUN   TestNodeRejectsUnverifiableCheckpoint
+--- PASS: TestNodeRejectsUnverifiableCheckpoint (0.34s)
+=== RUN   TestFullMeshNeighbors
+--- PASS: TestFullMeshNeighbors (0.00s)
+=== RUN   TestGroupParametersScalesDimension
+--- PASS: TestGroupParametersScalesDimension (0.00s)
+=== RUN   TestHypercubeConnectedAndReducesFanout
+--- PASS: TestHypercubeConnectedAndReducesFanout (0.00s)
+=== RUN   TestConsensusOverHypercubeTopology
+--- PASS: TestConsensusOverHypercubeTopology (0.18s)
+=== RUN   TestDeriveValidatorsSaturatesHugeStake
+--- PASS: TestDeriveValidatorsSaturatesHugeStake (0.00s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/node	26.958s
+=== RUN   TestSignVerifyRoundTrip
+--- PASS: TestSignVerifyRoundTrip (0.01s)
+=== RUN   TestCrossDomainSignatureRejected
+--- PASS: TestCrossDomainSignatureRejected (0.00s)
+=== RUN   TestCrossNetworkSignatureRejected
+--- PASS: TestCrossNetworkSignatureRejected (0.00s)
+=== RUN   TestFieldInjectionResisted
+--- PASS: TestFieldInjectionResisted (0.00s)
+=== RUN   TestTamperedFieldRejected
+--- PASS: TestTamperedFieldRejected (0.00s)
+=== RUN   TestMalformedInputsFailClosed
+--- PASS: TestMalformedInputsFailClosed (0.00s)
+=== RUN   TestBase64WireRoundTrip
+--- PASS: TestBase64WireRoundTrip (0.00s)
+PASS
+ok  	github.com/eval-apply-labs/go-ledger/signing	1.038s
+
+real	0m53.056s
+user	2m17.992s
+sys	0m15.085s
+EXIT=0

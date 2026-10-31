@@ -1,0 +1,215 @@
+--- a/node/node.go
++++ b/node/node.go
+@@ -254,10 +254,12 @@
+ 			n.startHeight()
+ 		}
+ 	case evNextHeight:
++		n.trace("evNextHeight")
+ 		n.startHeight()
+ 	case evAdopt:
+ 		n.adopt(*e.checkpoint)
+ 	case evCatchUp:
++		n.trace("evCatchUp offered cp.height=%d", e.checkpoint.Commit.Height)
+ 		n.catchUp(*e.checkpoint)
+ 	case evProposal:
+ 		// Relay only an AUTHENTIC proposal (from the round's proposer, correctly signed); an
+@@ -267,16 +269,29 @@
+ 		}
+ 	case evVote:
+ 		if n.driver != nil {
++			if traceOn {
++				dh := int64(-1)
++				dh = n.driverHeight()
++				if e.vote.Height != dh {
++					n.trace("vote DROPPED-BY-DRIVER from=%s vh=%d r=%d t=%d (driver height %d)", tn(e.vote.Validator), e.vote.Height, e.vote.Round, e.vote.Type, dh)
++				}
++			}
+ 			n.process(n.driver.ReceiveVote(*e.vote))
++		} else {
++			n.trace("vote NO-DRIVER from=%s vh=%d", tn(e.vote.Validator), e.vote.Height)
+ 		}
+ 		n.rememberVote(*e.vote)
+ 		n.relay(Message{Type: MsgVote, From: n.self, Vote: e.vote})
+ 	case evTimeout:
+ 		if n.driver != nil {
++			if e.round == n.driver.Round() {
++				n.trace("TIMEOUT step=%d round=%d (driver round %d step %d)", e.step, e.round, n.driver.Round(), n.driver.Step())
++			}
+ 			n.process(n.driver.Timeout(e.step, e.round))
+ 		}
+ 	case evPayment:
+ 		err := n.admitPayment(*e.payment)
++		n.trace("payment intake BlockID=%d admitted=%v err=%v", e.payment.BlockID, err == nil, err)
+ 		if e.admit != nil {
+ 			e.admit <- err
+ 		}
+@@ -316,6 +331,10 @@
+ 	case evGovernanceQuery:
+ 		e.govQuery <- n.governanceView()
+ 	case evRegossip:
++		if n.driver != nil {
++			_, has := n.heightProposals[n.driver.Round()]
++			n.trace("REGOSSIP votes=%d proposalHeld(round %d)=%v", len(n.heightVotes), n.driver.Round(), has)
++		}
+ 		n.reGossipVotes()
+ 		n.reGossipProposal()
+ 	}
+@@ -364,6 +383,7 @@
+ 	if !n.verifyCheckpoint(cp, n.accounts) {
+ 		return
+ 	}
++	n.trace("CATCHUP fast-forward to height %d", cp.Commit.Height+1)
+ 	n.fastForward(cp)
+ 	n.startHeight()
+ }
+@@ -465,6 +485,7 @@
+ // starts a fresh Driver for the current height.
+ func (n *Node) startHeight() {
+ 	if n.heightStarted == n.height && n.driver != nil {
++		n.trace("startHeight SKIPPED (already started)")
+ 		return // already started this height — ignore a stale evNextHeight/evCatchUp that would
+ 		//        otherwise replace the live driver mid-height and discard its in-progress votes.
+ 	}
+@@ -481,6 +502,13 @@
+ 		},
+ 		n.heightVals)
+ 	n.blocks[candidateBlock.StateDigest] = candidateBlock
++	if traceOn {
++		var ids []int64
++		for _, p := range n.mem.snapshot() {
++			ids = append(ids, p.BlockID)
++		}
++		n.trace("START HEIGHT proposer(r0)=%s mempoolBlockIDs=%v candidatePayments=%d heldProposals=%d heldVotes=%d", tn(n.heightVals.ProposerAt(n.height, 0)), ids, len(candidateBlock.Payments), len(n.heightProposals), len(n.heightVotes))
++	}
+ 	n.driver = consensus.NewDriver(n.cfg.Signer, n.heightVals, n.cfg.Scheme, n.cfg.NetworkID, n.height, candidateBlock.StateDigest)
+ 	n.process(n.driver.Start())
+ }
+@@ -493,9 +521,15 @@
+ // invalid block is still relayed so peers can see it and prevote nil.
+ func (n *Node) onProposal(p ProposalMsg) bool {
+ 	if p.Height != n.height || n.driver == nil {
++		n.trace("proposal DROPPED wrong-height/no-driver ph=%d r=%d from=%s driver=%v", p.Height, p.Round, tn(p.Proposer), n.driver != nil)
+ 		return false
+ 	}
+ 	if held, ok := n.heightProposals[p.Round]; ok && held.Block.StateDigest == p.Block.StateDigest {
++		if traceOn && n.driverHeight() != p.Height {
++			n.trace("proposal DEDUPED-AS-HELD but driver is for height %d (never fed to live driver) r=%d from=%s", n.driverHeight(), p.Round, tn(p.Proposer))
++		} else if traceOn && !n.driverHasProposal(p.Round) {
++			n.trace("proposal DEDUPED-AS-HELD but live driver has NO proposal for r=%d from=%s", p.Round, tn(p.Proposer))
++		}
+ 		// We already hold this round's proposal, so do NOT relay this duplicate. The proposal was
+ 		// flooded on its first sight, and reGossipProposal periodically re-broadcasts the AUTHENTIC
+ 		// held copy, so propagation is covered. Relaying the duplicate would be unsafe: only its
+@@ -505,10 +539,12 @@
+ 		return false
+ 	}
+ 	if p.Proposer != n.driver.Proposer(p.Round) || !VerifyProposal(n.cfg.Scheme, n.cfg.NetworkID, p) {
++		n.trace("proposal DROPPED wrong-proposer/bad-sig ph=%d r=%d from=%s expected(driver h=%d)=%s", p.Height, p.Round, tn(p.Proposer), n.driverHeight(), tn(n.driver.Proposer(p.Round)))
+ 		return false // wrong proposer or bad signature — drop, don't relay
+ 	}
+ 	_, valid := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, p.Block, n.validatorsFor(n.accounts))
+ 	n.blocks[p.Block.StateDigest] = p.Block
++	n.trace("proposal ACCEPTED ph=%d r=%d from=%s valid=%v payments=%d driverHeight=%d", p.Height, p.Round, tn(p.Proposer), valid, len(p.Block.Payments), n.driverHeight())
+ 	n.rememberProposal(p)
+ 	n.process(n.driver.ReceiveProposal(consensus.Proposal{
+ 		Round: p.Round, Digest: p.Block.StateDigest, ValidRound: p.ValidRound, Valid: valid,
+@@ -627,6 +663,7 @@
+ func (n *Node) commit(act consensus.ActDecided) {
+ 	blk, ok := n.blocks[act.Digest]
+ 	if !ok {
++		n.trace("DECIDED but block unknown")
+ 		return
+ 	}
+ 	nextState, ok := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, blk, n.heightVals)
+@@ -652,6 +689,7 @@
+ 			delete(n.pendingSlashes, offender)
+ 		}
+ 	}
++	n.trace("COMMIT round=%d payments=%d", act.Round, len(blk.Payments))
+ 	n.saveSnapshot()
+ 	n.height++
+ 	n.mem.dropBelow(n.height) // stale payments (their block has passed) can never replay
+@@ -677,3 +715,17 @@
+ 	}
+ 	time.AfterFunc(interval, func() { n.enqueue(event{kind: evNextHeight}) })
+ }
++
++func (n *Node) driverHeight() int64 {
++	if n.driver == nil {
++		return -1
++	}
++	return n.driver.Height()
++}
++
++func (n *Node) driverHasProposal(r int32) bool {
++	if n.driver == nil {
++		return false
++	}
++	return n.driver.HasProposal(r)
++}
+--- a/node/replay_test.go
++++ b/node/replay_test.go
+@@ -3,6 +3,10 @@
+ import (
+ 	"bytes"
+ 	"encoding/json"
++	"fmt"
++	"os"
++	"path/filepath"
++	"strings"
+ 	"net/http"
+ 	"net/http/httptest"
+ 	"testing"
+@@ -17,6 +21,20 @@
+ // receipt, (2) gossip so that whichever node proposes the payment's target block includes it, and
+ // (3) not be applicable twice — a replay of the already-cleared payment (a past block) is ignored.
+ func TestPaymentGossipReceiptAndReplay(t *testing.T) {
++	traceReset()
++	began := time.Now()
++	defer func() {
++		el := time.Since(began)
++		if traceOn && (el > 4*time.Second || t.Failed()) {
++			dir := os.Getenv("GOLEDGER_TRACE_DIR")
++			if dir == "" {
++				dir = os.TempDir()
++			}
++			f := filepath.Join(dir, fmt.Sprintf("trace-%d-%s.log", time.Now().UnixNano(), strings.ReplaceAll(el.Round(time.Millisecond).String(), ".", "_")))
++			_ = os.WriteFile(f, []byte(strings.Join(traceDump(), "\n")+"\n"), 0o644)
++			t.Logf("SLOW/FAILED run (%s): trace written to %s", el, f)
++		}
++	}()
+ 	const n = 4
+ 	signers := make([]*signing.Signer, n)
+ 	vals := make([]consensus.Validator, n)
+@@ -24,6 +42,7 @@
+ 		s, _ := signing.Generate(signing.Ed25519{}, "testnet")
+ 		signers[i] = s
+ 		vals[i] = consensus.Validator{PublicKey: s.PublicKeyBase64(), Power: 1}
++		traceName(s.PublicKeyBase64(), fmt.Sprintf("N%d", i))
+ 	}
+ 	vs := consensus.NewValidatorSet(vals)
+ 
+@@ -73,6 +92,13 @@
+ 	// A payment naming a near-future block (h+3), submitted to ONE node via /hdls/pay. Blocks are
+ 	// 300ms and gossip is localhost, so the payment reaches the proposer of its target block in time.
+ 	h := nodes[0].Snapshot().Height
++	if traceOn {
++		var hs []int64
++		for _, nd := range nodes {
++			hs = append(hs, nd.Snapshot().Height)
++		}
++		nodes[0].trace("TEST: submitting payment BlockID=%d (h=%d) heights=%v", h+3, h, hs)
++	}
+ 	pay, _ := ledger.SignPayment(alice, ledger.Payment{
+ 		PublicKeyFrom: alice.PublicKeyBase64(), PublicKeyTo: recipient.PublicKeyBase64(), Amount: rat("10"), BlockID: h + 3,
+ 	})
+--- a/consensus/driver.go
++++ b/consensus/driver.go
+@@ -398,3 +398,7 @@
+ }
+ 
+ func digestPtr(d [32]byte) *[32]byte { c := d; return &c }
++
++// Height / HasProposal are debug accessors added in the scratch trace copy only.
++func (d *Driver) Height() int64 { return d.height }
++func (d *Driver) HasProposal(r int32) bool { _, ok := d.proposals[r]; return ok }

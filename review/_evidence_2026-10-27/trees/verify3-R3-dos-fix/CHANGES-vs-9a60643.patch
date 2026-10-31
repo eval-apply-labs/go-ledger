@@ -1,0 +1,84 @@
+--- a/node/chaos_test.go
++++ b/node/chaos_test.go
+@@ -777,6 +777,10 @@
+ 		}
+ 		time.Sleep(150 * time.Millisecond)
+ 	}
++	for i, nd := range c.nodes {
++		s := nd.Snapshot()
++		t.Logf("node %d height %d admitted=%v", i, s.Height, deriveValidators(s.Accounts, rat(threshold)).Contains(newcomer.PublicKeyBase64()))
++	}
+ 	t.Fatal("newcomer was not admitted as a validator on all nodes under chaos")
+ }
+ 
+--- a/node/node.go
++++ b/node/node.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"errors"
+ 	"math/big"
++	"sync/atomic"
+ 	"time"
+ 
+ 	"github.com/eval-apply-labs/go-ledger/consensus"
+@@ -114,6 +115,8 @@
+ 	pendingSlashes        map[string]consensus.Evidence      // equivocation proofs to carry into the next block (by offender)
+ 	paramProposals        map[string]*ledger.ParameterChange // accumulating parameter-change votes (by proposal)
+ 	reassignmentProposals map[string]*ledger.Reassignment    // accumulating balance-reassignment votes (by proposal)
++
++	backupBusy atomic.Bool // one BackupPath mirror in flight at most (a hung mount then pins one goroutine, not one per block)
+ }
+ 
+ // New builds a node. If a snapshot is configured and present on disk, it is loaded as the starting
+@@ -495,7 +498,11 @@
+ 	if p.Height != n.height || n.driver == nil {
+ 		return false
+ 	}
+-	if held, ok := n.heightProposals[p.Round]; ok && held.Block.StateDigest == p.Block.StateDigest {
++	if p.Round < 0 || p.Round > n.driver.Round()+1 {
++		return false // far-future (or negative) round: bounded like votes, so one proposer cannot pile up rounds
++	}
++	if held, ok := n.heightProposals[p.Round]; ok {
++		_ = held // first authentic proposal per round wins (as in the driver): a second one is never re-applied or relayed
+ 		// We already hold this round's proposal, so do NOT relay this duplicate. The proposal was
+ 		// flooded on its first sight, and reGossipProposal periodically re-broadcasts the AUTHENTIC
+ 		// held copy, so propagation is covered. Relaying the duplicate would be unsafe: only its
+--- a/node/persist.go
++++ b/node/persist.go
+@@ -62,7 +62,10 @@
+ 		// local-filesystem guarantee — on NFS/CIFS a mirror can fail (silently, per best-effort);
+ 		// the operator guide tells operators to prefer a local disk for this reason.
+ 		tmp := n.cfg.BackupPath + "." + strconv.FormatInt(n.lastCommit.Height, 10) + ".tmp"
+-		go writeAtomic(n.cfg.BackupPath, tmp, data)
++		if !n.backupBusy.CompareAndSwap(false, true) {
++			return // previous mirror still in flight (slow or hung mount): skip; the next commit mirrors the latest
++		}
++		go func() { defer n.backupBusy.Store(false); writeAtomic(n.cfg.BackupPath, tmp, data) }()
+ 	}
+ }
+ 
+--- a/consensus/driver.go
++++ b/consensus/driver.go
+@@ -332,11 +332,11 @@
+ 	if d.step == StepPropose && !d.sentPrevote[r] {
+ 		if p, ok := d.proposals[r]; ok {
+ 			if p.ValidRound == -1 {
+-				return d.prevoteFor(r, p, -1), true
++				return d.prevoteFor(r, p, -1), d.sentPrevote[r] // no progress if signing failed
+ 			}
+ 			if p.ValidRound >= 0 && p.ValidRound < r {
+ 				if pv := d.prevotes[p.ValidRound]; pv != nil && pv.HasQuorumFor(p.Digest) {
+-					return d.prevoteFor(r, p, p.ValidRound), true
++					return d.prevoteFor(r, p, p.ValidRound), d.sentPrevote[r]
+ 				}
+ 			}
+ 		}
+@@ -361,7 +361,7 @@
+ 
+ 	// upon 2/3 prevotes for nil while in prevote step: precommit nil.
+ 	if d.step == StepPrevote && d.prevotes[r].HasQuorumFor(nilDigest) && !d.sentPrecommit[r] {
+-		return d.castVote(Precommit, r, nilDigest), true
++		return d.castVote(Precommit, r, nilDigest), d.sentPrecommit[r]
+ 	}
+ 
+ 	// upon 2/3 prevotes(*) while in prevote step (first time): arm the prevote timeout.

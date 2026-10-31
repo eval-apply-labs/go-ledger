@@ -1,0 +1,295 @@
+=== RUN   TestV3S1SingleHeavyValidatorRestartForks
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=4 digest 17ca2037.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=4 committed 17ca2037.. on QPaz/N.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=4 committed 9330236b.. on Mf2rP5.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:17ca2037 precommit@r0:17ca2037 prevote@r0:9330236b precommit@r0:9330236b]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 22 merchant=0 | B height 22 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 4 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1SingleHeavyValidatorRestartForks (3.03s)
+=== RUN   TestV3S1ProposerA
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=A
+    zz_v3_amnesia_test.go:131: votes at H by YOVGbn..: [prevote@r0:661fd699 precommit@r0:661fd699]
+    zz_v3_amnesia_test.go:131: votes at H by QHQh0i..: [prevote@r0:661fd699]
+    zz_v3_amnesia_test.go:131: votes at H by 8XI5Ru..: [prevote@r0:nil]
+    zz_v3_amnesia_test.go:133: A height 4
+    zz_v3_amnesia_test.go:134: A did not decide H
+--- FAIL: TestV3S1ProposerA (41.22s)
+=== RUN   TestV3S1CrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=4 digest ff57c245.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=4 committed ff57c245.. on u8A3zN.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=4 committed ef67a5cf.. on fI+3PT.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:ff57c245 precommit@r0:ff57c245 prevote@r0:ef67a5cf precommit@r0:nil prevote@r1:ef67a5cf precommit@r1:ef67a5cf]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 14 merchant=0 | B height 14 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 4 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1CrossRound (6.02s)
+=== RUN   TestV3S1ProposerACrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=6, r=0) proposer=A
+    zz_v3_amnesia_test.go:131: votes at H by PcjSyn..: [prevote@r0:71859b2a precommit@r0:71859b2a]
+    zz_v3_amnesia_test.go:131: votes at H by mz7M7K..: [prevote@r0:71859b2a]
+    zz_v3_amnesia_test.go:131: votes at H by Z7M2oE..: [prevote@r0:nil]
+    zz_v3_amnesia_test.go:133: A height 6
+    zz_v3_amnesia_test.go:134: A did not decide H
+--- FAIL: TestV3S1ProposerACrossRound (40.32s)
+=== RUN   TestV3S2SharedPowerOutageForks
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=5,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=5 digest 39a6496c.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 5 / 5
+    zz_v3_amnesia_test.go:262: H=5 committed 39a6496c.. on o4si9c.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:262: H=5 committed f6badb97.. on I/sK2D.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 10 merchant=0 (was 49/10)
+    zz_v3_amnesia_test.go:271: FORK at height 5 after a shared power outage, zero Byzantine validators
+--- FAIL: TestV3S2SharedPowerOutageForks (3.02s)
+=== RUN   TestV3S2ControlDeciderReachable
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:237: a desktop never precommitted non-nil at H
+--- FAIL: TestV3S2ControlDeciderReachable (120.13s)
+=== RUN   TestV3S1SingleHeavyValidatorRestartForks
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=4 digest 773fa2eb.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=4 committed 1363e3a9.. on D7sQK9.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=4 committed 773fa2eb.. on 64dcKu.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:773fa2eb precommit@r0:773fa2eb prevote@r0:1363e3a9 precommit@r0:1363e3a9]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 22 merchant=0 | B height 22 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 4 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1SingleHeavyValidatorRestartForks (3.03s)
+=== RUN   TestV3S1ProposerA
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=5 digest 22a05f33.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed 22a05f33.. on PK8AQb.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed 2bd5b18b.. on FBYntq.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:22a05f33 precommit@r0:22a05f33 prevote@r0:nil precommit@r0:nil prevote@r1:2bd5b18b precommit@r1:2bd5b18b]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 22 merchant=0 | B height 22 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1ProposerA (3.03s)
+=== RUN   TestV3S1CrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=X
+    zz_v3_amnesia_test.go:114: X never precommitted non-nil at H
+--- FAIL: TestV3S1CrossRound (120.01s)
+=== RUN   TestV3S1ProposerACrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=A
+    zz_v3_amnesia_test.go:131: votes at H by qNjusN..: [prevote@r0:51e662d5 precommit@r0:51e662d5]
+    zz_v3_amnesia_test.go:131: votes at H by iAsQAi..: [prevote@r0:51e662d5]
+    zz_v3_amnesia_test.go:131: votes at H by 364dyZ..: [prevote@r0:nil]
+    zz_v3_amnesia_test.go:133: A height 4
+    zz_v3_amnesia_test.go:134: A did not decide H
+--- FAIL: TestV3S1ProposerACrossRound (40.14s)
+=== RUN   TestV3S2SharedPowerOutageForks
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=4 digest 25dfba8b.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 4 / 4
+    zz_v3_amnesia_test.go:262: H=4 committed 25dfba8b.. on WbURmz.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:262: H=4 committed 746e6a04.. on d+E6uN.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 27 merchant=0 (was 49/10)
+    zz_v3_amnesia_test.go:271: FORK at height 4 after a shared power outage, zero Byzantine validators
+--- FAIL: TestV3S2SharedPowerOutageForks (3.03s)
+=== RUN   TestV3S2ControlDeciderReachable
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=4 digest 70a2dffc.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 4 / 4
+    zz_v3_amnesia_test.go:262: H=4 committed 70a2dffc.. on 68HNCe.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 7 merchant=49/10 (was 49/10)
+--- PASS: TestV3S2ControlDeciderReachable (0.66s)
+=== RUN   TestV3S1SingleHeavyValidatorRestartForks
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=5 digest 66b5d3b6.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed db4c4b1a.. on nMH21j.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed 66b5d3b6.. on D1lyty.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:66b5d3b6 precommit@r0:66b5d3b6 prevote@r0:db4c4b1a precommit@r0:db4c4b1a]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 24 merchant=0 | B height 24 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1SingleHeavyValidatorRestartForks (3.02s)
+=== RUN   TestV3S1ProposerA
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=6, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=6 digest 8e46a446.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=6 committed 8e46a446.. on u3gHkv.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=6 committed fe098d35.. on 6K0Ukt.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:8e46a446 precommit@r0:8e46a446 prevote@r0:nil precommit@r0:nil prevote@r1:fe098d35 precommit@r1:fe098d35]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 21 merchant=0 | B height 21 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 6 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1ProposerA (3.02s)
+=== RUN   TestV3S1CrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=5 digest f7881edd.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed 1e07862c.. on rJOIKP.. round 2, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed f7881edd.. on Nl0YVd.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:f7881edd precommit@r0:f7881edd prevote@r0:1e07862c precommit@r0:nil prevote@r1:nil precommit@r1:nil prevote@r2:1e07862c precommit@r2:1e07862c]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 16 merchant=0 | B height 16 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1CrossRound (6.02s)
+=== RUN   TestV3S1ProposerACrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=5 digest 353b6629.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed 353b6629.. on gSD2KB.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed 21150de6.. on 2BFvuc.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:353b6629 precommit@r0:353b6629 prevote@r0:nil precommit@r0:nil prevote@r1:21150de6 precommit@r1:21150de6]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 10 merchant=0 | B height 10 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1ProposerACrossRound (3.03s)
+=== RUN   TestV3S2SharedPowerOutageForks
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=5,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=5 digest f26d087e.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 5 / 5
+    zz_v3_amnesia_test.go:262: H=5 committed f26d087e.. on zlsc9N.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:262: H=5 committed 2ea9c737.. on 9oZ7EO.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 21 merchant=0 (was 49/10)
+    zz_v3_amnesia_test.go:271: FORK at height 5 after a shared power outage, zero Byzantine validators
+--- FAIL: TestV3S2SharedPowerOutageForks (3.02s)
+=== RUN   TestV3S2ControlDeciderReachable
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=4 digest fed6e280.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 4 / 4
+    zz_v3_amnesia_test.go:262: H=4 committed fed6e280.. on +kdCq4.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 7 merchant=49/10 (was 49/10)
+--- PASS: TestV3S2ControlDeciderReachable (1.26s)
+=== RUN   TestV3S1SingleHeavyValidatorRestartForks
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=4 digest c253e106.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=4 committed c253e106.. on stiJkR.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=4 committed b8000dbc.. on jSvwVa.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:c253e106 precommit@r0:c253e106 prevote@r0:b8000dbc precommit@r0:b8000dbc]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 22 merchant=0 | B height 22 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 4 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1SingleHeavyValidatorRestartForks (3.02s)
+=== RUN   TestV3S1ProposerA
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=6, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=6 digest 0cfd4db4.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=6 committed 0cfd4db4.. on pOazah.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=6 committed 94eba0bc.. on 0r6pou.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:0cfd4db4 precommit@r0:0cfd4db4 prevote@r0:nil precommit@r0:nil prevote@r1:94eba0bc precommit@r1:94eba0bc]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 21 merchant=0 | B height 21 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 6 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1ProposerA (3.03s)
+=== RUN   TestV3S1CrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=5 digest 145b6d7c.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed 145b6d7c.. on 6w5JIQ.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed 66bd160c.. on C1xuLr.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:145b6d7c precommit@r0:145b6d7c prevote@r0:66bd160c precommit@r0:nil prevote@r1:66bd160c precommit@r1:66bd160c]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 24 merchant=0 | B height 24 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1CrossRound (6.02s)
+=== RUN   TestV3S1ProposerACrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=6, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=6 digest 3749708f.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=6 committed 3749708f.. on fY+3A8.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=6 committed e42a556a.. on 4mwUip.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:3749708f precommit@r0:3749708f prevote@r0:nil precommit@r0:nil prevote@r1:e42a556a precommit@r1:e42a556a]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 11 merchant=0 | B height 11 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 6 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1ProposerACrossRound (3.03s)
+=== RUN   TestV3S2SharedPowerOutageForks
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=4 digest 245c3b93.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 4 / 4
+    zz_v3_amnesia_test.go:262: H=4 committed e6b17c50.. on 1byaIE.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:262: H=4 committed 245c3b93.. on 0qnZnH.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 22 merchant=0 (was 49/10)
+    zz_v3_amnesia_test.go:271: FORK at height 4 after a shared power outage, zero Byzantine validators
+--- FAIL: TestV3S2SharedPowerOutageForks (3.02s)
+=== RUN   TestV3S2ControlDeciderReachable
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=5,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=5 digest d602f726.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 5 / 5
+    zz_v3_amnesia_test.go:262: H=5 committed d602f726.. on aeIUq6.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 8 merchant=49/10 (was 49/10)
+--- PASS: TestV3S2ControlDeciderReachable (0.42s)
+=== RUN   TestV3S1SingleHeavyValidatorRestartForks
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=5 digest 178065a5.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed 178065a5.. on ErI8PJ.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed 37118cc6.. on CZIJFT.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:178065a5 precommit@r0:178065a5 prevote@r0:37118cc6 precommit@r0:37118cc6]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 22 merchant=0 | B height 22 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1SingleHeavyValidatorRestartForks (3.02s)
+=== RUN   TestV3S1ProposerA
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=5 digest 07d31841.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed a027395a.. on maS4mL.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed 07d31841.. on qnWpWl.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:07d31841 precommit@r0:07d31841 prevote@r0:nil precommit@r0:nil prevote@r1:a027395a precommit@r1:a027395a]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 22 merchant=0 | B height 22 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1ProposerA (3.03s)
+=== RUN   TestV3S1CrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=5 digest d73c7be1.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed 3ce1e69f.. on V5/5Ns.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed d73c7be1.. on Fs99FV.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:d73c7be1 precommit@r0:d73c7be1 prevote@r0:3ce1e69f precommit@r0:nil prevote@r1:3ce1e69f precommit@r1:3ce1e69f]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 24 merchant=0 | B height 24 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1CrossRound (6.03s)
+=== RUN   TestV3S1ProposerACrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=4 digest 0d0e2515.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=4 committed 0d0e2515.. on 3BU7aU.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=4 committed 4b41c9fd.. on WwOyQd.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:0d0e2515 precommit@r0:0d0e2515 prevote@r0:nil precommit@r0:nil prevote@r1:4b41c9fd precommit@r1:4b41c9fd]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 17 merchant=0 | B height 17 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 4 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1ProposerACrossRound (6.03s)
+=== RUN   TestV3S2SharedPowerOutageForks
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:246: L did not decide H
+--- FAIL: TestV3S2SharedPowerOutageForks (40.13s)
+=== RUN   TestV3S2ControlDeciderReachable
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=4 digest a24b3f0d.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 4 / 4
+    zz_v3_amnesia_test.go:262: H=4 committed a24b3f0d.. on /bA2nE.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 7 merchant=49/10 (was 49/10)
+--- PASS: TestV3S2ControlDeciderReachable (0.66s)
+=== RUN   TestV3S1SingleHeavyValidatorRestartForks
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=4 digest 7f92345d.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=4 committed 7f92345d.. on cJRIhz.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=4 committed cdd615c1.. on V1I2yz.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:7f92345d precommit@r0:7f92345d prevote@r0:cdd615c1 precommit@r0:cdd615c1]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 23 merchant=0 | B height 23 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 4 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1SingleHeavyValidatorRestartForks (3.03s)
+=== RUN   TestV3S1ProposerA
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=7, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=7 digest 799c0da0.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=7 committed 799c0da0.. on 8ncB07.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=7 committed 84f0825c.. on osjUeu.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:799c0da0 precommit@r0:799c0da0 prevote@r0:nil precommit@r0:nil prevote@r1:84f0825c precommit@r1:84f0825c]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 21 merchant=0 | B height 21 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 7 with zero Byzantine validators (one honest restart)
+    testing.go:1464: TempDir RemoveAll cleanup: unlinkat /tmp/TestV3S1ProposerA3845745245/001: directory not empty
+--- FAIL: TestV3S1ProposerA (3.03s)
+=== RUN   TestV3S1CrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=4, r=0) proposer=X
+    zz_v3_amnesia_test.go:138: A decided H=4 digest d190c36c.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=4 committed d190c36c.. on 5xoTVe.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=4 committed 6706cac8.. on 24xa7W.. round 2, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:d190c36c precommit@r0:d190c36c prevote@r0:6706cac8 precommit@r0:nil prevote@r1:nil precommit@r1:nil prevote@r2:6706cac8 precommit@r2:6706cac8]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 13 merchant=0 | B height 13 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 4 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1CrossRound (6.02s)
+=== RUN   TestV3S1ProposerACrossRound
+    zz_v3_amnesia_test.go:68: static set X:2 A:1 B:1, quorum 3; (H=5, r=0) proposer=A
+    zz_v3_amnesia_test.go:138: A decided H=5 digest d0fe185a.. round 0 with 2 precommits; merchant balance on A = 49/10
+    zz_v3_amnesia_test.go:153: H=5 committed d0fe185a.. on DI6P4i.. round 0, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:153: H=5 committed 8be3e2bc.. on 3Az9wf.. round 1, 2 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:160: X's signed votes at H: [prevote@r0:d0fe185a precommit@r0:d0fe185a prevote@r0:nil precommit@r0:nil prevote@r1:8be3e2bc precommit@r1:8be3e2bc]
+    zz_v3_amnesia_test.go:166: after A rejoins: A height 10 merchant=0 | B height 10 merchant=0 | X balance on B=100
+    zz_v3_amnesia_test.go:170: FORK at height 5 with zero Byzantine validators (one honest restart)
+--- FAIL: TestV3S1ProposerACrossRound (3.03s)
+=== RUN   TestV3S2SharedPowerOutageForks
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:230: network did not reach H-1
+--- FAIL: TestV3S2SharedPowerOutageForks (80.02s)
+=== RUN   TestV3S2ControlDeciderReachable
+    zz_v3_amnesia_test.go:192: static X1:2 X2:2 L:1, quorum 4; (H=4,r=0) proposer is a desktop
+    zz_v3_amnesia_test.go:249: L decided H=4 digest 46f82e62.. (3 precommits); merchant on L = 49/10
+    zz_v3_amnesia_test.go:255: desktops rebooted from their snapshots at heights 4 / 4
+    zz_v3_amnesia_test.go:262: H=4 committed 46f82e62.. on nQnWaI.. round 0, 3 precommits, Verify(static set)=true
+    zz_v3_amnesia_test.go:268: after L rejoins: L height 7 merchant=49/10 (was 49/10)
+--- PASS: TestV3S2ControlDeciderReachable (0.38s)
+FAIL
+FAIL	github.com/eval-apply-labs/go-ledger/node	575.935s
+FAIL

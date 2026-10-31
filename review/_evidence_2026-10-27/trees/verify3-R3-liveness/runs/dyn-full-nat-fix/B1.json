@@ -1,0 +1,51 @@
+{
+  "networkId": "pocdyn",
+  "listen": "127.0.0.1:43481",
+  "publicKey": "eoM0TxHCbmOEO40IfSa56ilpNycb3xInV5tpieSwGXI=",
+  "privateKey": "AJ+bNDFGhijEniFWn/fIWrR6gcYw9FH41wiAO0cVLhR6gzRPEcJuY4Q7jQh9JrnqKWk3JxvfEidXm2mJ5LAZcg==",
+  "transactionCost": "0.1",
+  "timeoutMs": 1000,
+  "minBlockIntervalMs": 300,
+  "validatorThreshold": "100",
+  "validators": [
+    {
+      "publicKey": "hPkkoDcLanZNsRMlFHTJOK675XkJdYP+imR9dT/lQck=",
+      "power": 1,
+      "url": "http://127.0.0.1:37919"
+    },
+    {
+      "publicKey": "eoM0TxHCbmOEO40IfSa56ilpNycb3xInV5tpieSwGXI=",
+      "power": 1,
+      "url": "http://127.0.0.1:43481"
+    },
+    {
+      "publicKey": "wdH4Aq/BGEylzw8ZKT5LgOEh8Szkk8Hil62jm+q78ao=",
+      "power": 1,
+      "url": "http://127.0.0.1:45681"
+    },
+    {
+      "publicKey": "ySsD+bDMpmJoAnpItJWQOkTtBieqbPSXHiqUXClKTCw=",
+      "power": 1,
+      "url": "http://127.0.0.1:38393"
+    },
+    {
+      "publicKey": "ZM5Dv6vk/33yi/HxL1vWL5HH/dd5tO5OND7LZO9GyFA=",
+      "power": 1,
+      "url": "http://127.0.0.1:39347"
+    }
+  ],
+  "peers": [
+    "http://127.0.0.1:37919",
+    "http://127.0.0.1:45681",
+    "http://127.0.0.1:38393",
+    "http://127.0.0.1:39347"
+  ],
+  "genesis": [
+    {
+      "publicKey": "hPkkoDcLanZNsRMlFHTJOK675XkJdYP+imR9dT/lQck=",
+      "name": "founder",
+      "amount": "1000",
+      "validatorNode": "hPkkoDcLanZNsRMlFHTJOK675XkJdYP+imR9dT/lQck="
+    }
+  ]
+}

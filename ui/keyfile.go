@@ -1,27 +1,28 @@
 package main
 
-// The wallet key file. The private key is stored encrypted like an SSH key: a passphrase (asked at
+// The wallet key file. The private key is the 32-byte ML-DSA-65 seed the key derives from, and it is
+// stored encrypted like an SSH key: a passphrase (asked at
 // startup, terminal echo off) is stretched with PBKDF2-HMAC-SHA256 and the key sealed with
 // AES-256-GCM, so a copied/backed-up/stolen wallet.json is useless without the passphrase — the
 // dominant loss vector for a file that otherwise holds the key in plain base64. An EMPTY passphrase
-// keeps the plaintext form (exactly like ssh-keygen), and a legacy plaintext file keeps working and
-// is offered a one-time upgrade. Zero external dependencies: PBKDF2 is implemented here (RFC 8018)
-// from stdlib HMAC-SHA256.
+// keeps the plaintext form (exactly like ssh-keygen); a plaintext file keeps working and is sealed in
+// place as soon as a passphrase is available. Zero external dependencies: PBKDF2 comes from the
+// standard library (crypto/pbkdf2).
 
 import (
 	"bufio"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/eval-apply-labs/go-ledger/signing"
@@ -31,13 +32,13 @@ import (
 // file, so it can be raised later without breaking existing wallets.
 const kdfIterations = 600_000
 
-// passphraseEnv lets scripts and tests supply the passphrase non-interactively.
-const passphraseEnv = "GOLEDGER_WALLET_PASSPHRASE"
+// passphraseEnvironmentVariable lets scripts and tests supply the passphrase non-interactively.
+const passphraseEnvironmentVariable = "GOLEDGER_WALLET_PASSPHRASE"
 
 type keyFile struct {
-	PublicKey  string        `json:"publicKey"`
-	PrivateKey string        `json:"privateKey,omitempty"`          // plaintext form (empty passphrase / legacy)
-	Encrypted  *encryptedKey `json:"encryptedPrivateKey,omitempty"` // passphrase-sealed form
+	PublicKey  string        `json:"publicKey"`                     // the key the seed derives, for display; checked on load
+	PrivateKey string        `json:"privateKey,omitempty"`          // the seed, plaintext form (empty passphrase)
+	Encrypted  *encryptedKey `json:"encryptedPrivateKey,omitempty"` // the seed, passphrase-sealed form
 }
 
 type encryptedKey struct {
@@ -45,91 +46,124 @@ type encryptedKey struct {
 	Iterations int    `json:"iterations"`
 	Salt       string `json:"salt"`       // base64
 	Nonce      string `json:"nonce"`      // base64
-	Ciphertext string `json:"ciphertext"` // base64: AES-256-GCM over the raw private key
+	Ciphertext string `json:"ciphertext"` // base64: AES-256-GCM over the 32-byte seed
 }
 
 // loadOrCreateKey returns the wallet key pair, creating and saving a fresh one if no file exists
 // yet (asking whether to protect it with a passphrase). Only a MISSING file creates a new key — any
 // other failure (unreadable JSON, wrong passphrase) is surfaced instead of silently overwriting a
 // wallet that may hold funds.
-func loadOrCreateKey(path string) (pub, priv []byte, err error) {
+func loadOrCreateKey(path string) (publicKey, privateKey []byte, err error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		if pub, priv, err = (signing.Ed25519{}).GenerateKey(); err != nil {
+		if publicKey, privateKey, err = (signing.MLDSA65{}).GenerateKey(); err != nil {
 			return nil, nil, err
 		}
-		pass, err := newPassphrase("set a wallet passphrase (empty = store unencrypted): ")
+		passphrase, err := newPassphrase("set a wallet passphrase (empty = store unencrypted): ")
 		if err != nil {
 			return nil, nil, err
 		}
-		return pub, priv, saveKey(path, pub, priv, pass)
+		return publicKey, privateKey, saveKey(path, publicKey, privateKey, passphrase)
 	}
 	if err != nil {
 		return nil, nil, err
 	}
-	var k keyFile
-	if err := json.Unmarshal(data, &k); err != nil {
+	var storedKey keyFile
+	if err := json.Unmarshal(data, &storedKey); err != nil {
 		return nil, nil, fmt.Errorf("unreadable wallet file %s: %w", path, err)
 	}
-	if pub, err = base64.StdEncoding.DecodeString(k.PublicKey); err != nil {
-		return nil, nil, err
-	}
 	switch {
-	case k.Encrypted != nil:
-		pass, err := getPassphrase("wallet passphrase: ")
+	case storedKey.Encrypted != nil:
+		passphrase, err := getPassphrase("wallet passphrase: ")
 		if err != nil {
 			return nil, nil, err
 		}
-		priv, err = k.Encrypted.open(pass)
-		return pub, priv, err
-	case k.PrivateKey != "":
-		if priv, err = base64.StdEncoding.DecodeString(k.PrivateKey); err != nil {
+		if privateKey, err = storedKey.Encrypted.open(passphrase); err != nil {
 			return nil, nil, err
 		}
-		// Legacy plaintext file: offer the one-time upgrade (skipped when non-interactive).
-		if interactive() && os.Getenv(passphraseEnv) == "" {
-			pass, err := newPassphrase("wallet key is stored UNENCRYPTED — set a passphrase now (empty to keep): ")
-			if err == nil && pass != "" {
-				err = saveKey(path, pub, priv, pass)
-			}
-			if err != nil {
-				return nil, nil, err
-			}
+	case storedKey.PrivateKey != "":
+		if privateKey, err = base64.StdEncoding.DecodeString(storedKey.PrivateKey); err != nil {
+			return nil, nil, err
 		}
-		return pub, priv, nil
+	default:
+		return nil, nil, fmt.Errorf("wallet file %s carries no private key", path)
 	}
-	return nil, nil, fmt.Errorf("wallet file %s carries no private key", path)
+	// The account is the key the seed derives. The publicKey field is outside the seal, so one that
+	// disagrees (a tampered or corrupted file) is refused rather than shown as this wallet's account.
+	// Any 32 bytes are a seed (signing/fips140v1.go stops the one build where crypto/mldsa refuses
+	// them all), so only a key of another length fails to parse: an earlier network's.
+	parsedKey, err := (signing.MLDSA65{}).ParsePrivateKey(privateKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("wallet file %s holds a %d-byte private key, not a 32-byte ML-DSA-65 seed: it belongs to an earlier network; make a new wallet", path, len(privateKey))
+	}
+	publicKey = parsedKey.PublicKey()
+	if storedKey.PublicKey != base64.StdEncoding.EncodeToString(publicKey) {
+		return nil, nil, fmt.Errorf("wallet file %s: publicKey does not match the private key (tampered or corrupted file)", path)
+	}
+	// A plaintext key is sealed as soon as a passphrase is available: the environment override, or one
+	// typed now. With neither, newPassphrase warns that the key stays unencrypted, on every start.
+	if storedKey.Encrypted == nil {
+		passphrase, err := newPassphrase("wallet key is stored UNENCRYPTED — set a passphrase now (empty to keep): ")
+		if err == nil && passphrase != "" {
+			err = saveKey(path, publicKey, privateKey, passphrase)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return publicKey, privateKey, nil
 }
 
-// saveKey writes the key pair: sealed under the passphrase, or plaintext if it is empty.
-func saveKey(path string, pub, priv []byte, passphrase string) error {
-	k := keyFile{PublicKey: base64.StdEncoding.EncodeToString(pub)}
+// saveKey writes the key pair: sealed under the passphrase, or plaintext if it is empty. It may
+// replace a funded wallet's only copy, so the write is crash-atomic: a synced temp file (mode 0600)
+// renamed over the old one. A path that is a symlink is followed, so the file it points to is the one
+// replaced: renaming over the link itself would leave a plaintext key there.
+func saveKey(path string, publicKey, privateKey []byte, passphrase string) error {
+	storedKey := keyFile{PublicKey: base64.StdEncoding.EncodeToString(publicKey)}
 	if passphrase == "" {
-		k.PrivateKey = base64.StdEncoding.EncodeToString(priv)
+		storedKey.PrivateKey = base64.StdEncoding.EncodeToString(privateKey)
 	} else {
-		sealed, err := sealPrivateKey(priv, passphrase)
+		sealed, err := sealPrivateKey(privateKey, passphrase)
 		if err != nil {
 			return err
 		}
-		k.Encrypted = sealed
+		storedKey.Encrypted = sealed
 	}
-	data, err := json.MarshalIndent(k, "", "  ")
+	data, err := json.MarshalIndent(storedKey, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		path = target
+	}
+	temporaryFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*") // created 0600
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporaryFile.Name()) // nothing left to remove once renamed
+	_, err = temporaryFile.Write(data)
+	if err == nil {
+		err = temporaryFile.Sync()
+	}
+	if closeErr := temporaryFile.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(temporaryFile.Name(), path)
 }
 
-func sealPrivateKey(priv []byte, passphrase string) (*encryptedKey, error) {
+func sealPrivateKey(privateKey []byte, passphrase string) (*encryptedKey, error) {
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return nil, err
 	}
-	gcm, err := gcmFor(passphrase, salt, kdfIterations)
+	aesGCM, err := gcmFor(passphrase, salt, kdfIterations)
 	if err != nil {
 		return nil, err
 	}
-	nonce := make([]byte, gcm.NonceSize())
+	nonce := make([]byte, aesGCM.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
@@ -138,87 +172,62 @@ func sealPrivateKey(priv []byte, passphrase string) (*encryptedKey, error) {
 		Iterations: kdfIterations,
 		Salt:       base64.StdEncoding.EncodeToString(salt),
 		Nonce:      base64.StdEncoding.EncodeToString(nonce),
-		Ciphertext: base64.StdEncoding.EncodeToString(gcm.Seal(nil, nonce, priv, nil)),
+		Ciphertext: base64.StdEncoding.EncodeToString(aesGCM.Seal(nil, nonce, privateKey, nil)),
 	}, nil
 }
 
-func (e *encryptedKey) open(passphrase string) ([]byte, error) {
-	if e.KDF != "pbkdf2-hmac-sha256" || e.Iterations < 1 {
-		return nil, fmt.Errorf("unsupported wallet key encryption %q", e.KDF)
+func (sealedKey *encryptedKey) open(passphrase string) ([]byte, error) {
+	if sealedKey.KDF != "pbkdf2-hmac-sha256" || sealedKey.Iterations < 1 {
+		return nil, fmt.Errorf("unsupported wallet key encryption %q", sealedKey.KDF)
 	}
-	salt, err := base64.StdEncoding.DecodeString(e.Salt)
+	salt, err := base64.StdEncoding.DecodeString(sealedKey.Salt)
 	if err != nil {
 		return nil, err
 	}
-	nonce, err := base64.StdEncoding.DecodeString(e.Nonce)
+	nonce, err := base64.StdEncoding.DecodeString(sealedKey.Nonce)
 	if err != nil {
 		return nil, err
 	}
-	ciphertext, err := base64.StdEncoding.DecodeString(e.Ciphertext)
+	ciphertext, err := base64.StdEncoding.DecodeString(sealedKey.Ciphertext)
 	if err != nil {
 		return nil, err
 	}
-	gcm, err := gcmFor(passphrase, salt, e.Iterations)
+	aesGCM, err := gcmFor(passphrase, salt, sealedKey.Iterations)
 	if err != nil {
 		return nil, err
 	}
-	priv, err := gcm.Open(nil, nonce, ciphertext, nil)
+	privateKey, err := aesGCM.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return nil, errors.New("cannot unlock the wallet: wrong passphrase (or a corrupted key file)")
 	}
-	return priv, nil
+	return privateKey, nil
 }
 
 func gcmFor(passphrase string, salt []byte, iterations int) (cipher.AEAD, error) {
-	block, err := aes.NewCipher(pbkdf2SHA256([]byte(passphrase), salt, iterations, 32))
+	derivedKey, err := pbkdf2.Key(sha256.New, passphrase, salt, iterations, 32)
 	if err != nil {
 		return nil, err
 	}
-	return cipher.NewGCM(block)
-}
-
-// pbkdf2SHA256 is PBKDF2 (RFC 8018 §5.2) with HMAC-SHA256 — implemented here because the stdlib of
-// this toolchain ships the primitives but not the KDF, and the ui module stays dependency-free.
-// Verified against published test vectors in keyfile_test.go.
-func pbkdf2SHA256(password, salt []byte, iterations, keyLen int) []byte {
-	prf := hmac.New(sha256.New, password)
-	hashLen := prf.Size()
-	blocks := (keyLen + hashLen - 1) / hashLen
-	derived := make([]byte, 0, blocks*hashLen)
-	var counter [4]byte
-	for block := 1; block <= blocks; block++ {
-		prf.Reset()
-		prf.Write(salt)
-		binary.BigEndian.PutUint32(counter[:], uint32(block))
-		prf.Write(counter[:])
-		u := prf.Sum(nil)
-		t := append([]byte(nil), u...)
-		for i := 1; i < iterations; i++ {
-			prf.Reset()
-			prf.Write(u)
-			u = prf.Sum(nil)
-			for j := range t {
-				t[j] ^= u[j]
-			}
-		}
-		derived = append(derived, t...)
+	blockCipher, err := aes.NewCipher(derivedKey)
+	if err != nil {
+		return nil, err
 	}
-	return derived[:keyLen]
+	return cipher.NewGCM(blockCipher)
 }
 
 // ---- passphrase acquisition ----
 
-// stdin is shared so a prompt-and-confirm pair cannot lose a buffered line between two readers.
-var stdin = bufio.NewReader(os.Stdin)
+// standardInputReader is shared so a prompt-and-confirm pair cannot lose a buffered line between two readers.
+var standardInputReader = bufio.NewReader(os.Stdin)
 
 // getPassphrase returns the passphrase for an EXISTING sealed key: the environment override if set,
 // otherwise a terminal prompt. A sealed wallet in a non-interactive run with no override is an error.
 func getPassphrase(prompt string) (string, error) {
-	if pass := os.Getenv(passphraseEnv); pass != "" {
-		return pass, nil
+	if passphrase := os.Getenv(passphraseEnvironmentVariable); passphrase != "" {
+		return passphrase, nil
 	}
 	if !interactive() {
-		return "", fmt.Errorf("the wallet key is passphrase-protected; set %s or run interactively", passphraseEnv)
+		return "", fmt.Errorf("the wallet key is passphrase-protected; set %s or run interactively", passphraseEnvironmentVariable)
 	}
 	return readSecret(prompt)
 }
@@ -226,31 +235,31 @@ func getPassphrase(prompt string) (string, error) {
 // newPassphrase asks for a NEW passphrase (with confirmation). Non-interactively it returns the
 // environment override, or empty (plaintext) so scripted runs keep working.
 func newPassphrase(prompt string) (string, error) {
-	if pass := os.Getenv(passphraseEnv); pass != "" {
-		return pass, nil
+	if passphrase := os.Getenv(passphraseEnvironmentVariable); passphrase != "" {
+		return passphrase, nil
 	}
 	if !interactive() {
 		// No terminal to prompt on and no env override: we cannot obtain a passphrase, so the key is
 		// stored UNENCRYPTED. Say so loudly rather than silently — an operator running the wallet as a
 		// service is the one who most needs to know, and can seal it by setting the env var.
-		fmt.Fprintf(os.Stderr, "warning: no terminal to set a passphrase — the wallet key is stored UNENCRYPTED. Set %s to seal it.\n", passphraseEnv)
+		fmt.Fprintf(os.Stderr, "warning: no terminal to set a passphrase — the wallet key is stored UNENCRYPTED. Set %s to seal it.\n", passphraseEnvironmentVariable)
 		return "", nil
 	}
-	pass, err := readSecret(prompt)
+	passphrase, err := readSecret(prompt)
 	if err != nil {
 		return "", nil // no usable terminal after all (e.g. stdin is /dev/null): keep plaintext
 	}
-	if pass == "" {
+	if passphrase == "" {
 		return "", nil
 	}
 	again, err := readSecret("repeat the passphrase: ")
 	if err != nil {
 		return "", err
 	}
-	if pass != again {
+	if passphrase != again {
 		return "", errors.New("passphrases do not match")
 	}
-	return pass, nil
+	return passphrase, nil
 }
 
 // interactive reports whether stdin is a real terminal we can prompt on. A character-device check
@@ -261,8 +270,8 @@ func newPassphrase(prompt string) (string, error) {
 // readSecret already uses), and fall back to the char-device heuristic only if stty is absent, so a
 // genuine terminal on a minimal system still gets a prompt.
 func interactive() bool {
-	info, err := os.Stdin.Stat()
-	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+	fileInformation, err := os.Stdin.Stat()
+	if err != nil || fileInformation.Mode()&os.ModeCharDevice == 0 {
 		return false // a pipe, file or redirect is never a terminal
 	}
 	probe := exec.Command("stty")
@@ -284,7 +293,7 @@ func readSecret(prompt string) (string, error) {
 	echoOff := exec.Command("stty", "-echo")
 	echoOff.Stdin = os.Stdin
 	echoSuppressed := echoOff.Run() == nil
-	line, err := stdin.ReadString('\n')
+	line, err := standardInputReader.ReadString('\n')
 	if echoSuppressed {
 		echoOn := exec.Command("stty", "echo")
 		echoOn.Stdin = os.Stdin

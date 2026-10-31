@@ -1,0 +1,63 @@
+{
+  "networkId": "pocmisc",
+  "listen": "127.0.0.1:36309",
+  "publicKey": "AsTnrDqpjOtZa773KZKEqLWH5SMvWnP+m77u1AQ3HDU=",
+  "privateKey": "ctFN9AUACfIEhQ82MA4YeKH1qxAyUknM44m8DHDcOdICxOesOqmM61lrvvcpkoSotYflIy9ac/6bvu7UBDccNQ==",
+  "transactionCost": "0.1",
+  "timeoutMs": 1000,
+  "minBlockIntervalMs": 300,
+  "maxPeers": 0,
+  "validators": [
+    {
+      "publicKey": "p/lES8mXyYtwVQkOJvIZz4jxF+mcd8bgUs9J5gm1Kbg=",
+      "power": 1,
+      "url": "http://127.0.0.1:35917"
+    },
+    {
+      "publicKey": "AsTnrDqpjOtZa773KZKEqLWH5SMvWnP+m77u1AQ3HDU=",
+      "power": 1,
+      "url": "http://127.0.0.1:36309"
+    },
+    {
+      "publicKey": "P1k1rn/tAQGxpY40fjMR70WJR+TNNbrxuwOVJ2jXT2M=",
+      "power": 1,
+      "url": "http://127.0.0.1:33013"
+    },
+    {
+      "publicKey": "Ar1SFsZsq8hVkT+IhADIy92c3FOlLX9sIRQhC+8qNO8=",
+      "power": 1,
+      "url": "http://127.0.0.1:41035"
+    }
+  ],
+  "peers": [
+    "http://127.0.0.1:35917",
+    "http://127.0.0.1:33013",
+    "http://127.0.0.1:41035"
+  ],
+  "genesis": [
+    {
+      "publicKey": "p/lES8mXyYtwVQkOJvIZz4jxF+mcd8bgUs9J5gm1Kbg=",
+      "amount": "100",
+      "validatorNode": "p/lES8mXyYtwVQkOJvIZz4jxF+mcd8bgUs9J5gm1Kbg=",
+      "address": "http://127.0.0.1:35917"
+    },
+    {
+      "publicKey": "AsTnrDqpjOtZa773KZKEqLWH5SMvWnP+m77u1AQ3HDU=",
+      "amount": "100",
+      "validatorNode": "AsTnrDqpjOtZa773KZKEqLWH5SMvWnP+m77u1AQ3HDU=",
+      "address": "http://127.0.0.1:36309"
+    },
+    {
+      "publicKey": "P1k1rn/tAQGxpY40fjMR70WJR+TNNbrxuwOVJ2jXT2M=",
+      "amount": "100",
+      "validatorNode": "P1k1rn/tAQGxpY40fjMR70WJR+TNNbrxuwOVJ2jXT2M=",
+      "address": "http://127.0.0.1:33013"
+    },
+    {
+      "publicKey": "Ar1SFsZsq8hVkT+IhADIy92c3FOlLX9sIRQhC+8qNO8=",
+      "amount": "100",
+      "validatorNode": "Ar1SFsZsq8hVkT+IhADIy92c3FOlLX9sIRQhC+8qNO8=",
+      "address": "http://127.0.0.1:41035"
+    }
+  ]
+}

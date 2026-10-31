@@ -1,0 +1,8 @@
+?   	github.com/eval-apply-labs/go-ledger/cmd/demo	[no test files]
+?   	github.com/eval-apply-labs/go-ledger/cmd/keygen	[no test files]
+ok  	github.com/eval-apply-labs/go-ledger/cmd/server	1.036s
+ok  	github.com/eval-apply-labs/go-ledger/consensus	12.396s
+ok  	github.com/eval-apply-labs/go-ledger/ledger	1.165s
+ok  	github.com/eval-apply-labs/go-ledger/node	25.499s
+ok  	github.com/eval-apply-labs/go-ledger/signing	1.037s
+EXIT=0

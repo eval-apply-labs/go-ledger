@@ -6,111 +6,86 @@ import (
 	"github.com/eval-apply-labs/go-ledger/signing"
 )
 
-// AccountUpdate is a signed change to an account's own attributes: a re-delegation (point your stake
-// at a different validator), a display Name, and a Description. It is carried in a block like a
-// payment and applied deterministically. The Name is a first-come-unique claim across the whole
-// ledger — that uniqueness rule is what makes this a naming service: a "domain" is just a Name bound
-// to a public key, and because you must already have an account to update it, registering a name is
-// paid for by the same money layer that secures payments. An empty field leaves that attribute
-// unchanged.
+// AccountUpdate is a signed change to an account's own attributes: a re-delegation (point your stake at
+// another name), a Description, and the gossip Address a validator publishes (the on-chain peer DNS).
+// It is carried in a block like a payment and applied deterministically. An empty field leaves that
+// attribute unchanged, and ClearField sets it to none. An update never names or renames an account: a
+// name is the account's identity.
 type AccountUpdate struct {
-	From        string // the account's public key (owner and verification key)
-	Name        string // requested unique name (empty = unchanged)
-	Delegated   string // validator public key to delegate stake to (empty = unchanged)
-	Description string // free text (empty = unchanged)
-	Address     string // this validator's gossip address, for the on-chain peer DNS (empty = unchanged)
+	Name        string // the account; its current key signs
+	Delegate    string // the name this balance backs as stake ("" = unchanged, ClearField = none)
+	Description string // free text ("" = unchanged, ClearField = none)
+	Address     string // this validator's gossip address ("" = unchanged, ClearField = none)
 	BlockID     int64  // the block this update is bound to (replay guard, as for a payment)
-	Signature   string // owner signature over the canonical fields (domain "account-update")
+	Signature   string // the account's signature over the canonical fields (domain "account-update")
 }
 
-func (u AccountUpdate) signFields() [][]byte {
+// ClearField, in an update's Delegate, Description or Address, sets that field to none; "" leaves it
+// unchanged. It is never a name (CanonicalName), so a delegation can always be told from it. Without
+// it a delegation, or a published address, could never be withdrawn.
+const ClearField = "-"
+
+func (accountUpdate AccountUpdate) signFields() [][]byte {
 	return [][]byte{
-		[]byte(u.From),
-		[]byte(u.Name),
-		[]byte(u.Delegated),
-		[]byte(u.Description),
-		[]byte(u.Address),
-		[]byte(strconv.FormatInt(u.BlockID, 10)),
+		[]byte(accountUpdate.Name),
+		[]byte(accountUpdate.Delegate),
+		[]byte(accountUpdate.Description),
+		[]byte(accountUpdate.Address),
+		[]byte(strconv.FormatInt(accountUpdate.BlockID, 10)),
 	}
 }
 
-// SignAccountUpdate returns a copy of u signed by its owner in the "account-update" domain.
-func SignAccountUpdate(signer *signing.Signer, u AccountUpdate) (AccountUpdate, error) {
-	sig, err := signer.SignBase64(signing.DomainAccountUpdate, u.signFields()...)
+// SignAccountUpdate returns a copy of update signed by its account's key in the "account-update" domain.
+func SignAccountUpdate(signer *signing.Signer, update AccountUpdate) (AccountUpdate, error) {
+	signature, err := signer.SignBase64(signing.DomainAccountUpdate, update.signFields()...)
 	if err != nil {
-		return u, err
+		return update, err
 	}
-	u.Signature = sig
-	return u, nil
+	update.Signature = signature
+	return update, nil
 }
 
-// VerifyAccountUpdate reports whether u carries a valid signature by its own account (From).
-func VerifyAccountUpdate(scheme signing.Scheme, networkID string, u AccountUpdate) bool {
-	return signing.VerifyBase64(scheme, networkID, u.From, signing.DomainAccountUpdate, u.Signature, u.signFields()...)
+// VerifyAccountUpdate reports whether update carries a valid signature by publicKey, which the caller
+// takes from the state: the current key of the account named update.Name.
+func VerifyAccountUpdate(scheme signing.Scheme, networkID, publicKey string, update AccountUpdate) bool {
+	return signing.VerifyBase64(scheme, networkID, publicKey, signing.DomainAccountUpdate, update.Signature, update.signFields()...)
 }
 
 // UpdateID is a malleability-proof identity for an update (content, not signature) — used for
 // mempool/gossip dedup, mirroring PaymentID.
-func UpdateID(u AccountUpdate) string { return hashFields("account-update-id", u.signFields()) }
+func UpdateID(update AccountUpdate) string {
+	return hashFields("account-update-id", update.signFields())
+}
 
-// MaxAccountNameLength caps a registered name's byte length. Deliberately well below 44 — the
-// base64 length of an Ed25519 public key — so a registered name can NEVER be a valid key encoding:
-// a payment recipient is either a key or a name with no overlap (a 44-char "name" could otherwise
-// be crafted to mask someone's actual key and hijack pay-by-key inputs treated as names, or vice
-// versa). Also keeps the registry human-scale.
-const MaxAccountNameLength = 32
-
-// applyAccountUpdates applies signed attribute updates to accounts, in order, deterministically:
-// re-delegation, description, and Name — the Name only if it is free or already this account's
-// (first-come uniqueness = the registry) and within MaxAccountNameLength. An update for a
-// non-existent account is dropped (you must hold an account to name/delegate it). Callers pass only
-// updates that verify and name this block.
-func applyAccountUpdates(scheme signing.Scheme, networkID string, accounts []Account, updates []AccountUpdate, height int64) []Account {
+// applyAccountUpdates applies signed attribute updates to accounts, in order, deterministically: the
+// delegate, the description and the address, each left alone when the update leaves it "", and set to
+// none by ClearField. Callers pass only updates that ApplyBlock's checks accept (updateError), so each
+// names an existing account; the accounts keep their order.
+func applyAccountUpdates(accounts []Account, updates []AccountUpdate) []Account {
 	if len(updates) == 0 {
 		return accounts
 	}
-	updatedAccounts := make([]Account, len(accounts))
-	copy(updatedAccounts, accounts)
-	accountIndexByKey := make(map[string]int, len(updatedAccounts))
-	ownerByName := make(map[string]string, len(updatedAccounts))
-	for accountIndex, account := range updatedAccounts {
-		accountIndexByKey[account.PublicKey] = accountIndex
-		if account.Name != "" {
-			ownerByName[account.Name] = account.PublicKey
-		}
-	}
-
+	updatedAccounts := append([]Account(nil), accounts...)
 	for _, update := range updates {
-		if update.BlockID != height || !VerifyAccountUpdate(scheme, networkID, update) {
+		index, found := findAccountIndex(updatedAccounts, update.Name)
+		if !found {
 			continue
 		}
-		accountIndex, accountExists := accountIndexByKey[update.From]
-		if !accountExists {
-			continue // you must already hold an account to name or delegate it
-		}
-		account := updatedAccounts[accountIndex]
-		if update.Name != "" && len(update.Name) <= MaxAccountNameLength {
-			currentOwner, nameAlreadyTaken := ownerByName[update.Name]
-			if !nameAlreadyTaken || currentOwner == update.From {
-				if account.Name != "" {
-					delete(ownerByName, account.Name) // release the previous name
-				}
-				ownerByName[update.Name] = update.From
-				account.Name = update.Name
-			}
-			// else: the name belongs to someone else — ignore the rename, apply the rest
-		}
-		// An over-long name (it could mask a public key) is ignored like a taken one; the rest applies.
-		if update.Delegated != "" {
-			account.ValidatorNode = update.Delegated
-		}
-		if update.Description != "" {
-			account.Description = update.Description
-		}
-		if update.Address != "" {
-			account.Address = update.Address
-		}
-		updatedAccounts[accountIndex] = account
+		applyField(&updatedAccounts[index].Delegate, update.Delegate)
+		applyField(&updatedAccounts[index].Description, update.Description)
+		applyField(&updatedAccounts[index].Address, update.Address)
 	}
 	return updatedAccounts
+}
+
+// applyField sets *field from an update's value: "" leaves it, ClearField empties it, anything else
+// replaces it.
+func applyField(field *string, value string) {
+	switch value {
+	case "":
+	case ClearField:
+		*field = ""
+	default:
+		*field = value
+	}
 }

@@ -2,10 +2,11 @@ package node
 
 import (
 	"bytes"
-	"context"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,12 +17,17 @@ import (
 
 // HTTPTransport broadcasts messages to peers over HTTP with fire-and-forget POSTs. Peers are the
 // base URLs of the other nodes. Delivery is asynchronous (a goroutine per peer), as required by
-// the Transport contract, so it never blocks the node's event loop.
-type HTTPTransport struct {
-	mu     sync.RWMutex
+// the Transport contract, so it never blocks the node's event loop. SetPeers and Peers are not part
+// of Transport: the node finds them with a type assertion (resolvePeersFromState, catchUpCheckpoint).
+type HTTPTransport struct { // implements Transport
+	mutex  sync.RWMutex
 	peers  []string
 	client *http.Client
 }
+
+// The compiler checks that *HTTPTransport implements Transport. Its methods take a pointer receiver,
+// so it is the pointer, *HTTPTransport, that implements it; nil is a pointer of that type.
+var _ Transport = (*HTTPTransport)(nil)
 
 // NewHTTPTransport builds a transport for the given peer base URLs (which may be set later via
 // SetPeers).
@@ -33,287 +39,378 @@ func NewHTTPTransport(peers []string) *HTTPTransport {
 }
 
 // SetPeers replaces the peer list.
-func (t *HTTPTransport) SetPeers(peers []string) {
-	t.mu.Lock()
-	t.peers = append([]string(nil), peers...)
-	t.mu.Unlock()
+func (httpTransport *HTTPTransport) SetPeers(peers []string) {
+	httpTransport.mutex.Lock()
+	httpTransport.peers = append([]string(nil), peers...)
+	httpTransport.mutex.Unlock()
 }
 
-// Peers returns a copy of the current peer list (used as catch-up sources when no bootstrap peers
-// are configured).
-func (t *HTTPTransport) Peers() []string {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return append([]string(nil), t.peers...)
+// Peers returns a copy of the current peer list (asked for a checkpoint to catch up to when no
+// bootstrap peer yields one; see Node.catchUpCheckpoint).
+func (httpTransport *HTTPTransport) Peers() []string {
+	httpTransport.mutex.RLock()
+	defer httpTransport.mutex.RUnlock()
+	return append([]string(nil), httpTransport.peers...)
 }
 
-// Broadcast POSTs msg to every peer asynchronously.
-func (t *HTTPTransport) Broadcast(from string, msg Message) {
-	t.mu.RLock()
-	peers := append([]string(nil), t.peers...)
-	t.mu.RUnlock()
+// Broadcast POSTs message to every peer asynchronously.
+func (httpTransport *HTTPTransport) Broadcast(from string, message Message) {
+	httpTransport.mutex.RLock()
+	peers := append([]string(nil), httpTransport.peers...)
+	httpTransport.mutex.RUnlock()
 
 	var path string
 	var body any
-	switch msg.Type {
-	case MsgProposal:
-		path, body = "/hdls/proposal", msg.Proposal
-	case MsgVote:
-		path, body = "/hdls/vote", msg.Vote
-	case MsgPayment:
-		path, body = "/hdls/payment", msg.Payment
-	case MsgUpdate:
-		path, body = "/hdls/update", msg.Update
-	case MsgParameterVote:
-		path, body = "/hdls/parameter-vote", msg.ParameterChange
-	case MsgReassignmentVote:
-		path, body = "/hdls/reassignment-vote", msg.Reassignment
+	switch message.Type {
+	case MessageProposal:
+		path, body = "/hdls/proposal", message.Proposal
+	case MessageVote:
+		path, body = "/hdls/vote", message.Vote
+	case MessagePayment:
+		path, body = "/hdls/payment", message.Payment
+	case MessageUpdate:
+		path, body = "/hdls/update", message.Update
+	case MessageNameRequest:
+		path, body = "/hdls/name-request", message.NameRequest
+	case MessageParameterCertificate:
+		path, body = "/hdls/parameter-vote", message.ParameterChange
+	case MessageReassignmentCertificate:
+		path, body = "/hdls/reassignment-vote", message.Reassignment
 	default:
 		return
 	}
-	b, err := json.Marshal(body)
+	encodedBody, err := json.Marshal(body)
 	if err != nil {
 		return
 	}
 	for _, peer := range peers {
-		go t.post(peer+path, b)
+		go httpTransport.post(peer+path, encodedBody)
 	}
 }
 
-func (t *HTTPTransport) post(url string, body []byte) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+// post sends one message to one peer. The client's 5-second timeout bounds the whole exchange.
+func (httpTransport *HTTPTransport) post(endpointURL string, body []byte) {
+	response, err := httpTransport.client.Post(endpointURL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return
-	}
-	resp.Body.Close()
+	response.Body.Close()
 }
 
-// Server exposes a Node over HTTP: peer message intake (/hdls/proposal, /hdls/vote) plus client
-// endpoints (/hdls/pay, /hdls/status, /hdls/accounts).
+// Server exposes a Node over HTTP: the routes Handler registers.
 type Server struct{ node *Node }
 
 // NewServer wraps a node for HTTP serving.
-func NewServer(n *Node) *Server { return &Server{node: n} }
+func NewServer(node *Node) *Server { return &Server{node: node} }
 
-// Handler returns the node's HTTP routes.
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/hdls/proposal", s.handleProposal)
-	mux.HandleFunc("/hdls/vote", s.handleVote)
-	mux.HandleFunc("/hdls/payment", s.handleGossipPayment)
-	mux.HandleFunc("/hdls/update", s.handleAccountUpdate)
-	mux.HandleFunc("/hdls/parameter-vote", s.handleParameterVote)
-	mux.HandleFunc("/hdls/reassignment-vote", s.handleReassignmentVote)
-	mux.HandleFunc("/hdls/pay", s.handlePay)
-	mux.HandleFunc("/hdls/status", s.handleStatus)
-	mux.HandleFunc("/hdls/accounts", s.handleAccounts)
-	mux.HandleFunc("/hdls/resolve", s.handleResolve)
-	mux.HandleFunc("/hdls/governance", s.handleGovernance)
-	mux.HandleFunc("/hdls/checkpoint", s.handleCheckpoint)
-	return mux
+// Handler returns the node's HTTP routes, each with its method: the router answers 405 to another
+// method before any handler runs.
+func (server *Server) Handler() http.Handler {
+	router := http.NewServeMux()
+	router.HandleFunc("POST /hdls/proposal", server.handleProposal)
+	router.HandleFunc("POST /hdls/vote", server.handleVote)
+	router.HandleFunc("POST /hdls/payment", server.handleGossipPayment)
+	router.HandleFunc("POST /hdls/update", server.handleAccountUpdate)
+	router.HandleFunc("POST /hdls/name-request", server.handleNameRequest)
+	router.HandleFunc("POST /hdls/parameter-vote", server.handleParameterVote)
+	router.HandleFunc("POST /hdls/reassignment-vote", server.handleReassignmentVote)
+	router.HandleFunc("POST /hdls/pay", server.handlePay)
+	router.HandleFunc("GET /hdls/status", server.handleStatus)
+	router.HandleFunc("GET /hdls/accounts", server.handleAccounts)
+	router.HandleFunc("GET /hdls/resolve", server.handleResolve)
+	router.HandleFunc("GET /hdls/governance", server.handleGovernance)
+	router.HandleFunc("GET /hdls/checkpoint", server.handleCheckpoint)
+	router.HandleFunc("GET /hdls/record", server.handleRecord)
+	router.HandleFunc("GET /hdls/lifelong-record", server.handleLifelongRecord)
+	return router
 }
 
-// handleCheckpoint serves the node's current committed state plus the certificate that finalised
-// it, for a joining/rebooting peer to verify and adopt.
-func (s *Server) handleCheckpoint(w http.ResponseWriter, r *http.Request) {
-	snap := s.node.Snapshot()
-	writeJSON(w, Checkpoint{Accounts: snap.Accounts, Parameters: snap.Parameters, GovernanceSequence: snap.GovernanceSequence, Commit: snap.LastCommit, Validators: snap.Validators})
+// handleCheckpoint serves the node's current committed state, the header of the block that produced it
+// and the certificate that finalised it, for a joining/rebooting peer to verify and adopt.
+func (server *Server) handleCheckpoint(responseWriter http.ResponseWriter, request *http.Request) {
+	writeJSON(responseWriter, server.node.Snapshot().checkpoint())
 }
 
-func (s *Server) handleProposal(w http.ResponseWriter, r *http.Request) {
-	var p ProposalMsg
-	if !decode(w, r, &p) {
+func (server *Server) handleProposal(responseWriter http.ResponseWriter, request *http.Request) {
+	var proposal ProposalMessage
+	if !decode(responseWriter, request, &proposal, maxProposalBytes) {
 		return
 	}
-	s.node.SubmitProposal(p)
-	w.WriteHeader(http.StatusAccepted)
+	server.node.SubmitProposal(proposal)
+	responseWriter.WriteHeader(http.StatusAccepted)
 }
 
-func (s *Server) handleVote(w http.ResponseWriter, r *http.Request) {
-	var v consensus.Vote
-	if !decode(w, r, &v) {
+func (server *Server) handleVote(responseWriter http.ResponseWriter, request *http.Request) {
+	var vote consensus.Vote
+	if !decode(responseWriter, request, &vote, maxBodyBytes) {
 		return
 	}
-	s.node.SubmitVote(v)
-	w.WriteHeader(http.StatusAccepted)
+	server.node.SubmitVote(vote)
+	responseWriter.WriteHeader(http.StatusAccepted)
 }
 
-// handleGossipPayment receives a payment relayed from a peer node and queues it locally. The payer
-// signature is verified at ingress — the same check as the client endpoint — so an unauthenticated
-// attacker cannot fill the bounded mempool with junk that the proposer would then re-verify every block.
-func (s *Server) handleGossipPayment(w http.ResponseWriter, r *http.Request) {
-	var p ledger.Payment
-	if !decode(w, r, &p) {
+// handleGossipPayment receives a payment relayed from a peer node and queues it locally, through the
+// same intake as the client endpoint (Node.AdmitPayment): the payer's signature is verified at ingress,
+// under the payer's key in the committed state, so an unauthenticated attacker cannot fill the bounded
+// mempool with junk that the proposer would then re-verify every block.
+func (server *Server) handleGossipPayment(responseWriter http.ResponseWriter, request *http.Request) {
+	var payment ledger.Payment
+	if !decode(responseWriter, request, &payment, maxBodyBytes) {
 		return
 	}
-	if !ledger.VerifyPayment(s.node.cfg.Scheme, s.node.cfg.NetworkID, p) {
-		http.Error(w, "invalid payment signature", http.StatusBadRequest)
-		return
-	}
-	if err := s.node.AdmitPayment(p); err != nil {
-		http.Error(w, "payment refused: "+err.Error(), http.StatusConflict)
+	if _, err := server.node.AdmitPayment(payment); err != nil {
+		http.Error(responseWriter, "payment refused: "+err.Error(), http.StatusConflict)
 		return // refused (e.g. it would overdraw the payer) — dropped, not queued, not relayed onward
 	}
-	w.WriteHeader(http.StatusAccepted)
+	responseWriter.WriteHeader(http.StatusAccepted)
 }
 
-// handleAccountUpdate receives a signed account-attribute update — a name registration, a
-// re-delegation, or a description change — from a client or a peer. It verifies the owner's signature
-// and queues it; the node gossips it onward so it reaches whichever node proposes the block it names.
-func (s *Server) handleAccountUpdate(w http.ResponseWriter, r *http.Request) {
+// handleAccountUpdate receives a signed account update — a re-delegation, a description or an address
+// — from a client or a peer, and hands it to the node's intake (Node.AdmitUpdate), which pools it only
+// if it can still apply and its signature verifies under its account's key, and gossips it onward so it
+// reaches whichever node proposes the block it names. A refusal answers 409 with the reason.
+func (server *Server) handleAccountUpdate(responseWriter http.ResponseWriter, request *http.Request) {
 	var update ledger.AccountUpdate
-	if !decode(w, r, &update) {
+	if !decode(responseWriter, request, &update, maxBodyBytes) {
 		return
 	}
-	if !ledger.VerifyAccountUpdate(s.node.cfg.Scheme, s.node.cfg.NetworkID, update) {
-		http.Error(w, "invalid update signature", http.StatusBadRequest)
+	if err := server.node.AdmitUpdate(update); err != nil {
+		http.Error(responseWriter, "update refused: "+err.Error(), http.StatusConflict)
 		return
 	}
-	s.node.SubmitUpdate(update)
-	w.WriteHeader(http.StatusAccepted)
+	responseWriter.WriteHeader(http.StatusAccepted)
 }
 
-// handleParameterVote receives a validator's parameter-change vote(s) — the proposed parameters, the
-// parameters they amend, and the signatures — from a validator or a peer, and pools/gossips them. A
-// change enacts only once pooled votes reach the > ⅔ quorum (verified again on block application).
-func (s *Server) handleParameterVote(w http.ResponseWriter, r *http.Request) {
+// handleNameRequest receives a signed name request — a registration, a key change, a bank change or a
+// freeze — from a client or a peer, and hands it to the node's intake (Node.AdmitNameRequest), which
+// pools it only if it can still apply and its signatures verify, and gossips it onward. It answers 202,
+// or 409 with the reason.
+func (server *Server) handleNameRequest(responseWriter http.ResponseWriter, request *http.Request) {
+	var nameRequest ledger.NameRequest
+	if !decode(responseWriter, request, &nameRequest, maxBodyBytes) {
+		return
+	}
+	if err := server.node.AdmitNameRequest(nameRequest); err != nil {
+		http.Error(responseWriter, "name request refused: "+err.Error(), http.StatusConflict)
+		return
+	}
+	responseWriter.WriteHeader(http.StatusAccepted)
+}
+
+// handleParameterVote receives a parameter-change certificate — the proposed parameters, the
+// parameters they amend, and the validators' signatures — from a validator or a peer. The node pools
+// and gossips it only if it is complete, its votes already meeting the > ⅔ quorum (see
+// addParameterVotes); it is verified again on block application. It answers 202 once the certificate
+// is pooled, now or before, or 409 with the reason.
+func (server *Server) handleParameterVote(responseWriter http.ResponseWriter, request *http.Request) {
 	var change ledger.ParameterChange
-	if !decode(w, r, &change) {
+	if !decode(responseWriter, request, &change, maxBodyBytes) {
 		return
 	}
-	s.node.SubmitParameterVote(change)
-	w.WriteHeader(http.StatusAccepted)
+	if err := server.node.AdmitParameterCertificate(change); err != nil {
+		http.Error(responseWriter, "certificate refused: "+err.Error(), http.StatusConflict)
+		return
+	}
+	responseWriter.WriteHeader(http.StatusAccepted)
 }
 
-// handleReassignmentVote receives a validator's balance-reassignment vote(s) — the account, the
-// balance it holds now, the balance to set, and the signatures — and pools/gossips them. It enacts
-// only once pooled votes reach the > ⅔ quorum (verified again on block application).
-func (s *Server) handleReassignmentVote(w http.ResponseWriter, r *http.Request) {
+// handleReassignmentVote receives a ⅔ name action's certificate — the name, what the action changes
+// (its balance, key, bank of record, frozen mark), and the validators' signatures. The node pools and
+// gossips it only if it is complete, its votes already meeting the > ⅔ quorum (see
+// addReassignmentVotes); it is verified again on block application. It answers 202 once the
+// certificate is pooled, now or before, or 409 with the reason.
+func (server *Server) handleReassignmentVote(responseWriter http.ResponseWriter, request *http.Request) {
 	var reassignment ledger.Reassignment
-	if !decode(w, r, &reassignment) {
+	if !decode(responseWriter, request, &reassignment, maxBodyBytes) {
 		return
 	}
-	s.node.SubmitReassignmentVote(reassignment)
-	w.WriteHeader(http.StatusAccepted)
+	if err := server.node.AdmitReassignmentCertificate(reassignment); err != nil {
+		http.Error(responseWriter, "certificate refused: "+err.Error(), http.StatusConflict)
+		return
+	}
+	responseWriter.WriteHeader(http.StatusAccepted)
 }
 
 // handleGovernance serves a read-only view of the current parameters, the validator set/quorum, and
-// the pending parameter and reassignment proposals with their vote tallies — for an admin UI.
-func (s *Server) handleGovernance(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.node.GovernanceView())
+// the pooled parameter-change and reassignment certificates with their vote tallies — for an admin UI.
+func (server *Server) handleGovernance(responseWriter http.ResponseWriter, request *http.Request) {
+	writeJSON(responseWriter, server.node.GovernanceView())
 }
 
 // handlePay is the client endpoint: a wallet submits a signed payment to its reference node. The
-// payment must carry a valid payer signature; the node queues it (and gossips it to peers so it
-// reaches whichever node proposes the block it names) and returns a signed receipt the payer can
-// show a merchant as proof the node accepted and queued it.
-func (s *Server) handlePay(w http.ResponseWriter, r *http.Request) {
-	var p ledger.Payment
-	if !decode(w, r, &p) {
+// payment must carry a valid signature under its payer's key; the node queues it (and gossips it to
+// peers so it reaches whichever node proposes the block it names) and returns a receipt, signed under
+// the node's name, that the payer can show a merchant as proof the node accepted and queued it.
+func (server *Server) handlePay(responseWriter http.ResponseWriter, request *http.Request) {
+	var payment ledger.Payment
+	if !decode(responseWriter, request, &payment, maxBodyBytes) {
 		return
 	}
-	if !ledger.VerifyPayment(s.node.cfg.Scheme, s.node.cfg.NetworkID, p) {
-		http.Error(w, "invalid payment signature", http.StatusBadRequest)
-		return
-	}
-	// Admission is synchronous and guarded (see Node.admitPayment): a payment that would overdraw
-	// the payer — or is stale, a flood overflow, etc. — is refused HERE, with no receipt, so the
-	// receipt below always means "this node holds the payment, queued for its block".
-	if err := s.node.AdmitPayment(p); err != nil {
-		http.Error(w, "payment refused: "+err.Error(), http.StatusConflict)
-		return
-	}
-	receipt, err := ledger.SignReceipt(s.node.cfg.Signer, p)
+	// Admission is synchronous and guarded (see Node.AdmitPayment): a payment that would overdraw
+	// the payer — or is stale, unsigned, a flood overflow, etc. — is refused HERE, with no receipt, so
+	// the receipt below always means "this node holds the payment, queued for its block". A payment it
+	// already holds gets 202 and no new receipt, so a replay of a gossiped payment costs no signature.
+	newlyPooled, err := server.node.AdmitPayment(payment)
 	if err != nil {
-		w.WriteHeader(http.StatusAccepted)
+		http.Error(responseWriter, "payment refused: "+err.Error(), http.StatusConflict)
 		return
 	}
-	writeJSON(w, receipt)
+	if !newlyPooled {
+		responseWriter.WriteHeader(http.StatusAccepted)
+		return
+	}
+	receipt, err := ledger.SignReceipt(server.node.config.Signer, server.node.self, payment)
+	if err != nil {
+		responseWriter.WriteHeader(http.StatusAccepted)
+		return
+	}
+	writeJSON(responseWriter, receipt)
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	snap := s.node.Snapshot()
-	writeJSON(w, map[string]any{
-		"height":   snap.Height,
-		"accounts": len(snap.Accounts),
+// handleStatus serves the height in progress (heightInProgress: one above the committed height), the
+// number of accounts and the effective network id (spec 2.3), which a wallet pins on first use. It
+// reads the committed view, off the event loop: every wallet page and every catch-up tick asks it.
+func (server *Server) handleStatus(responseWriter http.ResponseWriter, request *http.Request) {
+	state := server.node.view.Load().state
+	writeJSON(responseWriter, map[string]any{
+		"heightInProgress": state.Height + 1,
+		"accounts":         len(state.Accounts),
+		"networkId":        server.node.config.Chain.NetworkID,
 	})
 }
 
-func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.node.Snapshot().Accounts)
+func (server *Server) handleAccounts(responseWriter http.ResponseWriter, request *http.Request) {
+	writeJSON(responseWriter, server.node.Snapshot().Accounts)
 }
 
 // ResolveRecord is one name-lookup answer — the ledger acting as a decentralized name server. A
-// committed name maps to the account's public key AND its published network address (plus the
-// description), so one query replaces both a key directory and DNS for anything registered
-// on-chain. Height and StateDigest anchor the answer to the exact committed state it reflects:
-// a client that does not trust a single node queries K independent nodes and compares — matching
-// digests mean the answers come from the SAME ⅔-agreed state, no extra protocol needed.
+// committed name maps to the account's current public key, its bank of record, whether it is frozen,
+// any key or bank change waiting on it, AND its published network address (plus the description), so one query replaces both a key directory
+// and DNS for anything registered on-chain. Height and StateDigest name the committed state the answer
+// was read from: StateDigest is that state's LedgerState.Digest() in hex, the value a payment's pin
+// takes (E38), never the hash of the block that produced it. They are the serving node's word, not a
+// proof: a client that does not trust a single node queries K independent nodes and compares the
+// records themselves (key and address), since a dishonest node can pair a forged record with the
+// honest digest.
 type ResolveRecord struct {
-	Name        string `json:"name,omitempty"`
+	Name        string `json:"name"`
 	PublicKey   string `json:"publicKey"`
-	Address     string `json:"address,omitempty"` // the on-chain published address (e.g. "http://10.0.0.2:8080")
-	Description string `json:"description,omitempty"`
-	Height      int64  `json:"height"`
-	StateDigest string `json:"stateDigest"` // hex committed digest of the state this answer reflects
+	Bank        string `json:"bank"`        // the bank of record; "" for none
+	Frozen      bool   `json:"frozen"`      // a frozen name neither pays nor is paid
+	PendingKey  string `json:"pendingKey"`  // a key change waiting for PendingHeight; "" for none
+	PendingBank string `json:"pendingBank"` // a bank change waiting for PendingHeight; "" for none
+	// PendingHeight is the height at whose end the pending change takes effect; 0 for none.
+	PendingHeight int64  `json:"pendingHeight"`
+	Address       string `json:"address,omitempty"` // the on-chain published address (e.g. "http://10.0.0.2:8080")
+	Description   string `json:"description,omitempty"`
+	Height        int64  `json:"height"`      // the last committed height; the answer reflects the state its block produced
+	StateDigest   string `json:"stateDigest"` // hex of that state's digest (LedgerState.Digest)
 }
 
-// handleResolve is GET /hdls/resolve?name=<registered name> (or ?key=<public key> for the reverse
-// lookup). 404 when nothing on the committed ledger matches.
-func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "GET only", http.StatusMethodNotAllowed)
-		return
-	}
-	name, key := r.URL.Query().Get("name"), r.URL.Query().Get("key")
+// handleResolve is GET /hdls/resolve?name=<name> (or ?key=<public key> for the reverse lookup: the
+// name whose current key it is), answered from the committed view. 404 when nothing on the committed
+// ledger matches.
+func (server *Server) handleResolve(responseWriter http.ResponseWriter, request *http.Request) {
+	name, publicKey := request.URL.Query().Get("name"), request.URL.Query().Get("key")
 	// Standard base64 keys contain '+', which query parsing decodes to a space — so a raw (properly
 	// unencoded) key pasted into ?key= arrives with spaces and matches nothing. A space can never
 	// appear in a base64 key, so restoring '+' is safe and lets a raw key work as documented (a
 	// client that percent-encodes '+' as %2B already arrives correctly and is unaffected).
-	key = strings.ReplaceAll(key, " ", "+")
-	if (name == "") == (key == "") {
-		http.Error(w, "pass exactly one of ?name= or ?key=", http.StatusBadRequest)
+	publicKey = strings.ReplaceAll(publicKey, " ", "+")
+	if (name == "") == (publicKey == "") {
+		http.Error(responseWriter, "pass exactly one of ?name= or ?key=", http.StatusBadRequest)
 		return
 	}
-	snap := s.node.Snapshot()
-	for _, account := range snap.Accounts {
-		if (name != "" && account.Name == name) || (key != "" && account.PublicKey == key) {
-			writeJSON(w, ResolveRecord{
-				Name:        account.Name,
-				PublicKey:   account.PublicKey,
-				Address:     account.Address,
-				Description: account.Description,
-				Height:      snap.Height,
-				StateDigest: hex.EncodeToString(snap.Decided[:]),
-			})
-			return
+	view := server.node.view.Load()
+	var account ledger.Account
+	var found bool
+	if name != "" {
+		account, found = ledger.FindAccount(view.state.Accounts, name) // by halves: the accounts are in name order
+	} else {
+		for _, candidate := range view.state.Accounts { // a key only by a scan
+			if candidate.PublicKey == publicKey {
+				account, found = candidate, true
+				break
+			}
 		}
 	}
-	http.Error(w, "not registered", http.StatusNotFound)
+	if !found {
+		http.Error(responseWriter, "not registered", http.StatusNotFound)
+		return
+	}
+	writeJSON(responseWriter, ResolveRecord{
+		Name:          account.Name,
+		PublicKey:     account.PublicKey,
+		Bank:          account.Bank,
+		Frozen:        account.Frozen,
+		PendingKey:    account.PendingKey,
+		PendingBank:   account.PendingBank,
+		PendingHeight: account.PendingHeight,
+		Address:       account.Address,
+		Description:   account.Description,
+		Height:        view.state.Height,
+		StateDigest:   hex.EncodeToString(view.stateDigest[:]),
+	})
 }
 
-func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	if r.Method != http.MethodPost {
-		http.Error(w, "POST only", http.StatusMethodNotAllowed)
-		return false
+// handleRecord serves GET /hdls/record?from=H: the rolling entries for heights H to H + 99, from at
+// most two unit files. Without a from it serves the newest unit file's entries: the latest signatures.
+func (server *Server) handleRecord(responseWriter http.ResponseWriter, request *http.Request) {
+	from, hasFrom, ok := recordFrom(responseWriter, request)
+	if !ok {
+		return
 	}
-	// Bound the request body (audit: the spend path accepted unbounded JSON).
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err := dec.Decode(v); err != nil {
-		http.Error(w, "bad json", http.StatusBadRequest)
+	directory := server.node.recordDirectory()
+	if !hasFrom {
+		firstHeights, _ := unitFirstHeights(directory)
+		if len(firstHeights) > 0 {
+			from = firstHeights[len(firstHeights)-1] // the newest unit file's first height
+		}
+	}
+	paths := []string{unitPath(directory, from), unitPath(directory, from+recordUnitHeights)}
+	writeJSON(responseWriter, server.node.readRecord(paths, from, from+recordUnitHeights-1, false))
+}
+
+// handleLifelongRecord serves GET /hdls/lifelong-record?from=H: the first 100 lifelong entries of height
+// H and above. Without a from it serves the newest 100.
+func (server *Server) handleLifelongRecord(responseWriter http.ResponseWriter, request *http.Request) {
+	if from, hasFrom, ok := recordFrom(responseWriter, request); ok {
+		writeJSON(responseWriter, server.node.readRecord([]string{server.node.lifelongRecordPath()}, from, math.MaxInt64, !hasFrom))
+	}
+}
+
+// recordFrom reads a record route's from, a height of 0 or more, if the query has one, and whether it
+// has; or it answers 400.
+func recordFrom(responseWriter http.ResponseWriter, request *http.Request) (int64, bool, bool) {
+	query := request.URL.Query()
+	from, err := strconv.ParseInt(query.Get("from"), 10, 64)
+	if query.Has("from") && (err != nil || from < 0) {
+		http.Error(responseWriter, "pass ?from=<height>, or nothing for the newest entries", http.StatusBadRequest)
+		return 0, false, false
+	}
+	return from, query.Has("from"), true
+}
+
+// maxBodyBytes bounds the body every POST route decodes (audit: the spend path accepted unbounded
+// JSON), except a proposal's, which maxProposalBytes bounds: a block's content takes up to 768 KiB, and
+// its evidence and a governance certificate come on top (spec 4.11). It is ledger.MaxMessageBytesLimit,
+// the most a vote can set MaxMessageBytes to, so a message the parameters allow always fits a body.
+const (
+	maxBodyBytes     = ledger.MaxMessageBytesLimit
+	maxProposalBytes = 2 << 20
+)
+
+// decode reads a POST body of at most maxBytes into destination, or answers the request with an error.
+func decode(responseWriter http.ResponseWriter, request *http.Request, destination any, maxBytes int64) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(responseWriter, request.Body, maxBytes))
+	if err := decoder.Decode(destination); err != nil {
+		http.Error(responseWriter, "bad json", http.StatusBadRequest)
 		return false
 	}
 	return true
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+func writeJSON(responseWriter http.ResponseWriter, value any) {
+	responseWriter.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(responseWriter).Encode(value)
 }

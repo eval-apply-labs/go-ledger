@@ -1,0 +1,243 @@
+{
+ "slice": "S3",
+ "builder": {
+  "branchHead": "260937ae0b528ea017daa0f72f6e18f571c81ff8",
+  "commits": [
+   {
+    "hash": "7cf3f9db80790889c21b5e7882da82e13d625c4f",
+    "subject": "phase 2 S3: ledger.CanonicalName, the one spelling of a name"
+   },
+   {
+    "hash": "9413fecc713ca8f322374a088aa718b34ead751e",
+    "subject": "phase 2 S3: names are the identity"
+   },
+   {
+    "hash": "955867dc1e63402273c0eff3070916a3690c9d6d",
+    "subject": "phase 2 S3: the message bound fits a payment by name"
+   },
+   {
+    "hash": "260937ae0b528ea017daa0f72f6e18f571c81ff8",
+    "subject": "phase 2 S3: drop Commit.Voters, which nothing calls now"
+   }
+  ],
+  "summary": "S3 is built on branch p2-s3 in worktree <scratch>/wt/p2-s3: four commits on f2e257e. The working tree is clean and the full suite list passes on the head.\n\nWhat changed:\n- **Ledger identity.** `ledger.CanonicalName` (spec 3.2) is added, and `Account` takes the final spec 3.1 shape. `AccountsDigest` replaces `StateDigest`: the tag \"go-ledger accounts v2\", then the 11 fields of each account, hashed in slice order. A decoded state whose names are not strictly ascending is refused before any other check (`LedgerState.NamesAscending`). That covers the node's own snapshot, a peer's checkpoint, the wallet's read and `node.Open`'s genesis. Accounts are looked up by binary search (`ledger.FindAccount`).\n- **Payments.** They name payer and payee and verify under the payer's key in the pre-block state. Paying a key, the recipient resolution and the name claim are deleted. A payment never creates or deletes an account.\n- **Account updates.** They delegate to a name, and \"-\" (`ledger.ClearField`) clears Delegate, Description or Address.\n- **Consensus types.** `Validator`, `ValidatorSet`, `Vote`, `Commit` and the driver's `self` work by name, with keys taken from the set. `Evidence` became `VoteEvidence{Name, First, Second}`, valid under a key the caller supplies.\n- **Validator sets.** `ledger.Chain`, `ValidatorRule`, `StaticValidator` and `SetFor` moved from `node/validators.go` to `ledger/validators.go`. A frozen name is never seated, and a frozen balance backs no delegate (R10).\n- **ApplyBlock and ProposeBlock.** Both have their final signatures. `ApplyBlock` returns an error naming the rule broken. One function per item is shared by both and by intake: `PaymentFitsState`/`paymentError`, `UpdateFitsState`/`updateError`, `evidenceError`. `ApplyBlock` now enforces all of rule 17, including the transaction-cost floor S2 left open, and rule 20. Evidence still zeroes a balance, now by name.\n- **Node intake.** `Config` has `Chain` and `Name`. Payments and updates are checked off the event loop against a published committed view (state plus the next height's validator set, which is also the catch-up anchor). Signatures are verified there too. The loop then re-checks against live state and confirms the signer's key. `AdmitPayment` returns `(newlyPooled, err)`, and `AdmitUpdate` is new.\n- **HTTP routes.**\n  - `/hdls/update` answers 409 with the reason when it refuses an update.\n  - `/hdls/pay` refuses with 409. A payment already pooled gets 202 and no new receipt. Receipts carry the node's name.\n  - `/hdls/resolve` adds `bank` and `frozen`.\n- **Checkpoints.** A checkpoint carries its signing set in both modes. The anchor counts a vote only when the carried set gives the name the anchor's own key, and only after it verifies under that key. Then the commit is verified against the carried set.\n- **Governance view, topology, peer DNS, server config and demo.** The governance view and voters use names. Topology and peer DNS work by name. In `cmd/server`, genesis entries and validators are by name, each validator must be a genesis account, and the genesis is sorted by name. The demo uses names.\n- **Wallet.** It finds its name by key, pays and delegates by canonical name, and pins validators as (name, key, power). A pin without names is refused as belonging to an earlier network.\n- **Message sizes.** `MinMessageBytes` is 5000 and the default `MaxMessageBytes` is 6400, which `cmd/server` also uses. Measured sizes match spec 4.1: the largest payment is 4961 bytes, or 6361 with every comment byte escaped.\n\n**Evidence.** New behaviour was checked with 62 scratch mutants, each a single edit in a copy of the worktree. All 62 fail at least one test. Logs are in <scratch>/p2-scratch/s3/logs (mutants-b.log and mutants-c.log; harness in mutate.py).\n\nTwo mutants first passed. They showed that my \"signed under another name's key\" test cases were weak: I had edited a signed field after signing, so the signature failed under every key. I rebuilt those cases by signing with another account's key; both mutants now fail.\n\nDuring the rewrite the suite also caught a regression I had introduced: the sign log's locked proposal was being checked under the node's own key. It was fixed before committing.\n\nNo test time limit was changed.",
+  "tests": [
+   {
+    "name": "TestCanonicalNameRefusesOtherSpellings (ledger)",
+    "failsWithoutChange": "fails for 4 mutants of the pattern: no end anchor, case-insensitive, leading hyphen allowed, 33 bytes allowed"
+   },
+   {
+    "name": "TestVoteCountsOnlyUnderTheSetKey (consensus)",
+    "failsWithoutChange": "fails when VoteSet.Add, or Commit.Verify, accepts a vote that verifies under any key in the set instead of the key for its name"
+   },
+   {
+    "name": "TestPaymentIsSignedByThePayersCurrentKey (ledger)",
+    "failsWithoutChange": "fails when the block rule accepts a payment signature under any account's key; also checks that a re-keyed state takes only the new key"
+   },
+   {
+    "name": "TestPaymentSignatureCoversBothNames (ledger)",
+    "failsWithoutChange": "fails when the payer's name is left out of the signed fields"
+   },
+   {
+    "name": "TestPaymentToAnUnknownNameIsRefused (ledger)",
+    "failsWithoutChange": "fails without the payee-exists check: ProposeBlock carries the payment and ApplyBlock accepts the forged block"
+   },
+   {
+    "name": "TestPaymentFromOrToAFrozenNameIsRefused (ledger)",
+    "failsWithoutChange": "fails without the payer-frozen check or without the payee-frozen check"
+   },
+   {
+    "name": "TestApplyBlockRefusesAPaymentBelowTheCost (ledger, rule 17's floor)",
+    "failsWithoutChange": "fails when the floor is only 'not negative', as in the S2 parent's ApplyBlock; the forged block's digest matches, so only the floor can refuse it"
+   },
+   {
+    "name": "TestUpdateDelegatesToAName (ledger)",
+    "failsWithoutChange": "fails when updates ignore Delegate"
+   },
+   {
+    "name": "TestUpdateClearsAFieldWithADash (ledger)",
+    "failsWithoutChange": "fails when '-' is stored literally instead of clearing the field"
+   },
+   {
+    "name": "TestDelegationToAnUnknownOrFrozenNameIsRefused (ledger)",
+    "failsWithoutChange": "fails without any one of: delegate exists, delegate not frozen, account not frozen, update changes something"
+   },
+   {
+    "name": "TestUpdateRefusalAnswers409 (node, HTTP)",
+    "failsWithoutChange": "fails with the parent's behaviour (202 for every update), with each of the four update checks removed, and with an intake signature check that accepts any account's key"
+   },
+   {
+    "name": "TestAccountsDigestLayout (ledger, golden)",
+    "failsWithoutChange": "fails for a digest that sorts accounts, has no tag, or omits Frozen, Bank or PendingHeight"
+   },
+   {
+    "name": "TestNamesAscendingRefusesDisorderAndDuplicates (ledger)",
+    "failsWithoutChange": "fails with '>' in place of '>=' (duplicate names accepted)"
+   },
+   {
+    "name": "TestStateOutOfNameOrderIsRefused (node)",
+    "failsWithoutChange": "fails without the name-order check on snapshots and checkpoints, or without the genesis check in Open"
+   },
+   {
+    "name": "TestStaticSetTakesKeysFromState (ledger)",
+    "failsWithoutChange": "fails with an empty seat key, with a seat for a name that has no account, or with every power set to 1"
+   },
+   {
+    "name": "TestDynamicSetFollowsDelegationToNames (ledger)",
+    "failsWithoutChange": "fails when stake counts for the holder's own name, or when a delegate with no account is seated"
+   },
+   {
+    "name": "TestFrozenNameIsNotSeated (ledger)",
+    "failsWithoutChange": "fails when the static or the dynamic set seats a frozen name"
+   },
+   {
+    "name": "TestFrozenAccountBacksNoDelegate (ledger)",
+    "failsWithoutChange": "fails when a frozen balance still backs its delegate"
+   },
+   {
+    "name": "TestDynamicSetSaturatesHugeStake (ledger)",
+    "failsWithoutChange": "moved from node's TestDeriveValidatorsSaturatesHugeStake; still protects power saturation"
+   },
+   {
+    "name": "TestReassignmentSetsOnlyAnExistingName (ledger)",
+    "failsWithoutChange": "fails without the existence check in Reassignment.Valid"
+   },
+   {
+    "name": "TestCheckpointGivingRealNamesForeignKeysIsRefused (node)",
+    "failsWithoutChange": "fails when the anchor verifies votes under the checkpoint's carried keys, or counts names without verifying (as the parent's Voters-based check did)"
+   },
+   {
+    "name": "TestRepeatPaymentGetsNoNewReceipt (node, HTTP)",
+    "failsWithoutChange": "fails when a repeat gets a receipt (the parent's behaviour), or when the receipt names the node's key instead of its name"
+   },
+   {
+    "name": "TestIntakeRefusesAPaymentToAnUnknownOrFrozenName (node)",
+    "failsWithoutChange": "fails without the payee-exists or a frozen check, or when intake verifies the signature under any account's key"
+   },
+   {
+    "name": "TestGovernanceViewNamesValidatorsAndAccounts (node)",
+    "failsWithoutChange": "fails when the view lists validators by key"
+   },
+   {
+    "name": "TestNodesReachConsensusAndApplyPayment (node, adapted)",
+    "failsWithoutChange": "adapted to names: four nodes pay alice -> bob and agree on the state; not a mutant test"
+   },
+   {
+    "name": "TestNodeAppliesAnUpdateEndToEnd (node, replaces the name-registration test)",
+    "failsWithoutChange": "end to end: a delegation and a description land in committed state"
+   },
+   {
+    "name": "TestTotalOutageAfterUnanimousPrecommitStillDecides / TestRestartedValidatorKeepsItsLock (node, existing)",
+    "failsWithoutChange": "fail when the sign log's locked proposal (signed by the round's proposer) is checked under the node's own key; this caught the regression mentioned in the summary"
+   },
+   {
+    "name": "TestMinimumMessageBoundFitsAPayment (ledger)",
+    "failsWithoutChange": "fails with the floor back at 10000 or down at 4900, and with the default back at 12000 or down at 6300"
+   },
+   {
+    "name": "TestWalletFindsItsNameByKey (ui)",
+    "failsWithoutChange": "fails when the wallet takes the first account's name instead of the one under its key"
+   },
+   {
+    "name": "TestWalletPaysByName (ui)",
+    "failsWithoutChange": "fails when Send accepts a recipient that is not a canonical name (a key, or 'Shop')"
+   },
+   {
+    "name": "TestWalletPinHoldsNameKeyAndPower (ui)",
+    "failsWithoutChange": "fails when a pin without names loads, or when the commit is checked under the checkpoint's carried keys instead of the pinned ones"
+   },
+   {
+    "name": "TestWalletRefusesAStateOutOfNameOrder (ui)",
+    "failsWithoutChange": "fails without the wallet's name-order check"
+   },
+   {
+    "name": "TestAccountFormDelegates (ui, rewritten)",
+    "failsWithoutChange": "fails when the delegate is not checked as a canonical name"
+   },
+   {
+    "name": "TestLoadRefusesAValidatorWithoutAnAccount, TestLoadRefusesANonCanonicalNodeName, TestLoadSortsTheGenesisByName, new cases in TestLoadRejectsMalformedGenesis (cmd/server)",
+    "failsWithoutChange": "each fails with its check removed, or with the sort reversed"
+   }
+  ],
+  "deviations": "Each item takes the smallest reading consistent with the spec and the owner's decisions:\n\n1. **Payment pin (E38) still uses the accounts digest.** The rule 17 clause on PreviousStateDigest compares against hex of `AccountsDigest(previous accounts)`, not `previousState.Digest()`. Intake still has no pin rule. S4 owns \"the E38 pin against the full digest, with the intake rule for the next block only\". Every other part of rule 17 is enforced, the cost floor included.\n\n2. **A reassignment needs an existing name.** Creating a name needs a key, which arrives with NewKey in S5. So in S3 `Reassignment.Valid` refuses a name with no account, and the old \"grant to a newcomer key\" path is gone. The wallet's draft takes a name only.\n\n3. **Block-level rules left to S5.** Rule 21 (at most one update per name in ApplyBlock), the locked names L (R6) and rule 24 (R9) are S5's, which lists steps C to J. ProposeBlock still carries one update per account. Rule 20 is done here, because updates by name need it.\n\n4. **No separate shape checks at intake.** Spec 4.1 step 2 and 4.2 step 1 list canonical-name and exact-signature-size checks. They are not separate checks: a name with an account is always canonical, and `MLDSA65.Verify` refuses a wrong-size signature before any work. The refusals are the same, with less code. Amount > 0 and the comment length are checked first.\n\n5. **The committed view holds the state and the next height's set only.** It has no separate digest; only S4's pin intake needs one. \"Accounts by name\" is a binary search over the sorted accounts.\n\n6. **The sign log's locked proposal verifies under its proposer's key.** Spec 6.9 says logged votes and proposals verify under the node's own key. The node's own votes and proposals still do. But the locked proposal is usually signed by another validator. It now verifies under the key the height's set holds for its proposer; otherwise every restart locked on a peer's proposal would be refused.\n\n7. **Chain and block shape stay as they were.**\n   - `Chain` has no GenesisHash yet; S4 adds it with its use.\n   - `Block` keeps its S2 shape, with Evidence typed `[]VoteEvidence`.\n   - `ProposeBlock`'s previousBlockHash and nonce, and `ApplyBlock`'s previousBlockHash, are accepted but unused until S4, as the spec intends.\n   - The proposal signature still does not cover the Proposer name; that comes with S4's SignedProposal. A relabelled proposal already fails verification under the scheduled name's key.\n\n8. **Wallet limits until S9.**\n   - It trims a recipient or delegate and refuses anything that is not a canonical name, rather than lowercasing it; spec 3.2 says the wallet shows the lowercased result, and that display is S9's.\n   - The account form has description and delegate; the address field is S9's.\n   - The pin file is still a bare JSON array of {Name, PublicKey, Power}; S4 wraps it with networkId.\n\n9. **Server config by name, without a bank field.** The config gains `name`. Validators are `{name, power, url}`. Genesis entries are `{name, publicKey, amount, delegate, description, address}`; `validatorNode` became `delegate`. There is no `bank` field until S8's genesis file. Config validation stays minimal (S8 adds ValidateGenesis).\n\n10. **The update pool drops by block only.** Accounts are never deleted now, so an update's account can no longer vanish. S5 rewrites reconcilePools.\n\n11. **Unchanged until S6.** Static-mode slashing still leaves the validator seated, and its proof is carried until maxEvidenceAge. Observers still broadcast votes that peers drop.",
+  "suite": "Everything passes on head 260937a. Logs are in <scratch>/p2-scratch/s3/logs/final.\n\n- `gofmt -l .` (review/ excluded): no output.\n- `go vet ./...` and `go vet -C ui ./...`: pass.\n- `go build ./...` and `go build -C ui -o /dev/null .`: pass.\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./...`, run twice: pass both times (consensus 58.7s and 54.5s, node 52.6s and 53.1s, ledger about 10s).\n- `GOLEDGER_CHAOS_SLACK=4 go test -C ui -race -count=1 ./...`, run twice: pass (30.3s, 30.8s).\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/`: pass (91.4s).",
+  "openIssues": "- **Untested key re-check.** The event loop confirms that a payment's or update's signer still has the key its signature was checked under. No test covers it: nothing in S3 can change a key, so it becomes testable when S5 adds key changes and the ⅔ re-key.\n- **Docs are stale (S11).** README, docs/, ui/README.md and ui/USER_MANUAL.md still describe name claims by account update, pay-by-key and key-based validators.\n- **One leftover comment.** The comment on `ledger.WithinMessageBound` still mentions a \"megabyte name\". Update names are now canonical (32 bytes at most), but descriptions and comments still apply. It was left for S11's accuracy pass rather than adding a commit after the final suite run.\n- **Wallet reads the checkpoint more than once per action.** It fetches it once to find its name and again for the pinned key. One read per page is S9's (spec 7.2).\n- **Wallet refuses rather than lowercases.** It refuses an upper-case recipient or delegate; S9's lowercasing with display is still to come."
+ },
+ "check": {
+  "confirmed": false,
+  "problems": [
+   {
+    "severity": "major",
+    "file": "node/node.go",
+    "problem": "anchorVouches (step 3 of the checkpoint check) verifies every vote in the commit that names an anchor name, until one of them verifies. It only sets vouching[name] after a successful Verify, and it does not first check that the vote is a precommit for the commit's height, round and digest. So a peer can pad a checkpoint's commit with copies of one anchor name's vote, signed under any key, and force one ML-DSA check per copy. Spec §4.14 step 3 says the votes are \"verified, one per name\" and that a check costs \"at most one signature check per anchor name plus one per member of Validators\". This is a regression from the parent, where Commit.Verify ran first, refused a duplicate name before verifying, and stopped at the first failure. S4's padded-checkpoint test only pads Validators, which step 2 refuses, so it would not catch this.",
+    "evidence": "Scratch test <scratch>/p2-scratch/verify-S3-2/node/zz_verifier_anchor_test.go wraps MLDSA65 in a Scheme that counts checks. It builds a checkpoint carrying the real set and 500 precommits naming validator-0, each signed by an impostor key. On HEAD, verifyCheckpoint makes 500 signature checks (0.29 s). The same probe on f2e257e (verify-S3-parent/node/zz_verifier_anchor_test.go) makes 1. One vote is 4564 bytes of JSON, so a checkpoint at maxCheckpointBytes (64 MiB) holds about 14,700 of them. bestCheckpoint would then make about 14,700 checks per fetch, on every catch-up tick (3 s), for each bootstrap or gossip peer. With vouching[vote.Validator] = true moved before the Verify call, the probe makes 1 check, and TestCheckpointGivingRealNamesForeignKeysIsRefused, TestVerifyCheckpointSkippingTrust, TestStateOutOfNameOrderIsRefused and the CatchUp/Straggler tests still pass.",
+    "fix": "Mark the name as tried before verifying: one attempt per anchor name, whether or not it verifies. This is safe because step 4 refuses a commit with a duplicate name anyway. Optionally, also skip a vote that is not a precommit for the commit's (Height, Round, BlockDigest) before verifying it. Add a test that counts signature checks with a counting Scheme, like the scratch test."
+   },
+   {
+    "severity": "major",
+    "file": "ledger/account_update_test.go, ledger/reassignment_test.go, node (onProposal)",
+    "problem": "Three new name-to-key checks that guard validity and authentication have no test that fails without them. (a) Rule 20 in updateError, used by ApplyBlock and ProposeBlock: the update must verify under the key of the account it names. TestUpdateDelegatesToAName's \"forged\" case reuses bob's signature over bob's own fields, so that update fails under every key. This is the weakness the builder says it fixed for payments, but not for updates. (b) Reassignment.Valid: each vote must verify under the key the set holds for the name the vote carries. The parameter-vote analogue is covered; the reassignment one is not. (c) onProposal: the proposal must verify under the scheduled proposer's key. The proposal signature does not cover the Proposer name until S4, so this lookup is the only defence that deviation 7 relies on. S5 rewrites (a) and (b).",
+    "evidence": "Independent mutants, each one edit in a fresh copy of HEAD (logs in <scratch>/p2-scratch/verify-S3-logs/mutants2.out, mutants5.out and mutants6.out). 'update-any-key' (updateError accepts a signature under any account's key) SURVIVED the ledger, node and ui suites. 'reassignment-vote-any-set-key' SURVIVED ledger and node. 'proposal-any-set-key' (onProposal accepts a signature under any key in the set) SURVIVED node. Three scratch tests pass on HEAD and fail under these mutants: TestVerifierUpdateSignedUnderAnotherAccountsKey and TestVerifierReassignmentVotesSignedUnderOneKey (verify-S3-2/ledger/zz_verifier_keys_test.go), and TestVerifierRelabelledProposalIsDropped (verify-S3-2/node/zz_verifier_proposal_test.go).",
+    "fix": "Add three short tests. (a) Alice's update fields signed with bob's key: ProposeBlock leaves it out and ApplyBlock refuses the block. (b) One validator's key signs votes that name the other validators: the reassignment is not Valid. (c) A proposal that names the round's scheduled proposer but is signed by another validator: onProposal drops it, and takes the genuine one."
+   },
+   {
+    "severity": "minor",
+    "file": "node/node.go, node/updatepool.go",
+    "problem": "The loop's re-check that the signer's key is still the one checked off the loop (in admitPayment and admitUpdate) is new behaviour with no test. The builder's open issue calls it untestable until S5, but a white-box test covers it now.",
+    "evidence": "Scratch test <scratch>/p2-scratch/verify-S3-2/node/zz_verifier_rekey_test.go calls node.admitPayment(payment, otherKey) and node.admitUpdate(update, otherKey) on a node that is not started. It passes on HEAD and fails when the `payer.PublicKey != verifiedKey` and `account.PublicKey != verifiedKey` checks are removed. Mutant 'node-intake-no-key-recheck' survives the whole node suite (mutants3.out).",
+    "fix": "Add that test. The admit helper in node/admission_test.go already calls admitPayment directly."
+   },
+   {
+    "severity": "minor",
+    "file": "cmd/server/config.go",
+    "problem": "Take a config with no validators, no validatorThreshold and no snapshotPath. It now loads as ValidatorRule{StaticValidators: [], Threshold: nil}, which SetFor treats as dynamic mode with any stake, and it seats any delegated name, the node's own included. But load requires snapshotPath only when Threshold != nil or the name is a static validator, so that node validates with no sign log: after a restart mid-height it can sign against itself. On the parent the same config gave an empty static set that never signs. The spec's rule has Threshold nil only in static mode (§5.2), and §2.1 requires exactly one of the two.",
+    "evidence": "Scratch test <scratch>/p2-scratch/verify-S3-2/cmd/server/zz_verifier_config_test.go starts from baseConfig and deletes \"validators\" and \"snapshotPath\". load succeeds, SetFor(genesis) seats \"founder\" (the node itself), and the label is \"dynamic (stake-derived)\". The same probe on f2e257e (verify-S3-parent/cmd/server) gives Validators non-nil with total power 0 and threshold nil.",
+    "fix": "In load, use SetFor's own test for dynamic mode in the snapshotPath rule: require snapshotPath when len(staticValidators) == 0 or the name is a static validator. Alternatively, refuse a config that has neither validators nor validatorThreshold. Smallest change; S8's ValidateGenesis replaces it later."
+   },
+   {
+    "severity": "minor",
+    "file": "node/mempool.go, node/node.go, ledger/block.go, ui/main.go",
+    "problem": "Leftovers against the no-dead-code and accurate-comment rules. (1) mempool.add's comment-length check can no longer fire through the node: checkPayment now refuses a long comment first, on both AdmitPayment and SubmitPayment, the only paths into the pool. admitPayment's error still says \"mempool full or comment too long\". (2) The WithinMessageBound comment still names a \"megabyte name\", but names are at most 32 bytes now (the builder acknowledged this). (3) In the wallet UI, the /register route and its `register` handler now only submit an account update (description and delegate), while \"registration\" becomes S5's name request.",
+    "evidence": "node/node.go:594 refuses the long comment before node/mempool.go:34 can see it. The only caller of mempool.add is admitPayment, which runs only after checkPayment (node/node.go:222 and :233). The error text is at node/node.go:661, the stale comment at ledger/block.go:13-17, and the route and handler at ui/main.go:57 and :158.",
+    "fix": "Keep one comment check: drop the mempool's (and its unit-test case) or the new one, and fix the error text. Reword the WithinMessageBound comment to say descriptions and comments. Rename the route and handler, for example /update and updateAccount, with the form action in wallet.html."
+   }
+  ],
+  "evidence": "The full suite list ran on a scratch copy of HEAD 260937a (git archive into <scratch>/p2-scratch/verify-S3-1; log in verify-S3-logs/suite-1.log), and everything passed:\n- gofmt -l . reports nothing outside review/, and also nothing in the worktree, which is clean at 260937a.\n- go vet and go build pass for the root module and for ui.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice: consensus 55.2 s and 56.2 s, ledger 11.0 s and 10.4 s, node 52.8 s and 52.1 s.\n- The same with -C ui passed twice, in 30.3 s and 29.8 s.\n- The -count=3 Chaos|Restart|SignLog|Resume|CatchUp run passed in 93.2 s.\n\nAll 21 listed tests exist, plus TestApplyBlockRefusesAPaymentBelowTheCost for rule 17's cost floor.\n\nI ran about 78 mutants of my own (harness verify-S3-tools/mutate.py; results in verify-S3-logs/mutants1.out to mutants6.out). Each is a single edit in a fresh copy of HEAD. Every listed test fails under the mutant for the change it covers:\n- names, a payment under any account's key, an unknown payee, a frozen payer or payee, the cost floor;\n- \"-\" stored literally, Delegate ignored, the four delegation checks;\n- digest field, tag and order; NamesAscending with > instead of >=;\n- a frozen name seated in either mode, frozen stake backing a delegate, a seat with no account, a reassignment to a new name;\n- MinMessageBytes 4900 and a default of 6300;\n- VoteSet and Commit under any key in the set;\n- the checkpoint and genesis order checks, the one-third anchor floor, a receipt for a repeat or by key, 202 on a refused update, intake under any key for payments and updates;\n- the governance view by key, resolve without bank or frozen, the locked proposal under the node's own key;\n- the wallet's name, recipient, delegate, pin-name and state-order checks;\n- in cmd/server: the validator account, the sort, the node name, genesis names and delegates, and the default bound.\n\nThe mutants that survived are the problems listed. Two survivors are harmless: removing the anchor's key-equality check is safe because step 4 verifies under the same key, and the wallet's pinnedKey != \"\" test is redundant.\n\nMessage sizes match spec 4.1: the largest payment is 4961 bytes, or 6361 escaped.\n\nAn end-to-end run of the demo with the built wallet UI:\n- A payment to bakery got \"receipt from validator founder verified\".\n- \"Bakery\" was refused.\n- A delegate with no account showed the node's 409 reason.\n- \"-\" cleared the delegate, and the new description landed in state.\n\nI checked the §10.2 S3 scope item by item against §3–§8, and reviewed deviations 1 to 11. Each defers to the slice the spec assigns (pin to S4, rules 21 and 24 and L to S5, GenesisHash and SignedProposal to S4, bank and ValidateGenesis to S8, wallet display to S9) or is the smallest reading; deviation 6, the locked proposal checked under its proposer's key, is correct. Nothing from a later slice is half-built. The only leftover wire tag is on Block, which S4 redefines. Names follow the spelled-out rule; the short name `me` predates S3. Scratch tests that show each problem are under p2-scratch/verify-S3-2 and verify-S3-parent."
+ },
+ "fix": {
+  "branchHead": "39138438da7eb9c464cb26da6fff513c83e89f03",
+  "fixed": [
+   "Major, anchorVouches (6486e93): an anchor name is now marked as checked before its vote is verified. Before, a peer could pad a checkpoint's commit with copies of one anchor name's vote, signed under any key, and force one ML-DSA check per copy. Each anchor name now costs at most one check, as spec 4.14 step 3 requires. A commit that names a name twice fails Commit.Verify anyway, so no valid checkpoint is refused. New test TestAnchorChecksOneVotePerName (node/onboarding_test.go) uses a counting scheme on a commit with validator-0's vote signed by an impostor plus 20 copies of it: 4 checks with the fix, within the spec bound of 6; 24 checks with node/node.go reverted, and the test fails. The optional shape pre-check was not added (see notFixed).",
+   "Major, three name-to-key lookups had no test (644234e; one test renamed in 3913843): (a) TestUpdateDelegatesToAName now signs alice's update fields with bob's key (an account's key, not hers) and checks both that ProposeBlock leaves the update out and that ApplyBlock refuses the block. (b) TestReassignmentRequiresTwoThirds now has a vote naming v2 signed under v0's key. (c) TestProposalIsTakenOnlyFromTheRoundProposer (node/proposal_relay_test.go): another validator signs a proposal labelled as the round proposer's; the node drops it, then takes the genuine one. In a copy of the tree, each test fails under the review's mutant: update-any-key (ProposeBlock carried the update), reassignment-vote-any-set-key (the vote was counted), proposal-any-set-key (the node took the relabelled proposal).",
+   "Minor, the loop's re-check of the signer's key (0b06476): new white-box test TestLoopRechecksTheSignersKey (node/admission_test.go) hands admitPayment and admitUpdate a key that is not the signer's. Both refuse, and the same payment under alice's real key is admitted. The test fails with either re-check removed (payer.PublicKey != verifiedKey in node.go, account.PublicKey != verifiedKey in updatepool.go).",
+   "Minor, cmd/server config (51a45b3): load now refuses a config that sets neither validators nor validatorThreshold, following spec 2.1. Such a config had loaded as dynamic mode with no threshold: it seated the node's own name and needed no snapshotPath, so that node validated with no sign log. A config with both still means dynamic mode, as before (S8's ValidateGenesis replaces this). New test TestLoadRefusesAConfigWithoutValidatorsOrThreshold fails with the check disabled.",
+   "Minor leftovers: (1) 3291e85 keeps one comment-length check, checkPayment's, which runs before the signature check (spec 4.1 step 2). The mempool's unreachable check goes, with its field and its newMempool argument, and admitPayment's error now reads 'not admitted: the mempool is full'. TestMempoolBounds loses its comment case; new TestIntakeRefusesAnOverlongComment keeps that coverage through the intake and fails with checkPayment's check disabled. (2) 929ad3e rewords the ledger.WithinMessageBound comment: the bound is for a megabyte description or comment, and a name is at most 32 bytes. (3) 1583eaa renames the wallet route /register to /update and its handler to updateAccount, with the form action in wallet.html and the two tests that post to it; TestAccountFormDelegates fails with the route left at /register.",
+   "Beyond the listed problems (3913843), two gaps found among the surviving mutants in the check's own logs. (i) S3's rewrite of TestOnProposalRelaysFirstSightOnlyNeverDuplicates turned the parent's wrong-proposer case into a wrong-signer case. Under names an outsider's proposal fails the key lookup anyway, so nothing tested onProposal's check that the proposal names the round proposer (spec 4.11 step 4); mutant node-proposal-any-name survived the whole node suite. TestProposalIsTakenOnlyFromTheRoundProposer now also has another validator propose under its own name. (ii) TestOnlyCountableVotesAreKeptAndRelayed's impostor vote was signed under an outsider's key, which fails under every key in the set; it is now signed under another validator's key, so countable's key lookup by name is tested. Mutants node-proposal-any-name, proposal-any-set-key and countable-any-set-key now each fail one of these tests."
+  ],
+  "notFixed": [
+   "Optional part of the anchor fix, skipping a vote that is not a precommit for the commit's height, round and digest before verifying it: not added. It does not change the bound, which is already one check per anchor name, and a forger chooses the shape anyway. Commit.Verify already refuses such a vote, so the extra code would change neither cost nor verdict.",
+   "Seen among the surviving mutants in the check's logs but not listed as problems; left as they are: update-no-blockid-check-ledger: updateError's BlockID rule has no ledger test, but the parent's ledger suite also passes with both update BlockID checks removed, so the gap predates S3. late-double-sign-any-key: recordLateDoubleSign's key check is untested (without it a junk late precommit could replace a genuine pending proof for its name); S6 rewrites late double-signs into pendingProofs. node-anchor-signers-key and node-anchor-no-verify: each alone leaves the verdict unchanged, because Commit.Verify re-verifies every vote under the carried keys; they affect only cost, which S4's TestPaddedCheckpointIsRefusedBeforeAnyPadIsVerified counts. node-lastcommit-from-carried: the result differs only when the validator set changed in the adopted block, and S4's ValidatorsHash binds the carried set. ui-receipt-unpinned-ok and ui-pinned-by-carried: equivalent mutants, since an empty key fails VerifyBase64's exact-size check and the rebuilt set equals the pinned set."
+  ],
+  "suite": "Everything passes on head 3913843, and the worktree is clean (eight follow-up commits on 260937a). Logs are in <scratch>/p2-scratch/s3-followup/logs/final (summary.txt plus one log per run). Mutant and revert proofs are in <scratch>/p2-scratch/s3-followup/logs, with the harness at <scratch>/p2-scratch/s3-followup/tools/mutate.py.\n- gofmt -l . (review/ excluded): no output.\n- go vet ./... and go vet -C ui ./...: pass.\n- go build ./... and go build -C ui -o /dev/null .: pass.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., run twice: pass both times (58s and 56s wall time; consensus 55.5s and 54.8s, node 53.6s and 53.8s, ledger about 10.5s).\n- The same with -C ui, run twice: pass (30.9s and 30.4s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: pass (96.0s).\n- No data race reported in any log. No time limit was changed."
+ },
+ "secondCheck": {
+  "confirmed": true,
+  "problems": [
+   {
+    "severity": "minor",
+    "file": "ledger/account_update.go",
+    "problem": "No test checks which fields the account-update signature covers (signFields, line 28). Today it covers Name, Delegate, Description, Address and BlockID, which matches spec 4.2, so the code is right. But if any of these fields were dropped, every test would still pass. Without Delegate in the signed bytes, anyone relaying alice's signed description update could add a delegation of her stake. Without BlockID, they could replay her update in a later block. The gap was already there in the parent. S3 rewrote this preimage, though (From removed, Delegated became Delegate, a name), and it updated the matching payment test but not this one. The receipt's new Node field is likewise covered by no test; that one cannot be exploited while every key belongs to one name.",
+    "evidence": "Mutants applied at 3913843, one at a time, each run against the ledger, node and ui packages: removing Name, Delegate, Description or Address from signFields leaves every test passing (12 survivors; verify-S3-r2-logs/batch4-head.out). Replacing BlockID with a constant also passes everywhere (verify-S3-r2-logs/batch6.out). The parent f2e257e behaves the same: removing any of From, Name, Delegated, Description or Address passes every test (verify-S3-r2-logs/batch4-parent.out). For comparison, payment preimage mutants are killed by TestSignedFieldsCarryPlainDecimals (batch3.out, batch5-head.out). Removing Node from the receipt's signed fields also passes the ledger, node and ui tests (batch3.out). Log directory: <scratch>/p2-scratch/verify-S3-r2-logs/",
+    "fix": "In ledger/amount_test.go TestSignedFieldsCarryPlainDecimals (or a small new test), sign AccountUpdate{Name: \"alice\", Delegate: \"bank-a\", Description: \"hi\", Address: \"-\", BlockID: 5} with testSigner(\"alice\"). Then check that signing.VerifyBase64 accepts it in DomainAccountUpdate against the hand-built fields \"alice\", \"bank-a\", \"hi\", \"-\", \"5\", the same way the payment case does. Optionally do the same for a receipt (fields: node name, PaymentID, BlockID)."
+   },
+   {
+    "severity": "minor",
+    "file": "node/persist.go",
+    "problem": "loadSignLog's error message is inaccurate for one case. When the sign log's locked proposal fails verification, the message says the proposal \"does not verify under this node's key\". But line 232 checks the locked proposal under the key the height's set holds for its proposer (builder deviation 6), not under the node's own key. Only the node's own logged proposals are checked under its own key. An operator reading the message would look for the wrong key.",
+    "evidence": "node/persist.go:232: `verified := loadedSignLog.Locked == nil || VerifyProposal(scheme, networkID, validators.PublicKey(loadedSignLog.Locked.Proposer), *loadedSignLog.Locked)`. node/persist.go:237: `fmt.Errorf(\"sign log %s holds a proposal for another height, or one that does not verify under this node's key on network %q\", ...)`. The doc comment above the function states the rule correctly.",
+    "fix": "Reword the message to cover both cases, for example: \"... holds a proposal for another height, or one that does not verify on network %q (its own under this node's key, the one it is locked on under its proposer's)\"."
+   }
+  ],
+  "evidence": "S3 is confirmed. HEAD is 3913843 and the worktree is clean. All my experiments ran in scratch copies under <scratch>/p2-scratch/ (verify-S3-r2-*). Logs are in its verify-S3-r2-logs/ folder and the mutant harness is verify-S3-r2-tools/mutate.py.\n\n**Problem 1 (anchorVouches) is fixed.**\n- anchorVouches now marks a name as checked before verifying its vote, so each anchor name costs at most one signature check (spec 4.14 step 3).\n- Reverting just that change makes TestAnchorChecksOneVotePerName fail with 24 checks against its bound of 6 (batch1.out).\n- My own test (verify-S3-r2-adv/node/zz_verifier_anchor_test.go) used 7 anchor names, each padded with 30 junk copies signed under other keys plus 50 stranger votes:\n  - junk votes first: 7 checks;\n  - genuine votes first: 14 checks, exactly the bound of anchor names plus carried set (7 + 7);\n  - the unpadded genuine checkpoint still verifies.\n- No valid checkpoint can be refused: Commit.Verify already refuses a name that appears twice, before verifying it.\n- The fixer left out the optional shape check before verifying. That is correct: Commit.Verify refuses a wrong-shaped vote anyway, so the check would change neither the verdict nor the bound.\n\n**Problem 2 (key looked up by name) is fixed.** Each mutant below makes its named test fail (batch1.out):\n- update verified under any account's key: TestUpdateDelegatesToAName (ProposeBlock carried the update);\n- reassignment vote verified under any key in the set: TestReassignmentRequiresTwoThirds;\n- proposal verified under any key in the set: TestProposalIsTakenOnlyFromTheRoundProposer;\n- proposal accepted under any proposer name: TestProposalIsTakenOnlyFromTheRoundProposer;\n- vote counted under any key in the set: TestOnlyCountableVotesAreKeptAndRelayed;\n- the loop's key re-check removed, for payments or for updates: TestLoopRechecksTheSignersKey;\n- a config with neither validators nor a threshold accepted: TestLoadRefusesAConfigWithoutValidatorsOrThreshold;\n- the intake comment-length check removed: TestIntakeRefusesAnOverlongComment;\n- the wallet route left at /register: TestAccountFormDelegates.\n\nThe new tests pass 10 times in a row under -race.\n\n**Full suite, my own run on 3913843** (suite-1.log):\n- gofmt -l (review/ excluded) prints nothing; vet and build pass for both modules.\n- `GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./...` passes twice (consensus 56.5 s and 57.7 s, node 52.3 s and 51.8 s, ledger 10.4 s).\n- The same for ui passes twice (32.1 s, 30.1 s).\n- The chaos run (`-race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/`) passes in 92.6 s.\n- No data race was reported in any run.\n\n**Re-check of the whole slice.**\n- Every S3 scope item in spec 10.2 is present, and all 21 tests the slice lists exist.\n- I re-applied the first round's 76 mutants to HEAD (batch2.out). Every mutant aimed at a listed test is still killed. The survivors fall into three groups:\n  - ledger changes run against the node or ui tests, which the ledger tests do kill;\n  - equivalent mutants (anchor without verify, receipt pinned-key check, wallet pinned set, lastCommit set);\n  - gaps that already existed in the parent: the update BlockID rule has no ledger test, and nothing tests the late double-sign check. I confirmed both on f2e257e (batch7-parent.out); S6 rewrites the late double-sign code.\n- What is signed and hashed matches the spec: the payment fields (spec 4.1), the update fields (4.2), the payment and update ids, and the accounts digest (3.5, checked by the hand-built golden test).\n- Message sizes match spec 4.1: the largest payment is 4961 bytes, or 6361 with every comment byte escaped.\n- Config matches spec 6.1.\n- The builder's deviations are each justified by a later slice's scope.\n- No later slice is half-built, and I found no code with no production caller beyond the existing test helpers SubmitPayment and SubmitUpdate.\n- Demo end to end works (demo-e2e.sh):\n  - paying bakery by name gives a receipt the wallet verifies as founder's;\n  - \"Bakery\" is refused as not a name;\n  - a description update lands, and \"-\" clears it;\n  - /hdls/resolve shows the bank and frozen fields;\n  - /hdls/update answers 409 with the reason.\n\nThe two problems listed are both minor."
+ }
+}

@@ -20,18 +20,16 @@ func totalSupply(accounts []Account) *big.Rat {
 // across the mint attempts and overspend that a buggy ledger would let through.
 func TestSupplyIsNeverMinted(t *testing.T) {
 	transactionCost := big.NewRat(1, 10)
-	startingAccounts := []Account{
-		{PublicKey: "A", Amount: big.NewRat(100, 1), ValidatorNode: "A"},
-		{PublicKey: "B", Amount: big.NewRat(50, 1), ValidatorNode: "B"},
-	}
+	startingAccounts := []Account{{Name: "a", Amount: big.NewRat(100, 1)}, {Name: "b", Amount: big.NewRat(50, 1)}}
 	supplyBefore := totalSupply(startingAccounts)
 
 	scenarios := map[string][]Payment{
-		"normal":             {{PublicKeyFrom: "A", PublicKeyTo: "B", Amount: big.NewRat(10, 1)}},
-		"negative-amount-B1": {{PublicKeyFrom: "A", PublicKeyTo: "B", Amount: big.NewRat(-10, 1)}},
-		"phantom-payer-B2":   {{PublicKeyFrom: "ghost", PublicKeyTo: "B", Amount: big.NewRat(10, 1)}},
-		"overspend":          {{PublicKeyFrom: "A", PublicKeyTo: "B", Amount: big.NewRat(1000, 1)}},
-		"round-trip":         {{PublicKeyFrom: "A", PublicKeyTo: "B", Amount: big.NewRat(10, 1)}, {PublicKeyFrom: "B", PublicKeyTo: "A", Amount: big.NewRat(5, 1)}},
+		"normal":             {{From: "a", To: "b", Amount: big.NewRat(10, 1)}},
+		"negative-amount-B1": {{From: "a", To: "b", Amount: big.NewRat(-10, 1)}},
+		"phantom-payer-B2":   {{From: "ghost", To: "b", Amount: big.NewRat(10, 1)}},
+		"phantom-payee":      {{From: "a", To: "ghost", Amount: big.NewRat(10, 1)}},
+		"overspend":          {{From: "a", To: "b", Amount: big.NewRat(1000, 1)}},
+		"round-trip":         {{From: "a", To: "b", Amount: big.NewRat(10, 1)}, {From: "b", To: "a", Amount: big.NewRat(5, 1)}},
 	}
 	for scenarioName, payments := range scenarios {
 		supplyAfter := totalSupply(ProcessPayments(startingAccounts, payments, transactionCost))

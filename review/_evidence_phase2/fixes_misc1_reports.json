@@ -1,0 +1,81 @@
+{
+ "run": "misc1",
+ "notes": "C33 (signing and consensus part), C45, C55, C64",
+ "results": [
+  {
+   "slice": "misc1",
+   "report": {
+    "branchHead": "7e987aee9e9e7e601e406124bb3987ee5dd69643",
+    "commits": [
+     {
+      "hash": "208cfad",
+      "subject": "phase 2 C33: Driver.Start, Step and Decision move to driver_test.go; Generate says tests use it"
+     },
+     {
+      "hash": "08ee6bb",
+      "subject": "phase 2 C45: the demo's node gets cmd/server's pool and comment caps and HTTP timeouts"
+     },
+     {
+      "hash": "6aac545",
+      "subject": "phase 2 C55: say why the genesis parameter keys fill untagged fields"
+     },
+     {
+      "hash": "7e987ae",
+      "subject": "phase 2 C64: the startup log prints the validator count and validatorPower"
+     }
+    ],
+    "summary": "All four notes are fixed on p2-misc1, one commit each, in worktree <scratch>/wt/p2-misc1. The whole check list passes.\n\nC33 (signing and consensus part only):\n- I grepped every Go file outside review/. Nothing outside consensus's own tests (driver_test.go, sim_test.go, evidence_test.go) calls Driver.Start, Driver.Step or Driver.Decision. The node uses only Round, Proposer, Resume, SetSignLog, ReceiveProposal, ReceiveVote, Timeout and Evidence.\n- So the three methods moved unchanged into consensus/driver_test.go, under a comment saying only this package's tests use them. Round stays in driver.go, because the node reads it, and its comment is now \"Round returns the round the driver is in.\"\n- driver.go's file comment now says the node feeds the driver \"Resume at the start of every height\", not \"Start (or Resume after a restart)\".\n- Resume's comment no longer says \"as Start does\". It now ends: \"With no vote of its own, the driver begins at round 0. The node begins every height with Resume.\"\n- signing.Generate's comment now says tests use it, and that keygen, the demo and the wallet call Scheme.GenerateKey instead. Generate stays where it is, because tests in five packages call it.\n- In docs/reading-the-code.md, the step 9 \"Its inputs\" row now says Start is in driver_test.go.\n\nC45 (cmd/demo/main.go):\n- The node config and the HTTP server are now built in two small functions, demoNodeConfig and demoHTTPServer, so a test can check them.\n- demoNodeConfig sets MaxMempool 10000 and MaxCommentLength 280. Its comment points to cmd/server's load.\n- demoHTTPServer is an http.Server with cmd/server's timeouts: 5s read header, 15s read, 30s write, 2m idle (findings #10). It replaces http.ListenAndServe.\n- The values are written out again in the demo. cmd/demo is a separate main package and cannot import cmd/server, and node/ is outside this run.\n- The guide's step 19 row names the two functions.\n- Running `go run ./cmd/demo -ui \"\"` served /hdls/status and stopped cleanly.\n\nC55 (ledger/genesis.go): two comment lines on genesisParameterNames. LedgerParameters has no JSON tags; encoding/json fills its fields from these keys because it ignores case; ParseGenesis refuses any other spelling; snapshots and checkpoints write the Go names (LedgerParameters.MarshalJSON keeps them).\n\nC64 (cmd/server/main.go):\n- validatorsLabel now returns the log's key=value fields: \"validators=<count> validatorPower=<total>\" in static mode, and \"validators=dynamic (stake-derived)\" in dynamic mode.\n- The format string prints the label as it is. A real run logged \"peers=0 validators=1 validatorPower=3\".\n- No doc quotes the log line.",
+    "tests": [
+     {
+      "name": "cmd/demo TestDemoNodeHasTheServerLimitsAndTimeouts (new)",
+      "failsWithoutChange": "Yes. On a scratch copy with the caps and timeouts taken out of demoNodeConfig and demoHTTPServer, it fails with 'the demo node's pool cap is 0 and its comment cap 0, want cmd/server's defaults 10000 and 280' and 'the demo's HTTP timeouts are 0s, 0s, 0s and 0s'. On the parent commit the two functions do not exist, so it does not compile."
+     },
+     {
+      "name": "cmd/server TestLoadDynamicValidatorModeLeavesStaticSetNil (its two validatorsLabel checks rewritten)",
+      "failsWithoutChange": "Yes. Against the parent's cmd/server/main.go it fails with 'validatorsLabel = \"dynamic (stake-derived)\" in dynamic mode'. With that check set back, it fails with 'validatorsLabel = \"5\" for static powers 2 and 3, want their count 2 and their total power 5'."
+     },
+     {
+      "name": "C33 (a move of three methods plus comments) and C55 (comment only)",
+      "failsWithoutChange": "No new test, as the rules allow for a pure move or a comment-only change. go vet ./... compiles every test package, and the consensus and signing tests pass under -race. The guide's step 9 run (^Test(Driver|Sim)) still counts 20 tests."
+     }
+    ],
+    "deviations": "- C45: to make the values testable, I moved the node config and the HTTP server into two new functions, demoNodeConfig and demoHTTPServer, instead of editing them inside main. The caps and timeouts are written out again in the demo with comments pointing to cmd/server's load and main. They cannot be named once: cmd/demo cannot import cmd/server (both are package main), and node/ is outside this run.\n- C64: I chose \"both the count and the power\". validatorsLabel now also returns the key names (\"validators=\", \"validatorPower=\"), so the test covers the keys. Changing only the format string inside main would have left the fix untested.\n- C33: Resume's comment is reworded (two lines changed, one added) because it said \"as Start does\". The guide's step 9 row now says Start is in driver_test.go, and the step 19 row adds demoNodeConfig and demoHTTPServer.\n- Besides the listed files, I edited cmd/server/config_test.go, the existing test of a package I changed. No edits outside the listed files and their tests.",
+    "suite": "Everything passes on 7e987ae:\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: clean.\n- go build ./... and go build -C ui -o /dev/null .: OK.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./...: passed three times (cmd/demo, cmd/server, consensus about 54-59s, ledger about 15s, node about 66-69s, signing).\n- GOLEDGER_CHAOS_SLACK=4 go test -C ui -race -count=1 ./...: passed twice (about 38-39s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: ok in 89.5s.\n- No time limit was changed.",
+    "openIssues": "- Merge with run 'node1': Driver.Start, Step and Decision are now declared only in consensus/driver_test.go, so only consensus's own tests can see them. If node1 adds a node test that calls node.driver.Start(), Step() or Decision(), that test will not compile after the merge; today no node test does. Grep for them when merging.\n- C33's node part (node.New, Node.SubmitPayment, Node.SubmitUpdate, and the two event.admit checks in Node.handle) is left for a later run, as instructed.\n- The default caps (10000, 280) and the four HTTP timeouts are now written in two places, cmd/server and cmd/demo, and a test in each package pins them. Changing one without the other makes the other package's test fail.\n- review/ is not edited. The orchestrator still needs to mark C33 (signing and consensus part), C45, C55 and C64 fixed in phase2_code_notes.md and the progress note."
+   },
+   "verdict": {
+    "confirmed": true,
+    "problems": [
+     {
+      "severity": "minor",
+      "file": "docs/reading-the-code.md",
+      "problem": "The C45 commit made the map's API/CDN row out of date. That row still says cmd/demo has 197 production lines and 92 test lines, but after C45 it has 218 and 110. The task says to fix any doc sentence a change makes false in the same commit. (The consensus row, 1,000 and 1,436, was already out of date before this run because of earlier runs. C33 changes it again, to 1,033 and 1,570.)",
+      "evidence": "The cmd/server and cmd/demo numbers are exact wc -l counts. At 86f18fc: cmd/server prod=242 test=364, cmd/demo prod=197 test=92, which match line 39 exactly. At HEAD 7e987ae: cmd/demo prod=218 test=110. Line 39 still reads '| 17 to 19 | 242 + 197 | 364 + 92 |'.",
+      "fix": "In the C45 commit, change line 39 to '242 + 218 | 364 + 110'. Either update the consensus row (1,033 and 1,570) at the same time, or leave it for the orchestrator to refresh the whole map in one pass."
+     },
+     {
+      "severity": "minor",
+      "file": "consensus/driver.go",
+      "problem": "The C33 move leaves Driver.decision as a field that production code writes and nothing in production reads. Only the test-only Decision() in driver_test.go reads it. The block hash already goes to the caller in ActionDecided.BlockHash, so the field is dead state in production. This was true before the move but was hidden by the exported method. Fixing it is optional and goes beyond C33's 'move unchanged'.",
+      "evidence": "grep 'decision\\b' consensus/driver.go: declared at line 114 and assigned at line 400 ('driver.decision = proposal.BlockHash'), with no other read. The only reader is driver_test.go: 'return driver.decision, driver.decided'. It is used by the tests at driver_test.go:142 and :690.",
+      "fix": "Optional, can be left as is: delete the field, and have the two tests that check the decided hash read it from the ActionDecided that Start, ReceiveVote or ReceiveProposal returns. Decision() then returns only driver.decided, or goes away. Otherwise, record it with C53 (ActionDecided repeats what its Commit holds) for a later run."
+     }
+    ],
+    "evidence": "I checked branch p2-misc1 at 7e987ae against the four code notes in review/phase2_code_notes.md (C33, C45, C55, C64) and the orchestrator's scope. Nothing on the branch touches node/, ui/, ledger/name_request.go or review/, and the worktree is clean.\n\nC33:\n- I grepped every Go file outside review/. Driver.Start, Step and Decision are called only from consensus tests (driver_test.go, sim_test.go, evidence_test.go), and every consensus test file is package consensus.\n- Production node code uses only Round, Proposer, Resume, SetSignLog, ReceiveProposal, ReceiveVote, Timeout and Evidence. Today's node tests call none of the moved methods.\n- driver.go's file comment now says Resume at every height. That is accurate: node.startHeight is the only place a driver is built, and it always calls driver.Resume (node.go:849).\n- Resume's new sentence, 'With no vote of its own, the driver begins at round 0', matches the code: latestRound starts at 0.\n- Generate's comment is accurate: keygen (cmd/keygen/main.go:20), the demo (cmd/demo/main.go:191) and the wallet (ui/keyfile.go:59) call GenerateKey, and tests in five packages call Generate.\n- The guide's step 9 count is still 20: `go test -list` finds 20 tests.\n\nC45:\n- The values match cmd/server: load's defaults (10000 and 280, config.go:105 and :109) and main's http.Server timeouts.\n- Reverting in scratch copy verify-misc1-2 makes TestDemoNodeHasTheServerLimitsAndTimeouts fail each time. I tried removing both caps, only the comment cap, and each of the four timeouts one by one.\n- End to end, I built the demo binary and the parent's (86f18fc) and ran each on 127.0.0.1:18732. A client that sends a partial header and waits was disconnected after 5.0s by the new demo. The parent demo kept it open until the client's own 12s deadline.\n- /hdls/status answered, and Ctrl-C (SIGINT) logged 'demo stopped'.\n\nC55:\n- Comment only, 2 lines, and accurate. LedgerParameters has no tags (parameters.go:27). Its UnmarshalJSON decodes through encoding/json, which matches keys without regard to case. ParseGenesis compares exact key names before it decodes. MarshalJSON writes the Go field names.\n- It agrees with spec §0.2 (line 45) and line 134.\n\nC64:\n- Against the parent's cmd/server/main.go, the rewritten test fails with 'validatorsLabel = \"dynamic (stake-derived)\" in dynamic mode'. With only the static branch reverted to 'validators=%d' and the total power, it fails with 'validatorsLabel = \"validators=5\" for static powers 2 and 3'.\n- In a real run, I made a 2-validator genesis (powers 2 and 3) from keygen keys and started cmd/server. It logged '... peers=0 validators=2 validatorPower=5'.\n- No doc quotes the log line.\n\nNaming and code: the new names (demoNodeConfig, demoHTTPServer, httpServer, snapshotPath, validatorRule, totalPower) follow the rule. There are no old-format code paths, and commit subjects, bodies and trailers follow the rules.\n\nFull suite, run by me on scratch copy verify-misc1-1, all passing:\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: clean.\n- go build ./... and go build -C ui -o /dev/null .: OK.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./..., run twice: consensus 55s and 58s, node 67s both times.\n- The same with -C ui, run twice: 37s both times.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: ok in 89.2s.\n\nThe suite log is <scratch>/p2-scratch/verify-misc1-suite.log."
+   },
+   "fix": {
+    "branchHead": "fc29f6562986f5f4c515a04862fa91284422b493",
+    "fixed": [
+     "Minor, docs/reading-the-code.md (cb0b55c, 'phase 2 misc1: the guide's map counts cmd/demo's lines after C45 (review follow-up)'): the API/CDN row of the map now reads '| 17 to 19 | 242 + 218 | 364 + 110 |'. A wc -l count at HEAD gives cmd/demo 218 production and 110 test lines, and cmd/server is unchanged at 242 and 364. This is a doc-only change, so it has no test. The parallel run p2-node2 does not edit that row, so it should merge cleanly.",
+     "Minor (optional), consensus/driver.go (fc29f65, 'phase 2 misc1: the driver drops its decision field, which only a test read (review follow-up)'): the Driver.decision field and its one assignment are gone (2 production lines), and the test-only Decision() goes with them. In consensus/driver_test.go, TestDriverHappyPathDecides and TestDriverWithoutSignerNeverSigns now read the decided hash from the ActionDecided the driver returns, using a new findDecision helper. That is the value the node actually uses. TestDriverPrecommitsTheBlockItDecides reads driver.decided for its two flag-only checks. The top comment of driver_test.go now names only Start and Step. Proof that the rewritten checks still catch errors: on a scratch copy (<scratch>/p2-scratch/misc1-followup) where ActionDecided carries nilBlockHash, both hash tests fail (driver_test.go:150 and :697). No doc names Decision or the field. p2-node2 does not touch consensus/, and no Go file outside review/_evidence_* (which the go tool ignores) calls Decision()."
+    ],
+    "notFixed": [
+     "Two other rows of the map in docs/reading-the-code.md are left alone. The consensus row reads 1,000 and 1,436, but the true counts are 1,032 and 1,570 at fc29f65. The ledger row reads 2,594 and 3,642, but they are 2,609 and 3,696. Both rows were already wrong before this run, because of earlier runs; C33, this follow-up and C55 only moved them a little further. The parallel run p2-node2 also changes node/ heavily, so the node row (3,467 and 7,218) will be wrong after the merge too. Updating them here would be right only on this branch. The orchestrator should refresh the whole map in one pass after the group merge, as the check itself suggested."
+    ],
+    "suite": "Everything passed on fc29f65 with GOTOOLCHAIN=auto (go1.27.3) and GOLEDGER_CHAOS_SLACK=4:\n- gofmt -l . (ignoring review/): no output.\n- go vet ./... and go vet -C ui ./...: clean.\n- go build ./... and go build -C ui -o /dev/null .: OK.\n- go test -race -count=1 ./...: passed twice. cmd/demo about 1s, cmd/server about 1.4s, consensus 53-57s, ledger about 15s, node about 66s, signing about 1.4s.\n- go test -C ui -race -count=1 ./...: passed twice, about 37s each.\n- go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: ok in 90.3s.\n- No time limit was changed."
+   },
+   "recheck": null
+  }
+ ],
+ "merge": "Built from 86f18fc; replayed onto 0e2428b (node1 and ui merged) without a conflict, head 30defe3."
+}

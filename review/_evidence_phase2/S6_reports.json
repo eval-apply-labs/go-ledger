@@ -1,0 +1,117 @@
+{
+ "slice": "S6",
+ "report": {
+  "branchHead": "5090f4e54c0e943af8c9431f3333b60cc2c14fe3",
+  "commits": [
+   {
+    "hash": "3d2abfc",
+    "subject": "phase 2 S6: proposal evidence, and a driver that signs nothing without its seat"
+   },
+   {
+    "hash": "97a01a3",
+    "subject": "phase 2 S6: a double-sign freezes the name and keeps the balance"
+   },
+   {
+    "hash": "3f39e41",
+    "subject": "phase 2 S6: pending proofs by name, saved in the snapshot; sign only while seated"
+   },
+   {
+    "hash": "5090f4e",
+    "subject": "phase 2 S6: test comments follow the freeze"
+   }
+  ],
+  "summary": "S6 is built on branch p2-s6 in <scratch>/wt/p2-s6. A double-sign now freezes the name and leaves its balance alone. The change is 301 production lines added and 130 removed, and 676 test lines added and 144 removed.\n\nconsensus:\n- New ProposalEvidence.Valid: two proposals by one proposer for the same height and round, with different block hashes, both signed under the given key. A different ValidRound alone is not a double-sign.\n- A driver with a nil signer follows the rounds and decides, but never proposes. castVote marks its vote as cast without signing or counting it, and returns an empty, non-nil action list, so no timeout re-arms forever (spec 6.3).\n- The exported shapes of Vote, Commit, Validator, ValidatorSet, NewValidatorSet and SignVote are unchanged.\n\nledger:\n- maxEvidenceAge, evidenceInWindow and applySlashes are deleted (R5).\n- evidenceFitsState checks that the name exists, is not frozen, and that the double-sign is below the block's height. voteEvidenceError and proposalEvidenceError then verify both signatures under the name's current key in the pre-block state. That is the key node/record.go records, so record.go is unchanged.\n- Evidence names join the freezes F and the locked names L.\n- New rules: rule 8 (one evidence item per name) and rule 10 (no evidence against the ⅔ action's name).\n- Rule 22, the one-third cap, uses the new powerIgnoringFreezes and withinOneThirdCap in ledger/validators.go. It applies only when the block carries evidence.\n- ProposeBlock checks each evidence item cheaply first (room in the block, locked names, state, cap) and verifies signatures last. It carries at most maxEvidencePerBlock = 8 items.\n- withoutLastItem now also takes proposal evidence out.\n\nnode:\n- pendingSlashes became pendingProofs, keyed by name. Each entry holds one vote or proposal evidence item and its ConvictedKey.\n- Proofs come from three places:\n  - retireDriver, which in commit now runs before heightValidators is replaced, so it uses the keys the driver counted votes under;\n  - recordLateDoubleSign, under the key of the set that signed the last commit;\n  - reportEquivocation, which now keeps the proposal pair, verified under the height set's key.\n- Every proof is offered to ProposeBlock; the filter on set membership is gone.\n- prunePendingProofs runs in reconcilePools, so after each commit, catch-up, adopt and Open. It drops a proof only when its name is frozen or its convicted key is no longer the name's key.\n- The snapshot file is now {NetworkID, Checkpoint, PendingProofs}. loadSnapshot reloads the proofs before fastForward, which prunes them. The served Checkpoint never carries them.\n- seatedSigner gives the driver the node's signer only when its name is seated with exactly that key. When the name is seated under another key, the node logs it once. So unseated observers no longer broadcast votes, and static-mode freezes now take the name out of the set.\n\nTests: TestChaosEquivocatorIsSlashedWithoutFork was renamed TestChaosEquivocatorIsFrozenWithoutFork; it now checks that the name is frozen, keeps its 100 and is out of the set. TestRestartedProposerDoesNotSignAgainstItself now also records every proposal and checks one block per height and round.\n\nProof that the tests catch the bugs: I ran 62 mutants of the new code against a scratch copy. Each one makes at least one test fail. Mutants that first failed to compile were rewritten until they compiled and were then killed. The rewritten chaos test fails on the parent commit (after its 60 s wait). The restart test fails when the re-gossip wait at start is removed.",
+  "tests": [
+   {
+    "name": "consensus TestADifferentValidRoundIsNotEvidence",
+    "failsWithoutChange": "yes: five mutants of ProposalEvidence.Valid, each removing one check (same block hash, proposer names, height, round, signatures), each fail it"
+   },
+   {
+    "name": "consensus TestDriverWithoutSignerNeverSigns",
+    "failsWithoutChange": "yes: without the nil-signer branch the driver panics; it also fails if the driver proposes without a signer, if the unsigned vote is not marked cast, or if castVote returns nil (the timeout re-arms)"
+   },
+   {
+    "name": "ledger TestDoubleSignFreezesTheNameAndKeepsTheBalance",
+    "failsWithoutChange": "yes: fails with the slash restored, with evidence names left out of F, with evidence names left out of L in ApplyBlock (rule 18) or in ProposeBlock, without the frozen-already check, and without the signature check"
+   },
+   {
+    "name": "ledger TestEvidenceUnderAReplacedKeyIsMoot",
+    "failsWithoutChange": "yes: fails when vote or proposal evidence is not verified under the current key"
+   },
+   {
+    "name": "ledger TestEvidenceHasNoAgeLimit",
+    "failsWithoutChange": "yes: fails with a 1000-block age limit, and with >= weakened to > for the evidence height"
+   },
+   {
+    "name": "ledger TestProposalEvidenceFreezes",
+    "failsWithoutChange": "yes: fails on the parent (ApplyBlock refused proposal evidence), when ProposeBlock drops proposal evidence, when it is not frozen, and when its signatures are not checked"
+   },
+   {
+    "name": "ledger TestNonceOnlyDifferenceIsProposalEvidence",
+    "failsWithoutChange": "yes: fails on the parent and when ProposeBlock drops proposal evidence"
+   },
+   {
+    "name": "ledger TestEvidenceNeedsNoSeat",
+    "failsWithoutChange": "yes: fails on the parent's node-side filter in effect and with any seat requirement; on the ledger side it guards the zero-power case of the cap (it fails with the cap counting the name's seat as needed)"
+   },
+   {
+    "name": "ledger TestOneThirdCapHoldsEvidenceBack",
+    "failsWithoutChange": "yes: fails without the cap in ApplyBlock or ProposeBlock, with <= instead of <, when names frozen before the block are ignored, when the total counts V only, when the cap applies without evidence (holder freeze), and when either kind is not added in name order"
+   },
+   {
+    "name": "ledger TestFrozenValidatorLeavesTheSetWithItsDelegatedPower",
+    "failsWithoutChange": "yes: fails when powerIgnoringFreezes keeps the freezes"
+   },
+   {
+    "name": "ledger TestEvidenceIsOnePerNameNoneForTheActionAndEightPerBlock",
+    "failsWithoutChange": "yes: fails without rule 8, without rule 10, when ProposeBlock ignores locked names, and without the limit of eight"
+   },
+   {
+    "name": "ledger TestEvidenceThatWouldLeaveNoNameSeatedWaits",
+    "failsWithoutChange": "yes: fails when withoutLastItem does not take proposal evidence out"
+   },
+   {
+    "name": "node TestLateDoubleSignIsCarriedIntoTheNextBlock (now also checks recordLateDoubleSign's key)",
+    "failsWithoutChange": "yes: fails when recordLateDoubleSign keeps a late precommit without checking it under the commit set's key"
+   },
+   {
+    "name": "node TestProposalEquivocationIsCarriedIntoTheNextBlock",
+    "failsWithoutChange": "yes: fails when reportEquivocation does not keep the pair, when proposal evidence is not offered to ProposeBlock, and when a second proposal is kept without checking its signature"
+   },
+   {
+    "name": "node TestProofOutlivesLeavingTheSet",
+    "failsWithoutChange": "yes: fails with the parent's prune by set membership, with only seated names offered, and when the retired driver's proofs are not kept"
+   },
+   {
+    "name": "node TestProofIsDroppedWhenTheKeyChanges",
+    "failsWithoutChange": "yes: fails without the prune, with a prune only for frozen names, and when retireDriver runs after the next set replaces heightValidators (it then convicts the new key)"
+   },
+   {
+    "name": "node TestPendingProofSurvivesARestart",
+    "failsWithoutChange": "yes: fails when proofs are not saved, not loaded, loaded after the prune, or pruned only on a key change"
+   },
+   {
+    "name": "node TestNodeWithAReplacedKeyStopsSigning",
+    "failsWithoutChange": "yes: fails when the driver always gets the configured signer, when the log line repeats at every height, and when an unseated node logs it too"
+   },
+   {
+    "name": "node TestChaosEquivocatorIsFrozenWithoutFork (renamed from TestChaosEquivocatorIsSlashedWithoutFork)",
+    "failsWithoutChange": "yes: on the parent commit it fails after its 60 s wait: the equivocator is not frozen with its balance"
+   },
+   {
+    "name": "node TestRestartedProposerDoesNotSignAgainstItself (extended: one block per round)",
+    "failsWithoutChange": "yes: fails when startFirstHeight skips the re-gossip wait"
+   }
+  ],
+  "deviations": "No file outside S6's list was edited except node and consensus tests, which S6 owns. No ui file and no node/record.go was touched.\n\nReadings where the spec was ambiguous, each taking the smallest change:\n1. Vote evidence does not require the vote type to be prevote or precommit. Spec 4.12's \"(prevote or precommit)\" is not added as a check; the existing check (same Height, Round and Type, different hashes) stays. An honest node never signs any other type, so only a key holder could produce such a pair. Freezing it fits the owner's rule that a key seen signing two conflicting statements is burned.\n2. ProposeBlock adds vote evidence first, then proposal evidence, each sorted by name, rather than one name order across both kinds. withoutLastItem therefore takes proposal evidence out before vote evidence. Both orders are deterministic.\n3. maxEvidencePerBlock = 8 is a limit on what an honest proposer puts in a block, like maxBlockContentBytes. ApplyBlock does not refuse a block with more, because spec 5.3 lists no such rule.\n4. ApplyBlock accepts evidence and a holder's freeze for the same name in one block; rules 8 to 10 do not forbid it. ProposeBlock never builds such a block, because the freeze locks the name first.\n5. Pending proofs are pruned in reconcilePools, so after each commit, catch-up, adopt and Open. Two consequences:\n   - The snapshot written by a commit may still hold proofs that the same commit made moot, because saveSnapshot runs before reconcilePools. Open prunes them on load.\n   - Proofs taken from a driver abandoned by a catch-up are pruned at the next commit.\n6. reportEquivocation verifies only the second proposal. The held one is already authentic: it passed intake, or is the node's own, or came from its sign log. A newer valid proof for a name replaces the older one.\n7. \"Logs once\" means once per process run.",
+  "suite": "All passed on the final commit 5090f4e, exported to <scratch>/p2-scratch/final2, with GOTOOLCHAIN=auto (go1.27.3) and GOLEDGER_CHAOS_SLACK=4. The whole list also passed earlier on 3f39e41, the last code commit.\n- gofmt -l: no output outside review/.\n- go vet ./... and go vet -C ui ./...: clean.\n- go build ./... and go build -C ui -o /dev/null .: clean.\n- go test -race -count=1 ./..., run twice: ok both times (consensus about 55 s, ledger about 15 s, node about 63 s).\n- go test -C ui -race -count=1 ./..., run twice: ok (about 31 s).\n- go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: ok (93 s).\n\nNo time limit was raised. The intermediate commits 3d2abfc and 97a01a3 build and vet, ui included.",
+  "openIssues": "- S11 (docs): the docs still describe slashing. They need: the freeze with the balance kept (R5); proposal evidence; the one-third cap counted with powerIgnoringFreezes; pending proofs saved in the snapshot file; nodes that sign only while seated with their key, and the log line when the name is seated under another key; no age limit on evidence. findings_20261027.md can mark E13 and E16 fixed (with E35's cap).\n- S10: S6 added hand-driven node tests that do not wait for empty blocks. TestChaosEquivocatorIsFrozenWithoutFork and TestRestartedProposerDoesNotSignAgainstItself still rely on the chain committing empty blocks.\n- Owner decisions left open:\n  - The record question from S7 is unchanged: the lifelong record's Signers list the pre-block account key, which is the key S6 checks evidence under.\n  - Evidence against a name held back by the cap stays pending in every node's snapshot until a block can carry it, the name is frozen, or the ⅔ re-key it. There is no other expiry, as spec 6.4 intends."
+ },
+ "verdict": {
+  "confirmed": true,
+  "problems": [],
+  "evidence": "I found no blocker, major or minor problem. Everything below ran on HEAD 5090f4e of p2-s6, against the spec (§0 R1–R11, §4.12, §5.2–5.4, §5.8, §6.3, §6.4, the S6 entry in §10.2, §12 and the appendix). Work and logs are in <scratch>/p2-scratch/verify-S6-{1,2,mut,parent,merge,logs}.\n\n1. Scope. Every S6 item is built:\n- maxEvidenceAge, evidenceInWindow and applySlashes are deleted.\n- evidenceFitsState checks that the name exists and is not frozen, and that the double-sign is below the block's height. voteEvidenceError and proposalEvidenceError then verify under the name's key in the pre-block state. That is the key node/record.go records, so record.go stays consistent.\n- Evidence names join F (frozenNames) and L. Rules 8, 10 and 22 are in contentError.\n- powerIgnoringFreezes and withinOneThirdCap match §5.2 and §5.8.\n- ProposeBlock checks evidence cheaply first, at most 8 items, and verifies signatures last. withoutLastItem takes evidence out in the reverse of the order it was added.\n- ProposalEvidence.Valid exists.\n- The nil-signer driver: startRound does not propose, and castVote returns an empty, non-nil list.\n- pendingProofs is keyed by name and records the convicted key. Proofs come from retireDriver, which runs before heightValidators is replaced in commit and in startHeight after a catch-up, from recordLateDoubleSign and from reportEquivocation.\n- The filter on set membership and the prune by membership are gone. prunePendingProofs runs in reconcilePools, so after a commit, fastForward and Open.\n- savedSnapshot holds {NetworkID, Checkpoint, PendingProofs}. They are reloaded before fastForward's prune, and the served Checkpoint has no proofs.\n- seatedSigner logs once.\n- No \"slash\" is left in Go code outside review/. Nothing from S10 or S11 is built. Only S6 files and S6-owned tests changed, and no ui file. The exported shapes of Vote, Commit, Validator, ValidatorSet, NewValidatorSet and SignVote are unchanged.\n- p2-s9's diff applies cleanly on top of S6. The merge builds, vets, and ui tests pass.\n- The intermediate commits 3d2abfc, 97a01a3 and 3f39e41 each build and vet, ui included.\n\nI checked the 7 deviations against the decisions and the code, and each is sound. On no. 6, the held proposal is always authentic: from onProposal after its check, the node's own (signed only while seated with that key), or from the sign log (verified under the node's own key, and the set is fixed within a height).\n\n2. Adversarial tests I wrote in the scratch copy. All pass:\n- ledger: a holder freeze of 4/7 plus evidence. ProposeBlock carries the freeze and holds the evidence back, and ApplyBlock refuses both together (rule 22).\n- ledger: an evidence name locks a self-banked registration (rule 15), an update delegating to it (rule 21) and a payment to it (rule 18).\n- ledger: ProposeBlock gives the same block hash under 20 shuffles of mixed evidence.\n- ledger: nil versus a block prevote freezes the name. A prevote paired with a precommit is refused.\n- ledger: in dynamic mode, a name frozen earlier counts toward the cap.\n- ledger: R11 holds through an evidence freeze (the customer's pending key change co-signed by the frozen bank is cleared).\n- node: an unseated observer with a snapshot path logs no vote or proposal.\n- node: with two double-signers on 4 equal seats, one is carried and frozen and its proof pruned. The other stays pending.\n- node: a proposal equivocation seen in the post-commit window is kept under the next height's key. It is not carried at its own height, and is carried one height later.\n- Only callers of SignVote and SignProposal in production code: the driver and node.signProposal.\n\n3. Tests fail without their change. 62 mutants, each against its target test, without -race:\n- Every one was killed: 5 on ProposalEvidence.Valid; 4 on the driver; 27 on the ledger rules (slash restored, evidence names left out of F or L, the frozen check, both signature checks, an age limit, >= weakened to >, proposal evidence refused or dropped, a seat required, each cap variant, powerIgnoringFreezes keeping freezes, rules 8 and 10, the limit of 8, the locked check, withoutLastItem); 18 on the node (retireDriver after the set is replaced, the prune removed or limited to frozen names, to key changes, or to set members, only seated proofs offered, the retired driver's proofs not kept, proofs not saved, not loaded or loaded after the prune, the late-precommit key check removed or the proof not kept, reportEquivocation not keeping the pair or not verifying, proposal evidence not offered, seatedSigner always signing, logging every height or when unseated, the re-gossip wait skipped).\n- 3 mutants first failed to compile; I rewrote them so they compile, and then they were killed.\n- The no-signature mutants also kill TestEvidenceUnderAReplacedKeyIsMoot.\n- The new TestChaosEquivocatorIsFrozenWithoutFork, run on the parent 5525c3b, fails after 60 s: \"not frozen, with its balance\".\n\n4. Full suite, run by me with GOTOOLCHAIN=auto (go1.27.3) and GOLEDGER_CHAOS_SLACK=4:\n- gofmt -l: no output outside review/.\n- go vet ./... and go vet -C ui ./...: clean.\n- go build ./... and go build -C ui -o /dev/null .: clean.\n- go test -race -count=1 ./..., twice: ok (consensus 57 s and 56 s, ledger 15 s and 14 s, node 62 s and 62 s).\n- go test -C ui -race -count=1 ./..., twice: ok (33 s and 29 s).\n- go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/: ok (97 s).\n- No time limit was changed.\n\n5. Code quality:\n- Names are spelled out, and receivers follow the existing style (\"evidence\" for both evidence types).\n- No dead code (findAccountIndex is still used) and no old-format paths.\n- I checked the comments against the code, and they are accurate.\n- powerIgnoringFreezes runs on every candidate block even without evidence: about 20 ms against 263 ms for ProposeBlock with 23k accounts. Too small to report."
+ },
+ "fix": null,
+ "recheck": null
+}

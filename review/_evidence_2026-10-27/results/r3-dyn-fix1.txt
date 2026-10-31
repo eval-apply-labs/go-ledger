@@ -1,0 +1,2 @@
+      3 --- FAIL: TestChaosDynamicAdmissionConverges
+      9 --- PASS: TestChaosDynamicAdmissionConverges

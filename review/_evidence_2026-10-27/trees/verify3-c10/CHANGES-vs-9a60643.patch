@@ -1,0 +1,35 @@
+--- a/node/chaos_test.go
++++ b/node/chaos_test.go
+@@ -777,6 +777,10 @@
+ 		}
+ 		time.Sleep(150 * time.Millisecond)
+ 	}
++	for i, nd := range c.nodes {
++		s := nd.Snapshot()
++		t.Logf("node %d height %d admitted=%v", i, s.Height, deriveValidators(s.Accounts, rat(threshold)).Contains(newcomer.PublicKeyBase64()))
++	}
+ 	t.Fatal("newcomer was not admitted as a validator on all nodes under chaos")
+ }
+ 
+--- a/node/governance.go
++++ b/node/governance.go
+@@ -46,6 +46,19 @@
+ 	key := proposalKey(change)
+ 	pooled, exists := n.paramProposals[key]
+ 	if !exists {
++		// Verify at least one carried vote from a current validator BEFORE allocating a slot, so an
++		// unauthenticated voteless proposal can never occupy the bounded pool (round-1 C10 fix).
++		hasVerified := false
++		for _, vote := range change.Votes {
++			if currentValidators.Contains(vote.Validator) &&
++				ledger.VerifyParameterVote(n.cfg.Scheme, n.cfg.NetworkID, change.NewParameters, change.PreviousParametersDigest, change.Sequence, vote) {
++				hasVerified = true
++				break
++			}
++		}
++		if !hasVerified {
++			return false
++		}
+ 		if len(n.paramProposals) >= 64 {
+ 			return false // bound the pool
+ 		}

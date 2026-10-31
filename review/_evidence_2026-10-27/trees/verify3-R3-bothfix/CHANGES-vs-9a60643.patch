@@ -1,0 +1,38 @@
+--- a/node/node.go
++++ b/node/node.go
+@@ -348,7 +348,12 @@
+ 	n.lastCommitVals = n.checkpointSigners(cp)
+ 	n.heightVotes = map[string]consensus.Vote{} // votes from the abandoned height no longer apply
+ 	n.heightProposals = map[int32]ProposalMsg{} // likewise its proposals
+-	n.resolvePeersFromState()                   // adopt the peer addresses published in the synced state
++	// The adopted balances can be lower than the ones the pool was admitted against (payments other
++	// nodes admitted, a reassignment, a slash) — re-establish the intake invariant exactly as commit does.
++	n.mem.dropBelow(n.height)
++	n.mem.dropOverdrawn(func(payer string) *big.Rat { return ledger.AccountAmount(n.accounts, payer) })
++	n.updates.dropBelow(n.height)
++	n.resolvePeersFromState() // adopt the peer addresses published in the synced state
+ }
+ 
+ // catchUp lets a RUNNING node that fell behind (missed a commit window) fast-forward to a peer's
+@@ -508,7 +513,11 @@
+ 		return false // wrong proposer or bad signature — drop, don't relay
+ 	}
+ 	_, valid := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, p.Block, n.validatorsFor(n.accounts))
+-	n.blocks[p.Block.StateDigest] = p.Block
++	if p.Block.Height != n.height {
++		valid = false // the body's height keys every replay guard in ApplyBlock: it must be THIS height
++	} else {
++		n.blocks[p.Block.StateDigest] = p.Block
++	}
+ 	n.rememberProposal(p)
+ 	n.process(n.driver.ReceiveProposal(consensus.Proposal{
+ 		Round: p.Round, Digest: p.Block.StateDigest, ValidRound: p.ValidRound, Valid: valid,
+@@ -626,7 +635,7 @@
+ 
+ func (n *Node) commit(act consensus.ActDecided) {
+ 	blk, ok := n.blocks[act.Digest]
+-	if !ok {
++	if !ok || blk.Height != n.height {
+ 		return
+ 	}
+ 	nextState, ok := ledger.ApplyBlock(n.cfg.Scheme, n.cfg.NetworkID, ledger.LedgerState{Accounts: n.accounts, Parameters: n.parameters, GovernanceSequence: n.governanceSequence}, blk, n.heightVals)

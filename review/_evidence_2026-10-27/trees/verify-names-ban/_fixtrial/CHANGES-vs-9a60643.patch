@@ -1,0 +1,90 @@
+--- a/ledger/account_update.go
++++ b/ledger/account_update.go
+@@ -89,16 +89,12 @@
+ 			continue // you must already hold an account to name or delegate it
+ 		}
+ 		account := updatedAccounts[accountIndex]
+-		if update.Name != "" && len(update.Name) <= MaxAccountNameLength {
+-			currentOwner, nameAlreadyTaken := ownerByName[update.Name]
+-			if !nameAlreadyTaken || currentOwner == update.From {
+-				if account.Name != "" {
+-					delete(ownerByName, account.Name) // release the previous name
+-				}
++		// TRIAL D2: a name may be claimed only by an account that has none (renames/moves go to a ⅔ vote).
++		if update.Name != "" && account.Name == "" && len(update.Name) <= MaxAccountNameLength {
++			if _, nameAlreadyTaken := ownerByName[update.Name]; !nameAlreadyTaken {
+ 				ownerByName[update.Name] = update.From
+ 				account.Name = update.Name
+ 			}
+-			// else: the name belongs to someone else — ignore the rename, apply the rest
+ 		}
+ 		// An over-long name (it could mask a public key) is ignored like a taken one; the rest applies.
+ 		if update.Delegated != "" {
+--- a/ledger/block.go
++++ b/ledger/block.go
+@@ -3,6 +3,7 @@
+ import (
+ 	"encoding/hex"
+ 	"encoding/json"
++	"math/big"
+ 
+ 	"github.com/eval-apply-labs/go-ledger/consensus"
+ 	"github.com/eval-apply-labs/go-ledger/signing"
+@@ -83,6 +84,9 @@
+ 	for _, account := range accounts {
+ 		if !offenders[account.PublicKey] {
+ 			remainingAccounts = append(remainingAccounts, account)
++		} else if account.Name != "" { // TRIAL D1: the stake goes, the name stays with its (burned) key
++			account.Amount = new(big.Rat)
++			remainingAccounts = append(remainingAccounts, account)
+ 		}
+ 	}
+ 	return remainingAccounts
+--- a/ledger/digest.go
++++ b/ledger/digest.go
+@@ -26,7 +26,7 @@
+ 		h.Write(b)
+ 	}
+ 	for _, a := range sorted {
+-		amt := "0"
++		amt := "" // TRIAL C17-B: nil hashes distinctly from 0 (no honest state holds a nil amount)
+ 		if a.Amount != nil {
+ 			amt = a.Amount.RatString()
+ 		}
+--- a/ledger/ledger.go
++++ b/ledger/ledger.go
+@@ -187,10 +187,13 @@
+ 	for k := range credit {
+ 		affected[k] = true
+ 	}
++	for k := range banned {
++		affected[k] = true // re-derived below from a zero start: the ban destroys the pre-block balance
++	}
+ 
+ 	result := make([]Account, 0, len(accounts))
+ 	for _, a := range accounts {
+-		if !banned[a.PublicKey] && !affected[a.PublicKey] {
++		if !affected[a.PublicKey] {
+ 			result = append(result, a)
+ 		}
+ 	}
+@@ -199,14 +202,17 @@
+ 		if !ok {
+ 			old = Account{PublicKey: k, Amount: new(big.Rat), ValidatorNode: k}
+ 		}
+-		amt := new(big.Rat).Set(old.Amount)
++		amt := new(big.Rat)
++		if !banned[k] {
++			amt.Set(old.Amount)
++		}
+ 		if c, ok := credit[k]; ok {
+ 			amt.Add(amt, c)
+ 		}
+ 		if d, ok := debit[k]; ok {
+ 			amt.Sub(amt, d)
+ 		}
+-		if amt.Sign() > 0 { // non-positive balances are dropped
++		if amt.Sign() > 0 || old.Name != "" { // a named account is never deleted by a balance event
+ 			na := old
+ 			na.Amount = amt
+ 			result = append(result, na)

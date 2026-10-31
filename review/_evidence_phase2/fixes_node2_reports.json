@@ -1,0 +1,143 @@
+{
+ "run": "node2",
+ "notes": "C33 (node part), C35, C36, C37, C39, C44, C46, C47, C57 to C63, C70, C75",
+ "results": [
+  {
+   "slice": "node2",
+   "report": {
+    "branchHead": "375c0f3",
+    "commits": [
+     {
+      "hash": "dc95bd1",
+      "subject": "phase 2 C33: New, SubmitPayment and SubmitUpdate move into node_test.go"
+     },
+     {
+      "hash": "63d58b6",
+      "subject": "phase 2 C35: maxBodyBytes is ledger.MaxMessageBytesLimit"
+     },
+     {
+      "hash": "1d07c80",
+      "subject": "phase 2 C36: a node's peers are computed in one place, as it opens"
+     },
+     {
+      "hash": "64a48a5",
+      "subject": "phase 2 C37: the certificate pools name their bound and sort their keys as record.go does"
+     },
+     {
+      "hash": "5cc7230",
+      "subject": "phase 2 C39: the three pools do one job one way"
+     },
+     {
+      "hash": "b121e0b",
+      "subject": "phase 2 C44: routes are registered with their method; resolve finds a name by halves"
+     },
+     {
+      "hash": "a056314",
+      "subject": "phase 2 C46: handlePay signs the receipt under node.self"
+     },
+     {
+      "hash": "47b2a4a",
+      "subject": "phase 2 C47: the pools' snapshot method is pendingCopy"
+     },
+     {
+      "hash": "514596d",
+      "subject": "phase 2 C57: fastForward drops the abandoned height's blocks and last proposal"
+     },
+     {
+      "hash": "b5e2132",
+      "subject": "phase 2 C58: relay's and relaySeen's comments say the mark decides only for certificates"
+     },
+     {
+      "hash": "cef0a26",
+      "subject": "phase 2 C59: HTTPTransport.post uses the client's own timeout only"
+     },
+     {
+      "hash": "552dd92",
+      "subject": "phase 2 C60: Neighbors drops the checks that cannot fire"
+     },
+     {
+      "hash": "881103c",
+      "subject": "phase 2 C61: the eight readers of the height's set take it from the view"
+     },
+     {
+      "hash": "0ee1d09",
+      "subject": "phase 2 C62: blockInterval loses its guard against a zero or negative interval"
+     },
+     {
+      "hash": "2832a79",
+      "subject": "phase 2 C63: one Node.pendingOutgoing for spec 6.5's pending outgoing"
+     },
+     {
+      "hash": "51e4a5c",
+      "subject": "phase 2 C70: governanceView lists pooled certificates in key order"
+     },
+     {
+      "hash": "375c0f3",
+      "subject": "phase 2 C75: three small names in node.go"
+     }
+    ],
+    "summary": "All of run node2's code notes are fixed on p2-node2, one commit per note, 17 commits on c798b3a. Every commit builds, and the last one passes the whole check list. I did not touch misc1's files (signing/signer.go, consensus/driver.go, cmd/demo/main.go, cmd/server/main.go, ledger/genesis.go) or review/.\n\n- **C33:** New, SubmitPayment and SubmitUpdate moved into node/node_test.go. The two 'event.admit != nil' checks in handle are gone. No ui or cmd code or test calls node.New, so New left production.\n- **C35:** maxBodyBytes = ledger.MaxMessageBytesLimit. The ledger comment now says the proposal route is the one exception.\n- **C36:** Open ends with resolvePeersFromState (after publishView). cmd/server's load dropped its topology block and returns the configured peers. The old cmd/server test is now TestResolvePeersAtOpen in package node. The one visible change is stated in api.md and operating-a-network.md: with every validator's address in the genesis, a fresh validator gossips to the validators from the start, not from block 1, including with maxPeers 0.\n- **C37:** maxPooledCertificates = 64. The two pending functions iterate slices.Sorted(maps.Keys(...)). tallyVoters returns only the power. No generic helper.\n- **C39:**\n  - updatePool's fields are now pending, seen and maxSize.\n  - The two empty-id checks are gone.\n  - requestPool.add refuses a second request for a name and block itself. admitNameRequest no longer calls slotTaken, which is deleted.\n  - paymentKey is dropped. reassignmentKey is kept.\n- **C44:**\n  - All 15 routes are registered with their method ('GET /hdls/status', 'POST /hdls/pay', and so on), so ServeMux answers 405 to any other method.\n  - The method checks in decode and handleResolve are gone.\n  - handleResolve uses ledger.FindAccount for ?name=.\n  - api.md says nothing about a wrong method, so it is unchanged.\n- **C46:** handlePay signs the receipt under node.self.\n- **C47:** the pools' snapshot method is now pendingCopy.\n- **C57:** fastForward also resets node.blocks and node.lastProposal.\n- **C58:** comments only, on relay and the relaySeen field.\n- **C59:** post calls client.Post and relies on the client's timeout. The context import is gone.\n- **C60:** Neighbors drops the seen map and the 'j >= 0' and 'j != selfIndex' tests. A scratch comparison of the old and new Neighbors (not committed) found 4,110,600 cases equal: 1 to 400 participants, maxPeers 0 to 50, every name and an outsider. indexToCoordinates' comment now says in plain words what it computes.\n- **C61:** the 8 places read node.view.Load().validators. I rechecked today's code: node.state is assigned only in Open, commit and fastForward. None of the 8 runs between that assignment and publishView. Open's new resolvePeersFromState call runs after its publishView. publishView, commit and loadSignLog keep their SetFor calls.\n- **C62:** only blockInterval's guard is dropped.\n- **C63:** Node.pendingOutgoing(payerName) is used by admitPayment and admitNameRequest. reconcilePools' running map is now pendingOutgoingSoFar.\n- **C70:** governanceView lists both kinds of pooled certificate in key order.\n- **C75:**\n  - In commit, the map lookup's flag is now found.\n  - enqueue's and handle's parameter is now incoming.\n  - Driver.Start is left to misc1.\n\n**Docs:**\n- In docs/reading-the-code.md, every changed name is updated, and every count matches go test -list (I checked all 16 counted commands). The changed counts:\n  - step 13: 19\n  - step 15: 16\n  - step 17: 16 (RoutesAnswer405 added to its command)\n  - step 18: 10\n- docs/api.md and docs/operating-a-network.md state C36's visible change.\n- docs/signature.md says \"until the next commit or catch-up\" (C57).\n- findings.md and findings_20261027.md are untouched; no Phase 2 note in them became false.",
+    "tests": [
+     {
+      "name": "TestResolvePeersAtOpen (node/peerdns_test.go; carries over TestLoadObserverKeepsConfiguredPeersOnMaxPeersNetwork's checks, plus a maxPeers 0 case)",
+      "failsWithoutChange": "Yes. Without the resolvePeersFromState call in Open, the validator keeps [http://configured:8080] for both maxPeers 2 and maxPeers 0 (peerdns_test.go:72 and :75)."
+     },
+     {
+      "name": "TestRequestPoolHoldsOneRequestPerNameAndBlock (node/requestpool_test.go; extended to add two requests for one name and block to a bare pool)",
+      "failsWithoutChange": "Yes. With add's slot check removed it fails with \"the pool's add took a second request for the same name and block\", the intake lets the second request in, and the pool holds 3 requests. At the parent, the bare-pool check fails because add enforced nothing."
+     },
+     {
+      "name": "TestRoutesAnswer405ToAnotherMethod (node/http_test.go)",
+      "failsWithoutChange": "Yes. Against the parent's httptransport.go, POST to /hdls/status, /accounts, /checkpoint, /governance, /record and /lifelong-record each answered 200."
+     },
+     {
+      "name": "TestCatchUpDropsTheBlocksOfTheHeightItLeaves (node/catchup_test.go)",
+      "failsWithoutChange": "Yes. Without the two resets in fastForward it fails: \"the node holds 1 blocks and the proposal it decided at height 1, want none\"."
+     },
+     {
+      "name": "TestGovernanceViewListsCertificatesInKeyOrder (node/governance_test.go; 8 parameter changes and 8 name actions)",
+      "failsWithoutChange": "Yes. Against the parent's governance.go it failed 20 runs out of 20 (-count=20)."
+     },
+     {
+      "name": "TestDepartedVoterDoesNotBlockCertificate (node/governance_test.go; rewritten for C61)",
+      "failsWithoutChange": "The test changes the state by hand, so it now calls publishView afterwards, as a commit does. Without that line it fails under C61, because the set it reads is the one from before the change. That is correct behaviour; the test still protects the same thing."
+     }
+    ],
+    "deviations": "- **C33:** the test copies of SubmitPayment and SubmitUpdate are not quite unchanged. Each passes a one-slot admit channel that nobody reads. Without the admit checks the loop always sends on that channel, and a send on a nil channel would block the loop forever.\n- **C35:**\n  - The ledger comment's \"every route decodes a body under\" was slightly false: the proposal route allows 2 MiB. It now says \"every route but the proposal's\".\n  - No test was added, because the value is unchanged.\n- **C36:**\n  - load keeps its signature and returns configFile.Peers, so cmd/server/main.go (misc1's file) is untouched.\n  - The startup log's peers=%d now counts the configured peers, not the topology neighbours.\n  - load's warning that maxPeers gives a node no neighbours is gone, and the node logs nothing in its place.\n  - In TestValidatorLosingItsAddressDoesNotPartitionNetwork, a test comment that said peers were resolved at the first commit now says they are resolved as each node opens.\n- **C39:**\n  - I dropped paymentKey, so the three pools all call their ledger id directly. I kept reassignmentKey: it belongs to a certificate pool, not one of the three, and it pairs with parameterChangeKey, which computes a hash and is not a wrapper.\n  - With the slot check inside add, admitNameRequest now runs its fee checks before the slot check. Spec 4.3 step 4 lists the slot check first. A conflicting request that also fails the fee check now gets the fee reason and is not logged.\n  - The refusal's error and its operator log now read \"another request for this name names the same block, or the request pool is full\". So a full pool now logs every refusal, which it did not before.\n- **C44:** I added RoutesAnswer405 to the reading guide's step 17 command, so the count is 16.\n- **C57:** three comments that said the last decided proposal stays \"until the next commit\" now say \"until the next commit or catch-up\": Node.commit, emptySignLog in persist.go, and docs/signature.md.\n- **C63:** pendingOutgoing is added to the reading guide's step 11 file list and to its payment-intake row. mempool.outgoingFor's comment now refers to it.\n- **C75:** run's own loop variable (`case event := <-node.events`) is left as is, because the note names only enqueue's and handle's parameters.\n- **Untested refactors:** C37, C46, C47, C59, C61, C62 and C63 change no behaviour, so the existing tests are their evidence. C60 also has the scratch equivalence check over 4,110,600 cases.",
+    "suite": "All checks pass at 375c0f3.\n- gofmt -l . prints nothing outside review/.\n- go vet ./... and go vet -C ui ./... are clean.\n- go build ./... and go build -C ui -o /dev/null . succeed.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed both runs: node about 72 s, consensus about 56 s, ledger about 15 s, plus cmd/demo, cmd/server and signing.\n- GOLEDGER_CHAOS_SLACK=4 go test -C ui -race -count=1 ./... passed both runs, about 38 to 40 s.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed in 90 s.\n- No time limit was changed.\n- Every test count in docs/reading-the-code.md matches go test -list.\n- The log is at <scratch>/p2-scratch/node2/checks.txt",
+    "openIssues": "- **Spec 8.2:** the orchestrator updates it for C36. In short: load no longer computes topology peers; a node takes the validators' addresses as it opens, once every validator has one, whatever maxPeers is.\n- **Spec 4.3 step 4:** after C39 the slot check runs inside requestPool.add, after the fee checks, and its log also fires when the pool is full. If the spec's order matters, it needs a word.\n- **C58 leftover:** addParameterVotes' comment, which addReassignmentVotes refers to, says the caller gossips a replacement certificate onward. In fact relay's mark stops a replacement from being relayed again until the next commit. Only relay's and relaySeen's comments say so now. The note's longer option (a separate map for the equivocation marks) would resolve it, but the scope said not to restructure relaySeen.\n- **Not fixed (outside this run):** fastForward resets the per-height maps but not relaySeen, which only commit clears. It is harmless: the map is bounded, and the next commit clears it.\n- **C62:** stepTimeout's and reGossipInterval's guards stay for library callers, as asked. Without the reGossipInterval guard, a zero step timeout makes everyInterval re-gossip in a busy loop; it does not panic, so the note's 'time.NewTicker' wording is out of date."
+   },
+   "verdict": {
+    "confirmed": true,
+    "problems": [
+     {
+      "severity": "minor",
+      "file": "docs/operating-a-network.md",
+      "problem": "C36 made a docs sentence false and left it in place. Lines 117-118 say that for the example genesis (every validator has an address, maxPeers 0) \"validators take their peers from the chain after block 1\". Since C36, Open calls resolvePeersFromState, so they take those peers as they open. The paragraph the builder rewrote at lines 147-150 of the same file now says \"from the start\", so the file contradicts itself. The run's rule is that a change that makes a docs sentence false fixes it in the same commit.",
+      "evidence": "git show 1d07c80 -- docs/operating-a-network.md changes only lines 145-150. At HEAD, line 118 reads \"validator has an address, as here, validators take their peers from the chain after block 1, and\". The example genesis at line 95 has \"maxPeers\": 0. Before C36, load kept the configured peers when maxPeers was 0, and the switch came at the first commit. Now TestResolvePeersAtOpen's maxPeers 0 case shows the validator has the other 3 validators as peers straight after New/Open.",
+      "fix": "Change line 118 to say \"validators take their peers from the chain as they open\" (or \"from the start\"), keeping the rest of the sentence. One line, in a follow-up commit or folded into C36's."
+     },
+     {
+      "severity": "minor",
+      "file": "cmd/server/config.go",
+      "problem": "Two comments added by C36 say every node takes the validators' addresses. load's comment (lines 38-39) says \"The node replaces those peers with the validators' addresses once every validator has one\". Open's comment (node/node.go:156-158) says \"it takes its gossip peers from the validators' addresses ... once every validator has one\". Neither holds for a node whose name is not a validator, such as an observer or an unnamed node, or for the only validator of a network: Neighbors returns nil for them, so they keep their configured peers. That is the E41 case that TestResolvePeersAtOpen checks.",
+      "evidence": "resolvedPeerAddresses builds its result only from Neighbors(validatorNamesWithAddress, node.self, ...), which returns nil when self is not in the list or there is one participant. TestResolvePeersAtOpen's first case expects observer peers = [http://configured:8080]. docs/api.md:108-109 states the exception correctly (\"A node whose name is not a validator, and the only validator of a network, keep their configured peers\").",
+      "fix": "Say \"a validator's node\" or \"a validator\" in both comments, e.g. load: \"A validator replaces those peers with the validators' addresses once every validator has one (node.Open ...)\"; Open: \"Last, a validator takes its gossip peers from ...\". Comment-only, two lines."
+     }
+    ],
+    "evidence": "Worktree p2-node2 at 375c0f3, 17 commits on c798b3a, one per note. Compared against review/phase2_code_notes.md (C33, C35, C36, C37, C39, C44, C46, C47, C57-C63, C70, C75) and spec 4.3, 6.5, 6.10 and 8.2.\n\nScope:\n- git diff c798b3a..HEAD touches none of misc1's files (signing/signer.go, consensus/driver.go, cmd/demo/main.go, cmd/server/main.go, ledger/genesis.go), and none of review/, findings.md or findings_20261027.md.\n- Every commit, archived on its own into a scratch folder, passes go build ./..., go vet ./node ./cmd/server ./ledger, go vet -C ui ./... and gofmt.\n\nFull check list, which I ran myself on an archive of HEAD (<scratch>/p2-scratch/verify-node2-1; log at <scratch>/p2-scratch/verify-node2-logs/suite.txt):\n- gofmt prints nothing outside review/.\n- vet and both builds are clean.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice: node 73 s and 72 s, consensus 56 s and 54 s, ledger 15 s.\n- The same with -C ui passed twice, about 40 s and 38 s.\n- The -count=3 Chaos|Restart|SignLog|Resume|CatchUp run on ./node passed in 90 s.\n\nEach new test fails when I revert its production change in a scratch copy:\n- C36 (the resolvePeersFromState call removed from Open): TestResolvePeersAtOpen fails at peerdns_test.go:72 and :75; the validator keeps [http://configured:8080].\n- C39 (add's slot check removed): TestRequestPoolHoldsOneRequestPerNameAndBlock fails at :124, :133 and :139.\n- C44 (the methods removed from the route patterns): TestRoutesAnswer405ToAnotherMethod fails. POST to the 7 read routes answers 200; GET to the 8 POST routes answers 400.\n- C57 (the two resets removed): TestCatchUpDropsTheBlocksOfTheHeightItLeaves fails: \"holds 1 blocks and the proposal it decided at height 1\".\n- C70 (back to ranging over the maps): TestGovernanceViewListsCertificatesInKeyOrder fails in both runs out of 2.\n\nAdversarial tests I wrote and ran in a scratch copy, all passing:\n- HEAD /hdls/status answers 200.\n- PUT /hdls/pay answers 405 with Allow: POST.\n- An unknown path answers 404.\n- Bad JSON and a body over maxBodyBytes answer 400.\n- resolve ?name= finds the first, middle and last account and answers 404 for absent names before, between and after them; ?key= still works.\n- A full request pool refuses a new request and a duplicate, and keep frees the slot.\n\nCode review against the notes:\n- **C61:** node.state is assigned only in fastForward and commit, and Open starts from the genesis. Between 'node.state =' and publishView in commit, only retireDriver, saveSnapshot (which calls node.snapshot), emptySignLog and recordCommittedBlock run, and none of them reaches the 8 readers. fastForward publishes before reconcilePools and resolvePeersFromState, and Open publishes before its new resolve. ValidatorSet has no mutating method, so sharing the pointer is race-free. SetFor remains only in publishView, commit and loadSignLog.\n- **C60:** the removed checks cannot fire even if groupSize^dimensions < participantCount, because a neighbour index is always non-negative and below groupSize^dimensions.\n- **C33:** the one-slot admit channel in the test helpers is required, now that handle always sends. No ui, cmd or other package calls node.New, SubmitPayment or SubmitUpdate.\n- **C35, C37, C46, C47, C59, C62 and C63** match their notes and change no behaviour.\n\nDocs:\n- Every counted command in docs/reading-the-code.md matches go test -list: the 15 commands with a 'Run (N tests)' count, Driver|Sim 20, and the whole ledger package 125.\n\nThe builder's open issues are accurate:\n- relaySeen is not cleared in fastForward.\n- addParameterVotes' comment says the caller gossips a replacement onward, while relay's mark stops it. This predates the run.\n- The request intake now runs the slot check after the fee checks, and it now also logs when the pool is full. That mirrors updatePool's wording and still refuses the second request, as spec 4.3 requires.\n\nNot counted as problems:\n- Step 23 row 4 of the reading guide still lists mempool.outgoingFor and requests.feesOf as the overdraw guard's parts. This is still true, through the new pendingOutgoing.\n- run's 'case event := <-node.events' keeps a variable named after its type, because the run's C75 scope named only enqueue and handle."
+   },
+   "fix": {
+    "branchHead": "598ef6f",
+    "fixed": [
+     "docs/operating-a-network.md (minor), commit 9fe1db5. Line 118 now says validators take their peers from the chain \"as they open\" instead of \"after block 1\". The rest of the sentence is unchanged. The file now agrees with its node-config paragraph (\"from the start\") and with TestResolvePeersAtOpen's maxPeers 0 case. Docs only, so no test.",
+     "cmd/server/config.go and node/node.go (minor), commit 598ef6f. I checked the claim against the code. resolvedPeerAddresses builds its list from Neighbors, and Neighbors returns nil for a name that is not a validator and for a network's only validator, so those nodes keep their configured peers. load's comment now says: \"On a network of two or more validators, a validator's node replaces those peers with the validators' addresses once every validator has one (node.Open, which calls resolvePeersFromState); any other node keeps them.\" Open's comment now says: \"Last, if its name is one of two or more validators, it takes its gossip peers from ...\". I used \"two or more\" rather than the check's plain \"a validator\", because the only validator of a network also keeps its configured peers (docs/api.md:108-109 states that exception too). Comments only, so no test."
+    ],
+    "notFixed": [],
+    "suite": "All checks pass at 598ef6f, which is 375c0f3 plus the two follow-up commits.\n- gofmt -l . prints nothing outside review/.\n- go vet ./... and go vet -C ui ./... are clean.\n- go build ./... and go build -C ui -o /dev/null . succeed.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed both runs: node 75.5 s and 71.3 s, consensus 55.6 s and 56.7 s, ledger 15.7 s and 14.8 s; cmd/demo, cmd/server and signing also passed.\n- GOLEDGER_CHAOS_SLACK=4 go test -C ui -race -count=1 ./... passed both runs (38.0 s and 37.2 s).\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed in 90.1 s.\n- No time limit was changed.\n- The log is at <scratch>/p2-scratch/node2/followup-checks.txt\n- I also checked docs/reading-the-code.md:681 (\"A validator takes its peers from the chain, from the moment it opens, only when every current validator has published an address\"). It is still true, so I left it unchanged."
+   },
+   "recheck": null
+  }
+ ],
+ "merge": "Built from c798b3a; replayed onto 61175f4 (misc1 merged) without a conflict. The orchestrator added 3474363 (addParameterVotes comment, the leftover the builder reported under C58)."
+}

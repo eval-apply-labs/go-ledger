@@ -1,138 +1,152 @@
-# Governance — self-amending parameters
+# Governance
 
-The network can change its own operating parameters — the transaction cost and the **timing profile**
-(block interval, step timeout, gossip fan-out) — by validator vote, rather than them being fixed
-config. This is implemented.
+Area: **node**. Code: `ledger/parameters.go`, `ledger/governance.go` (`ParameterChange`),
+`ledger/reassignment.go` (the ⅔ name action), and the pools in `node/governance.go` and
+`node/reassignment.go`. The admin page that drafts and signs the votes is in `ui/admin.go`.
 
-## The rule: ⅔, not ½+1
+Validators holding more than ⅔ of the power can do two things that no single holder can: change
+the network's parameters, and act on one name (its balance, its key, its bank of record, its frozen
+mark). Each is a certificate of signed votes, carried in a block.
 
-A parameter change is ratified by a **> ⅔ stake supermajority** of the *current* validator set — the
-same quorum as block finality (`ValidatorSet.Quorum`), deliberately. Anything that changes shared
-state gets the BFT supermajority, for the same reason finality does: quorum intersection means a
-minority (≤ ⅓) can neither force a change nor ratify two conflicting ones. The (acceptable) cost is
-that a ⅓ minority can *block* a change — which, for governance, is a feature.
+What the ⅔ cannot change is the validator rule, which the genesis file sets and the genesis hash
+covers: in static mode the list of validators and their powers, in dynamic mode the
+`validatorThreshold`. Changing it takes a new genesis (see
+[operating-a-network.md](operating-a-network.md#starting-a-new-network)). The ⅔ can still freeze a
+validator's name, which takes it out of the set, or give it a new key; in dynamic mode, a balance
+they change also changes the stake it backs.
 
-## The change certificate
+## The rule: ⅔, not ½ + 1
 
-`ledger.ParameterChange` bundles the proof, the same shape as a `Commit` or equivocation `Evidence`:
+A governance action needs votes from validators of the current set holding a strict > ⅔ of the
+power, the quorum of block finality (`ValidatorSet.Quorum`). By quorum intersection, a third or less
+can neither force an action nor ratify two conflicting ones. A third or more can block one, which
+for governance is a feature.
 
-    ParameterChange {
-        NewParameters            LedgerParameters
-        PreviousParametersDigest [32]byte          // the parameters this change amends
-        Sequence                 int64             // the governance sequence it amends (single-use)
-        Votes                    []ParameterVote    // each a validator's signature over the three above
-    }
+## The governance sequence: each certificate is single-use
 
-`ParameterChange.Valid(scheme, network, validators, currentParameters, currentSequence)` accepts it
-only if every vote is a distinct **current** validator signing exactly these `(NewParameters,
-PreviousParametersDigest, Sequence)` in the `parameter-vote` domain, their combined power meets the
-> ⅔ quorum, it amends the current parameters (`PreviousParametersDigest == currentParameters.Digest()`),
-and it amends the current governance **sequence** (`Sequence == currentSequence`).
+`LedgerState.GovernanceSequence` counts the governance actions applied. Every vote binds the
+sequence it amends; `ApplyBlock` applies a certificate only while that sequence is current, then
+adds one. So a certificate applies once, even if the state later cycles back to what it was. Both
+kinds share the sequence, so a block carries at most one governance action.
 
-The **replay guard** is the sequence (see [The governance sequence](#the-governance-sequence-single-use-certificates)
-below). Binding to the parameters' *value* alone was not enough — a security review showed a change
-could be re-applied after the parameters cycle back to a previous value (an A→B→A revert). The
-monotonic sequence, bumped on every applied governance action, makes each certificate single-use, with
-no target-height coordination needed.
+## The parameters
 
-## Application (in committed state)
+`ledger.LedgerParameters` are part of the committed state and its digest. The genesis file sets
+them (keys in lower camel case); a parameter change replaces all ten at once.
 
-Parameters live in `LedgerState.Parameters`, and the block digest covers them
-(`LedgerState.Digest = hash(accountsDigest, parametersDigest)`). A block carries an optional
-`ParameterChange`; `ApplyBlock` re-verifies it against the validator set (passed variadically — only
-a block with a change needs it) and, if ratified, sets the new parameters — otherwise the block is
-rejected. So every node applies the same change deterministically, and the transaction cost is taken
-from committed parameters, not chosen per block (a proposer can't set a rogue cost).
+| Parameter | Bounds (`LedgerParameters.Acceptable`) | Meaning |
+|---|---|---|
+| `transactionCost` | ≥ 0 | burned from each payment |
+| `blockIntervalMs` | 0 to 86,400,000 (one day) | the wait after a commit before the next height starts |
+| `stepTimeoutMs` | 1 to 86,400,000, and at least 250 ms per gossip hop | the base consensus step timeout |
+| `maxPeers` | 0 to 1,000 | the gossip fan-out; 0 is all-to-all |
+| `maxMessageBytes` | 0 (no bound) or 5,000 to 1,048,576 | the largest JSON of one payment or account update |
+| `newKeyFee` | > 0 | the fee of a registration, a key change or a bank change |
+| `changeDelayBlocks` | 1 to 2,592,000 | how long a key or bank change waits |
+| `retainBlocks` | 1,000 to 315,360,000 | how long the signature record keeps a block |
+| `maxPaymentAmount` | > 0 | the largest single payment |
+| `maxAccountBalance` | > 0 | the largest balance a payment or the ⅔ may raise a name to |
+
+Keep `maxPaymentAmount` at or above `transactionCost`. Nothing refuses a lower value (owner,
+2026-10-28), and then no payment can pass until a vote raises it.
+
+- **The timing profile is coupled.** The step timeout must cover the gossip fan-out: at least
+  250 ms (`AssumedGossipHopMs`) times the topology's dimension for the validator count and
+  `maxPeers` (`ledger.GroupParameters`). A ratified typo can hold blocks back by a day per step at
+  most, never for good.
+- **When a change takes effect.** From the next block. A lowered `maxAccountBalance` applies from
+  the block after the one that lowers it, and a balance already above it may stay and shrink. A
+  shorter `changeDelayBlocks` affects only requests filed after it. A longer `retainBlocks`
+  applies at once, to old records too; a shorter one only to records written after it, so the ⅔
+  cannot vote away the record of their own votes.
+- **What follows the governed values.** The step timeouts, the block interval, the re-gossip
+  interval, the wait of a node back without its sign log, the catch-up interval, and the fan-out of
+  peers resolved from the chain. A running node's re-gossip and catch-up loops take a new value
+  within a second, whether it is shorter or longer.
+
+## Parameter change
+
+`ledger.ParameterChange` holds `NewParameters`, `PreviousParametersDigest` (the parameters it
+amends), `Sequence` and `Votes`. Each vote (`ParameterVote`: a validator's name and a signature in
+the `parameter-vote` domain) signs the ten new parameters, the previous digest and the sequence.
+`ParameterChange.Valid` accepts it only if the sequence and the previous digest match the state,
+the new parameters are acceptable for the current validator count, and the votes come from distinct
+names of the set, each verifying under the set's key for that name, with power reaching the quorum.
+
+## The ⅔ name action
+
+`ledger.Reassignment` acts on one name: `Name`, `PreviousAmount` and `NewAmount`, `NewKey` with its
+`NewKeySignature` (the new key's proof that its holder has it), `Bank`, `Freeze`, `Unfreeze`,
+`Sequence` and `Votes`. Each vote, in the `reassignment-vote` domain, signs every field but the votes
+and the proof. It binds the name and the sequence, never the name's current key, so a key change
+that lands first does not make it stale.
+
+It is valid (`Reassignment.FitsState`, `Reassignment.Valid`) only if:
+
+- the sequence is current, and the votes reach the quorum as above;
+- the name is canonical, and `Freeze` is not set with `Unfreeze` or `NewKey`;
+- the two amounts are both null or both set; if set, `PreviousAmount` is the name's balance (0 for
+  a new name), `NewAmount` is not negative, and it raises no balance above `maxAccountBalance`;
+- a `NewKey` has the exact size, is no name's key, and its proof verifies under it;
+- `Bank` is `""` (leave it), `-` (none), or another name that exists and is not frozen;
+- for a name no account has: it sets a key and a balance, and neither freezes nor unfreezes;
+- for a frozen name: it unfreezes exactly when it gives a new key, so every unfreeze re-keys;
+- for a name that is not frozen: it does not unfreeze.
+
+A node also refuses an action that alone would leave no name seated.
+
+Its effect, in the block that carries it: a `Freeze` applies with the block's other freezes. The
+rest applies after them: a new name is created with the new key, the new balance and the bank, and
+backs no one; otherwise the new balance, bank and key replace the old ones, and `Unfreeze` clears
+the frozen mark. Any pending change of the name is cleared, so a day-old key change cannot undo the
+⅔ decision. The name sends, receives and requests nothing else in that block: its payments for that
+block lapse, so the target cannot pay the money away first.
+
+Uses: re-key a name whose key was stolen or burned (the holder freezes first, the ⅔ re-key and
+unfreeze); move a name to a new holder; give a name a bank of record; mint into a treasury or claw
+a balance back. It is the only way to create money (see
+[managing-the-currency.md](managing-the-currency.md)).
 
 ## Collecting the votes
 
-A validator votes with `SignParameterVote(newParameters, currentParameters.Digest())` and POSTs a
-`ParameterChange` carrying that vote to `POST /hdls/parameter-vote`. Nodes pool votes per proposal
-(`node/governance.go`), verify and dedup them, and gossip (`MsgParameterVote`) so votes converge
-network-wide. When a pooled proposal reaches quorum and still amends the current parameters, the
-proposer carries it in its next block; stale proposals are pruned each commit.
+Votes are collected off the network. Each validator drafts the action in its own wallet's admin
+page, checks what it binds, signs it, and hands the signed vote, as text, to whoever collects them.
+An action with a new key goes to the new key's wallet first, which signs the proof; the validators
+then sign the text it hands back. Once votes holding more than ⅔ of the power are in hand, the
+collector submits the certificate once, to `POST /hdls/parameter-vote` or
+`POST /hdls/reassignment-vote`. The route answers `202` once the node pools it, or `409` with the
+reason it refuses it.
 
-## Balance reassignment (the second governance action)
+A node pools and gossips only a complete certificate, valid against the current state. So nobody
+can fill the pools (64 certificates of each kind) with actions that never enact, and a seizure's
+target learns of it only once it can enact. The node leaves out the votes of validators who have
+left the set first. A copy with the same votes as a pooled certificate is dropped before any
+signature check. A certificate with other votes for the same change replaces the pooled one, is
+relayed, and wakes an idle chain. After each commit or catch-up the pools drop what no longer
+applies. Pooled certificates are verified again at every height, and `ProposeBlock` checks the one
+it carries.
 
-The same certificate mechanism governs one more thing: a **> ⅔-ratified override of an account's
-balance** (`ledger.Reassignment`). This is the community's deliberate exception to
-payment-conservation — money normally only moves via a signed payment or burns as a fee, but a
-supermajority can mint or reduce a specific balance (e.g. issue a community grant, or correct an
-error). It is the Go form of the original Hypernode "reassign proposal".
+A certificate has only bounded fields, so `maxMessageBytes` does not apply to it: a parameter change
+is about 0.5 KB plus 4.4 KB per vote, a name action about 7 KB plus 4.4 KB per vote.
 
-    Reassignment {
-        Account        pubkey
-        PreviousAmount big.Rat             // the balance it must currently hold
-        NewAmount      big.Rat             // what to set it to (non-negative)
-        Votes          []ReassignmentVote  // each signs the three above, domain "reassignment-vote"
-    }
-
-`Reassignment.Valid(scheme, network, validators, currentAccounts)` accepts it only if `NewAmount` is
-non-negative (the guard from the Java `reassign-non-negative` fix), the account **still holds
-`PreviousAmount`** (the replay guard *and* the exact starting point the voters signed off on — so a
-stale certificate can't replay once a payment or an earlier reassignment moves the balance), and the
-votes meet the > ⅔ quorum. `ApplyBlock` re-verifies it and sets the balance (creating the account if
-absent, so a grant can fund a newcomer); it is applied *after* payments, as the final override — so a
-payment crediting the same account in the same block is superseded by the reassignment's absolute
-value (deterministic, and reassignment is rare, but worth knowing). Applying it bumps the governance
-sequence, which is what makes the certificate single-use (it cannot be replayed after the balance
-cycles back — see the sequence discussion below).
-
-The node side mirrors parameter voting exactly: a vote pool (`node/reassignment.go`), gossip via
-`POST /hdls/reassignment-vote` (`MsgReassignmentVote`), a proposer carrying a quorum-reached
-reassignment in a block, and pruning stale ones each commit.
-
-Reassignment is the **only** way to create money (it mints out of nothing), so its use is monetary
-policy, not just administration — see [managing-the-currency.md](managing-the-currency.md) for how to
-wield it (the treasury pattern, and the honest limits of the tax/services/stability trilemma).
-
-## The governance sequence (single-use certificates)
-
-Committed state carries a monotonic `GovernanceSequence` (in `LedgerState`, and under the block
-digest). Every governance certificate — a `ParameterChange` or a `Reassignment` — binds the sequence
-it amends into each vote's signed preimage, and `ApplyBlock` applies it only while that sequence is
-current, then **bumps the sequence by one**. So a ratified certificate is *single-use*: once applied,
-the sequence has moved on and the certificate can never be re-applied — even if the parameters or the
-balance it changed later cycle back to exactly what they were.
-
-This closes a replay the review found: guarding only on the amended *value* (previous parameters,
-previous balance) failed whenever the value cycled back — most sharply, a newcomer grant
-(`prev 0 → X`) that could be re-minted every time the grantee spent to zero. The sequence anchor also
-avoids target-height coordination: votes accumulate freely because the sequence is stable *between*
-governance actions, and only advances when one applies. Because both certificate types share the one
-sequence, a block carries **at most one** governance action (a second would bind a now-stale sequence);
-`ApplyBlock` rejects a block that carries both.
-
-## The admin UI
-
-The wallet ships an **admin / governance page** (linked from the wallet, or `/admin`): it reads
-`GET /hdls/governance` — the current parameters, the validator set / quorum, and the pending
-parameter and reassignment proposals with live vote tallies — and lets a validator propose or add a
-vote to a transaction-cost change or a balance reassignment. Votes are signed with the wallet key, so
-only a validator's vote tallies toward the quorum (the page says so if the wallet isn't a validator).
-`make demo` brings up a node + this UI with the founder as the sole validator, so a vote enacts in a
-block or two.
-
-## The timing profile (coupled parameters)
-
-`LedgerParameters` carries more than the cost: the **exchange-window cadence** (`BlockIntervalMs`),
-the **per-step consensus timeout** (`StepTimeoutMs`), and the **gossip fan-out** (`MaxPeers`). These
-three are *interconnected* — the step timeout must be long enough for a proposal/vote to fan out
-across the gossip dimension the fan-out implies at the current node count, or votes strand and
-consensus stalls. Moving the window changes how many nodes you can reach in it; changing the fan-out
-changes how long a window must be. So they are governed **as one profile**, and
-`LedgerParameters.Acceptable(participants)` enforces the coupling: it rejects any profile whose
-`StepTimeoutMs` is below `dimension × AssumedGossipHopMs`, where the dimension comes from the same
-`ledger.GroupParameters` the topology uses (one source of truth). The check runs in
-`ParameterChange.Valid` (so every node rejects an ill-formed profile deterministically), at vote
-intake (so a hopeless proposal never pools or gossips), and in the wallet (so a validator gets a clear
-reason up front). The node reads all of this from committed state — `arm`, the block pacing, and the
-peer-DNS fan-out all use the governed values — so a ratified change re-tunes the live network. The
-profile is seeded from a node's config at genesis (`Timeout`/`MinBlockInterval`/`MaxPeers`), which must
-match across nodes, and governance is how it changes thereafter.
+`GET /hdls/governance` shows the parameters in force, the validators, the quorum, and the pooled
+certificates with their voters' power. The signature record keeps every governance certificate for
+the life of the chain, with each signer's name, key and power (see
+[architecture.md](architecture.md#the-signature-record)).
 
 ## Extending it
 
-`LedgerParameters` can grow further (mempool bounds, the validator stake threshold): add the field,
-include it in `LedgerParameters.fields` (which feeds both `Digest` and the vote preimage), extend
-`Acceptable` if it has an invariant, and it becomes governable by the same parameter certificate.
+To govern another value:
+
+1. Add the field to `LedgerParameters` and to `fields()`, which feeds both the digest and the vote.
+2. Give it bounds in `Acceptable`.
+3. Add it to the genesis file's keys, `genesisParameterNames` in `ledger/genesis.go`.
+4. For an amount, add it to `LedgerParameters`' JSON methods in `ledger/amount.go` and to
+   `ParseGenesis`'s list of amount parameters.
+5. Show it in `node.ParametersView` (`node/governance.go`) and on the admin page: `ui/admin.go`,
+   the form reading in `ui/main.go` (`proposeParameter`) and `ui/templates/admin.html`, so
+   validators can draft a vote on it in their wallets.
+
+It is then governed by the same certificate. Without step 5, only a hand-built certificate can
+change it. Changing the fields changes the digest and the signed preimage, so it needs a new
+genesis.

@@ -1,0 +1,112 @@
+{
+ "slice": "S8",
+ "report": {
+  "branchHead": "e2ac47991741bce8131e8738a3b929680241d918",
+  "commits": [
+   {
+    "hash": "178cd72",
+    "subject": "phase 2 S8: the genesis file, ParseGenesis and ValidateGenesis"
+   },
+   {
+    "hash": "84c111d",
+    "subject": "phase 2 S8: the server reads the genesis file (spec 8.2)"
+   },
+   {
+    "hash": "e2ac479",
+    "subject": "phase 2 S8: the demo's genesis (spec 8.3)"
+   }
+  ],
+  "summary": "S8 is built on p2-s8 in <scratch>/wt/p2-s8, as 3 commits on top of 3891341. Each commit builds. It touches only S8's files: ledger/genesis.go, ledger/genesis_test.go, cmd/server/config.go, cmd/server/config_test.go, cmd/server/main.go (doc comment only), cmd/demo/main.go and cmd/demo/main_test.go. No file of S5 or S7 was edited. Size: production +285/-227 lines, tests +527/-247.\n\n- ledger/genesis.go: the spec 2 file format, with lowercase keys:\n  - `Genesis{NetworkName, Parameters, Validators []GenesisValidator, ValidatorThreshold, Accounts []GenesisAccount}`.\n  - `GenesisValidator{name, power}`. Validator URLs are gone.\n  - `GenesisAccount{name, publicKey, amount, bank, delegate, description, address}`.\n  - `ParseGenesis(data)` refuses any key it does not know (DisallowUnknownFields) and any parameters object that does not give exactly the ten parameters. Without that check, a missing maxMessageBytes would read as 0, which means no bound.\n  - `ValidateGenesis(genesis) (Chain, LedgerState, error)` applies the eight rules of spec 2.2, and each refusal names the field. The rules:\n    - canonical networkName and account names, with no name given twice;\n    - canonical 1952-byte keys, with no key given twice;\n    - amounts that parse and stay within maxAccountBalance (zero is allowed);\n    - a delegate is \"\" or an account;\n    - a bank is never the account's own name and must be seated by the genesis set (R2, R4);\n    - static validators are accounts, listed once, with power of at least 1; or the threshold parses and is above 0; exactly one of the two modes;\n    - the parameters pass Acceptable for the size of the genesis set;\n    - the genesis seats at least one name.\n  - It returns the Chain (ML-DSA-65, the effective network id, the genesis hash, the validator rule) and the genesis state: accounts in name order, sequence 0, height 0.\n- cmd/server/config.go: the node config is now the spec 8.2 shape: genesisPath, listen, name, publicKey/privateKey, peers, bootstrap, snapshotPath, backupPath, maxMempool, maxCommentLength.\n  - load reads and validates the genesis file, signs for the network id that file makes, and keeps the key, seed and self-test checks and the snapshotPath rule.\n  - With the genesis maxPeers above 0, the gossip neighbours of a static validator come from the address on each validator's genesis account. If any validator has no address, or the node is not a validator, the node keeps its configured peers.\n  - The old genesis checks, the threshold-or-validators check and wellFormedKey moved into ValidateGenesis.\n  - The startup log already printed the effective id.\n- cmd/demo:\n  - `demoGenesis` gives: founder, the only validator with power 1 and no bank; bakery and cafe, both with bank founder; the default parameters except changeDelayBlocks 20 and retainBlocks 1000.\n  - The demo checks its genesis with ValidateGenesis, so a -network that is not a name is refused with a clear message.\n  - It prints the command for a second wallet: a fresh key file in its private temp directory, on port 8092.\n- Manual runs:\n  - The demo served `village/<64 hex>`, printed both wallet commands, and removed its temp directory on stop.\n  - `server` started from a keygen key and a genesis file, served `village/<hex>` from /hdls/status and logged the id.",
+  "tests": [
+   {
+    "name": "TestGenesisRefusesNonCanonicalOrDuplicateNames (ledger)",
+    "failsWithoutChange": "Does not build on 3891341 (no Genesis or ValidateGenesis). Mutants caught: networkName check removed, account-name check removed, duplicate-name check removed."
+   },
+   {
+    "name": "TestGenesisRefusesDuplicateKeys (ledger)",
+    "failsWithoutChange": "Does not build on 3891341. Mutants caught: duplicate-key check removed, CanonicalBase64 check removed."
+   },
+   {
+    "name": "TestGenesisRefusesABankThatIsNotSeated (ledger)",
+    "failsWithoutChange": "Does not build on 3891341. Mutant caught: bank-seated check removed. Covers static mode and dynamic mode."
+   },
+   {
+    "name": "TestGenesisRefusesAnOwnBank (ledger)",
+    "failsWithoutChange": "Does not build on 3891341. Mutant caught: own-bank check removed."
+   },
+   {
+    "name": "TestNetworkIdIsTheNamePlusTheGenesisHash (ledger)",
+    "failsWithoutChange": "Does not build on 3891341. Mutants caught: accounts not sorted by name, Bank not carried into state, id built from another name or state."
+   },
+   {
+    "name": "TestGenesisRefusesWhatNoLedgerCouldHold (ledger)",
+    "failsWithoutChange": "Does not build on 3891341. Mutants caught, one at a time: key-size check, delegate check, both-modes check, validator-not-an-account, validator listed twice, power below 1, zero threshold, empty set, Acceptable, balance cap. Holds the old cmd/server genesis-rule tests, moved here."
+   },
+   {
+    "name": "TestGenesisFileGivesEveryParameterAndNoUnknownKey (ledger)",
+    "failsWithoutChange": "Does not build on 3891341. Mutants caught: parameter presence check removed, unknown-parameter check removed, DisallowUnknownFields removed from ParseGenesis."
+   },
+   {
+    "name": "TestLoadReadsTheGenesisFile (cmd/server)",
+    "failsWithoutChange": "Fails on 3891341 (no genesisPath). Mutants caught: config DisallowUnknownFields removed, genesis state not used."
+   },
+   {
+    "name": "TestKeygenOutputLoads (cmd/server)",
+    "failsWithoutChange": "Fails on 3891341 because load has no genesis file. Keygen itself is unchanged, so this test guards existing behaviour. Mutants caught: keygen printing a seed that is not the public key's, keygen printing unpadded base64."
+   },
+   {
+    "name": "TestLoadObserverKeepsConfiguredPeersOnMaxPeersNetwork (cmd/server, rewritten)",
+    "failsWithoutChange": "Fails on 3891341. Mutants caught: topology without the every-validator-has-an-address check, topology ignoring the genesis maxPeers."
+   },
+   {
+    "name": "TestDemoGenesisIsValid (cmd/demo)",
+    "failsWithoutChange": "Does not build on 3891341 (no demoGenesis or ValidateGenesis). Mutants caught: founder as its own bank, bakery without a bank, default changeDelayBlocks, default retainBlocks."
+   },
+   {
+    "name": "TestLoadValidConfig, TestLoadDynamicValidatorModeLeavesStaticSetNil, TestLoadRejectsTruncatedKeys, TestLoadRefusesAPublicKeyThatIsNotTheSeeds, TestLoadRejectsKeysInAnotherSpelling, TestLoadRefusesANonCanonicalNodeName, TestLoadRequiresSnapshotPathOnValidators (cmd/server, rewritten)",
+    "failsWithoutChange": "Rewritten old tests that keep their protections under the new config and genesis file. All fail on 3891341, whose load has no genesisPath."
+   }
+  ],
+  "deviations": "1. The spec names only ValidateGenesis. I added `ledger.ParseGenesis(data)`, which decodes the file strictly: no unknown key, and all ten parameters present with exact lowercase names (spec 2.1 says \"every field present\"). ValidateGenesis takes the decoded Genesis and returns `(Chain, LedgerState, error)`, so the server and the demo build node.Config from one call.\n2. GenesisValidator is a copy of StaticValidator with lowercase JSON tags. ledger/validators.go is not S8's file.\n3. The node config refuses unknown keys. A field that moved to the genesis file (networkName, validators, transactionCost, maxPeers and the rest) fails loudly instead of being ignored. This is my reading of spec 8.2's \"removed from the node config\".\n4. A malformed parameter amount in the genesis, for example `\"transactionCost\": \"-1\"`, is refused with the amount parser's reason but without the parameter's name. The message comes from amountJSON in ledger/amount.go, which S5 is editing. Every other refusal names its field.\n5. Acceptable is checked against the number of names the genesis seats, which is what governance counts. In static mode this equals the number of validators; the old config used 1 in dynamic mode.\n6. Keygen is unchanged: it already prints what spec 8.1 asks for, a 2604-character publicKey and a 44-character privateKey seed, in the order publicKey then privateKey. TestKeygenOutputLoads runs `go run ../keygen` from the cmd/server test. `go test` puts its own GOROOT/bin first on PATH, so that resolves to the same toolchain. It adds about 0.3 s.\n7. The demo's second-wallet command is console text and has no automated test. It uses the same `walletArguments` helper as startWalletUI.\n8. In dynamic mode, load no longer runs the static topology code. Before, it logged a misleading \"no gossip neighbours\" warning there. Peer DNS still moves the node to the topology later, as before.\n9. A static validator power above consensus.MaxValidatorPower is not refused, since spec 2.2 only says \"below 1\". It saturates, as before.\n10. genesisPath is read relative to the working directory, like snapshotPath.",
+  "suite": "All passed on e2ac479, with GOTOOLCHAIN=auto (go1.27.3) and GOLEDGER_CHAOS_SLACK=4:\n- gofmt -l . printed nothing outside review/.\n- go vet ./... and go vet -C ui ./... passed.\n- go build ./... and go build -C ui -o /dev/null . passed.\n- go test -race -count=1 ./... passed twice: consensus about 56 s, node about 56 s, ledger about 11 s, cmd/server 1.5 s, cmd/demo 1 s, signing 1.3 s.\n- go test -C ui -race -count=1 ./... passed twice, about 30 s.\n- go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed in 95 s.\n\nCommits 178cd72 and 84c111d were also checked on their own: each builds, vets, and passes the cmd tests. The mutation run used a scratch copy in <scratch>/p2-scratch/s8-mutants: 33 mutants, all caught. The script is <scratch>/p2-scratch/s8_mutants.py.",
+  "openIssues": "- Merge with S5: my ledger tests use testSigner from ledger/helpers_test.go, which S5 may edit. If S5 renames it, the fix at merge is one line. My new package-level ledger names are Genesis, GenesisValidator, GenesisAccount, genesisParameterNames, ParseGenesis and ValidateGenesis; the test helpers are exampleGenesis, expectGenesisRefused and otherSpellingOf. None should clash with S5. S5's name action creates names after genesis, and ValidateGenesis does not interact with it.\n- S11 docs: docs/operating-a-network.md still shows the old node config (networkId or networkName, transactionCost, timeoutMs, validators with url, genesis). It needs the genesis file of spec 2.5, the node config of spec 8.2, and a note that the node config now refuses unknown keys. The genesis file's parameter keys are lowercase (transactionCost and so on), unlike the Go field names of the wire-format LedgerParameters.\n- Owner choice: whether a malformed genesis parameter amount should name its parameter. That needs either per-field parsing in ParseGenesis (about 10 lines) or a field-aware error in amount.go after S5 merges.\n- The demo's founder comment still says \"reassignment\"; S5 renames that to the name action."
+ },
+ "verdict": {
+  "confirmed": true,
+  "problems": [
+   {
+    "severity": "minor",
+    "file": "ledger/genesis.go",
+    "problem": "When a genesis parameter amount is malformed, the error does not say which parameter is wrong. Spec 2.2 says each refusal names the field. Three old cmd/server tests checked that the field was named: TestLoadRejectsMalformedTransactionCost, TestLoadRejectsExponentAndOffGridAmounts, and the newKeyFee/maxPaymentAmount/maxAccountBalance loop in TestLoadReadsTheNewParameters. The rewrite dropped that check, which the shared rule ('keeping what they protect') does not allow. The new test 'a parameter amount that is negative' now expects the message without the name. Commit 178cd72 also says 'each refusal naming the field', which is no longer true. The builder lists this as deviation 4. The integer parameters still give their name, for example '.maxPeers'.",
+    "evidence": "In scratch copy verify-S8-2, ParseGenesis was given '\"maxPaymentAmount\": \"1e5\"'. It returned 'genesis: amount must be a plain non-negative decimal: 1 to 18 digits, optionally a point and 1 to 8 more, such as 12 or 0.5', with no parameter name. Given '\"maxPaymentAmount\": null', it returned 'genesis: amount is missing: only a reassignment's amounts may be null'. Given '\"maxPeers\": \"0\"', it returned '... Go struct field .maxPeers of type int64', which does name the field. At 3891341, cmd/server/config_test.go lines 143-146, 384-391 and 425-429 asserted that the field name appears in the error.",
+    "fix": "In ParseGenesis, after the presence loop, add about 7 lines. For each of transactionCost, newKeyFee, maxPaymentAmount and maxAccountBalance, json.Unmarshal parameterKeys.Parameters[name] into a string and run ParseAmount. On failure return fmt.Errorf(\"genesis: parameters: %s: %v\", name, err). Change the test case so it expects 'transactionCost'."
+   },
+   {
+    "severity": "minor",
+    "file": "ledger/genesis_test.go",
+    "problem": "No test checks the validator count that ValidateGenesis passes to Acceptable (rule 7, 'for the genesis validator count'). In dynamic mode this is new behaviour: the count was 1 before, and is now the number of seated names (deviation 5). The shared rules require a test for every new behaviour.",
+    "evidence": "Mutant V13 replaced '!parameters.Acceptable(len(validators.Validators()))' with '!parameters.Acceptable(1)'. The full go test of ./ledger/ and ./cmd/server/ still passed. I checked the gap is real: a genesis with 30 seats, maxPeers 2 and stepTimeoutMs 300 is refused today, in both static and dynamic mode (fan-out dimension 5, so it needs at least 1250 ms). Acceptable(1) passes it.",
+    "fix": "Add one case to TestGenesisRefusesWhatNoLedgerCouldHold, or a short new test: a dynamic genesis that seats several names, with maxPeers 2 and a stepTimeoutMs that only a single validator could meet. The refusal must mention 'stepTimeoutMs must cover the gossip fan-out'."
+   },
+   {
+    "severity": "minor",
+    "file": "cmd/demo/main_test.go",
+    "problem": "Spec 8.3 says the founder has power 1, but TestDemoGenesisIsValid does not check the founder's power. With a single validator the power has no effect on consensus, so this only matters as a spec item no test covers.",
+    "evidence": "Mutant D2 changed the demo's validator to {Name: \"founder\", Power: 2}. TestDemoGenesisIsValid still passed.",
+    "fix": "Also assert that seated[0].Power == 1, or compare chain.ValidatorRule.StaticValidators with [{founder 1}]. This is one condition."
+   }
+  ],
+  "evidence": "S8 matches the spec and works. I found only three minor problems: one error message that no longer names its field, and two small test gaps.\n\nI checked branch p2-s8 at e2ac479 in fresh scratch copies taken with git archive (verify-S8-1/2/3, under <scratch>/p2-scratch/). I read spec §0 (R1-R11), §2, §3.2-3.5, §5.2, §6.1, §8, §10.2 (S8, plus S5 and S7 for file overlap), §12 and the appendix.\n\nScope:\n- The diff touches only S8's files: ledger/genesis.go, ledger/genesis_test.go, cmd/server/config.go, config_test.go and main.go (doc comment only), and cmd/demo/main.go and main_test.go. Nothing of S5's or S7's is touched.\n- ValidateGenesis applies all eight rules of §2.2:\n  - networkName and account names canonical, with no duplicates;\n  - keys canonical and 1952 bytes, with no duplicates;\n  - amounts parse and stay within maxAccountBalance, zero allowed;\n  - every delegate is \"\" or an account;\n  - no account is its own bank, and every bank is seated (R2, R4);\n  - static mode: validators are accounts, listed once, power at least 1; dynamic mode: a threshold above 0; never both modes, never neither;\n  - Acceptable is checked against the seated count;\n  - at least one name is seated.\n- It returns the §2.3 state (accounts in name order, height 0, sequence 0), the genesis hash, and the id name/hex.\n- The node config has the §8.2 shape, and unknown keys are refused. The topology is built from the genesis addresses. The demo matches §8.3.\n- Nothing from a later slice is half-built. The deviations are justified, apart from deviation 4 (reported above).\n\nAdversarial tests (scratch copy verify-S8-2):\n- Refused, with clear errors:\n  - trailing data after the JSON;\n  - a null or missing parameters object;\n  - wrongly typed or fractional integer parameters, such as 0.5 or 8.64e4;\n  - names ending in \\n;\n  - keys with an embedded \\n;\n  - a \"-\" delegate or bank;\n  - a validator listed twice through a key in another case;\n  - a threshold of 0.5 with stakes below 1 (refused as \"seats no name\");\n  - both modes at once.\n- Accepted, and deterministic:\n  - \"050.000\" gives the same id as \"50\";\n  - a power of MaxInt64 is accepted; the set caps it at MaxValidatorPower;\n  - top-level and account keys are matched case-insensitively, but parameter keys are checked exactly;\n  - duplicate top-level keys are merged the same way in both decoding passes.\n- I found no safety problem.\n- The node must not be required to hold its genesis key: after a key change it legitimately holds another.\n\nSmoke run: I ran keygen, wrote a genesis file and started the server. /hdls/status served \"smoke/ee229d...\", the log printed the id, and a config with \"networkId\" was refused with: unknown field \"networkId\".\n\nMutants: 27 of my own, one at a time, in verify-S8-3 (script at <scratch>/p2-scratch/verify-S8-tools/mutants.py).\n- 24 were caught. They cover every listed test:\n  - the name, key, spelling, own-bank and seated-bank checks (rules 1, 2 and 5);\n  - accounts not sorted, the bank not copied into state, height 1;\n  - a zero balance refused, the cap compared with >= instead of >;\n  - the delegate check, the parameter-presence check, strict decoding of the genesis;\n  - the dynamic-mode snapshotPath rule, the signer bound to the bare name instead of the id, the node-name check;\n  - an observer given the topology, lenient config decoding, the genesis left unvalidated;\n  - the demo's bank and seat changes.\n- 3 survived:\n  - Acceptable(1), and the demo founder at power 2 (both reported above);\n  - removing the sort of the topology names, which is pre-existing code with the same file order on every node, so not a problem.\n\nAgainst the parent 3891341:\n- The new cmd/server config_test.go fails 8 tests, among them TestLoadReadsTheGenesisFile and TestKeygenOutputLoads.\n- The ledger and demo tests do not build there.\n- Commits 178cd72 and 84c111d each build and vet, and pass the cmd and ledger tests.\n\nFull suite, go1.27.3 with GOTOOLCHAIN=auto, all passed:\n- gofmt -l printed nothing outside review/.\n- go vet passed in the root and in ui.\n- go build passed in the root and in ui.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice: consensus about 55-59 s, node about 55 s, ledger about 10 s, cmd/server 1.4-1.6 s, cmd/demo 1 s.\n- go test -C ui -race passed twice.\n- go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed in 91.9 s.\n\nNaming follows the spelled-out rule. Dead code is removed (wellFormedKey, mustParseAmount, the old file types), and the comments are accurate apart from the commit 178cd72 claim noted above. The logs are in <scratch>/p2-scratch/verify-S8-logs/."
+ },
+ "fix": {
+  "branchHead": "6de9bca2446c680168ac17e7db09c85adb6285e9",
+  "fixed": [
+   "763d119 (minor, ledger/genesis.go): a malformed genesis amount parameter now names its field. ParseGenesis checks transactionCost, newKeyFee, maxPaymentAmount and maxAccountBalance before the strict decode, and refuses a bad one as \"genesis: parameters: <name>: <reason>\". That is 10 production lines, and it restores spec 2.2's 'naming the field' for amounts. TestGenesisFileGivesEveryParameterAndNoUnknownKey tries each of the four with \"-1\", \"1e5\", \"1/2\", \"0.000000001\", null and a JSON number, which restores what the old cmd/server tests protected. The 'negative amount' case now expects 'parameters: transactionCost: amount must be a plain non-negative decimal'. The test fails on the parent commit, and with each of these mutants: each of the four names dropped from the list, ParseAmount not called, the not-a-string error ignored. This settles the builder's deviation 4 and the owner-choice open issue about it.",
+   "fcd477e (minor, ledger/genesis_test.go): a test now pins the validator count that ValidateGenesis passes to Acceptable. The new case in TestGenesisRefusesWhatNoLedgerCouldHold is a dynamic genesis (threshold 500) that seats bank-a and bank-b, with maxPeers 1 and stepTimeoutMs 400. Two names need dimension 2 (500 ms) and one name needs 250 ms. The test expects 'stepTimeoutMs must cover the gossip fan-out (>= 250 ms per relay hop for 2 validators with maxPeers 1)'. It fails with the check's mutant V13, Acceptable(1), and with Acceptable(len(genesis.Validators)), which is 0 in dynamic mode. Test only: the code was already right.",
+   "6de9bca (minor, cmd/demo/main_test.go): TestDemoGenesisIsValid now also asserts the founder's power is 1 (spec 8.3), and it fails with mutant D2 (founder power 2). Its failure message now prints the validator rule (names and powers) instead of the seated set, so it no longer dumps a 2604-character key. Test only."
+  ],
+  "notFixed": [],
+  "suite": "All passed at 6de9bca, with GOTOOLCHAIN=auto (go1.27.3) and GOLEDGER_CHAOS_SLACK=4.\\n- gofmt -l . printed nothing outside review/.\\n- go vet ./... and go vet -C ui ./... passed.\\n- go build ./... and go build -C ui -o /dev/null . passed.\\n- go test -race -count=1 ./... passed twice: cmd/demo 1.0 s, cmd/server 1.4 s, consensus 54-56 s, ledger 10.7-10.9 s, node 55-56 s, signing 1.3-1.4 s.\\n- go test -C ui -race -count=1 ./... passed twice (32 s and 32 s).\\n- go test -race -count=3 -run 'Chaos|Restart|SignLog|Resume|CatchUp' ./node/ passed in 92 s.\\n\\nThe follow-up is +54/-9 lines in S8's own files only: ledger/genesis.go, ledger/genesis_test.go and cmd/demo/main_test.go. No time limits were changed. The scratch copy for the reverted-code and mutant runs is <scratch>/p2-scratch/s8-followup."
+ },
+ "recheck": null
+}

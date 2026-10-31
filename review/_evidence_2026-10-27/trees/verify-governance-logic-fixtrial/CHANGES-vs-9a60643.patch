@@ -1,0 +1,110 @@
+--- a/node/governance.go
++++ b/node/governance.go
+@@ -86,10 +86,17 @@
+ 	}
+ 	sort.Strings(keys)
+ 	for _, key := range keys {
+-		change := n.paramProposals[key]
++		change := *n.paramProposals[key]
++		// FIX-TRIAL C11: carry only votes of CURRENT validators (a departed voter must not poison it).
++		change.Votes = nil
++		for _, vote := range n.paramProposals[key].Votes {
++			if currentValidators.Contains(vote.Validator) {
++				change.Votes = append(change.Votes, vote)
++			}
++		}
+ 		if change.Sequence == n.governanceSequence && change.PreviousParametersDigest == currentDigest &&
+ 			change.Valid(n.cfg.Scheme, n.cfg.NetworkID, currentValidators, n.parameters, n.governanceSequence) {
+-			return change
++			return &change
+ 		}
+ 	}
+ 	return nil
+--- a/node/reassignment.go
++++ b/node/reassignment.go
+@@ -84,10 +84,16 @@
+ 	}
+ 	sort.Strings(keys)
+ 	for _, key := range keys {
+-		reassignment := n.reassignmentProposals[key]
++		reassignment := *n.reassignmentProposals[key]
++		reassignment.Votes = nil // FIX-TRIAL C11: current validators' votes only
++		for _, vote := range n.reassignmentProposals[key].Votes {
++			if currentValidators.Contains(vote.Validator) {
++				reassignment.Votes = append(reassignment.Votes, vote)
++			}
++		}
+ 		if reassignment.Sequence == n.governanceSequence &&
+ 			reassignment.Valid(n.cfg.Scheme, n.cfg.NetworkID, currentValidators, n.accounts, n.governanceSequence) {
+-			return reassignment
++			return &reassignment
+ 		}
+ 	}
+ 	return nil
+--- a/ledger/block.go
++++ b/ledger/block.go
+@@ -148,6 +148,16 @@
+ 		nextSequence++
+ 	}
+ 
++	if ratifiedReassignment != nil {
++		// FIX-TRIAL C12: the reassignment's account neither pays nor is paid in its enacting block.
++		kept := make([]Payment, 0, len(paymentsForThisBlock))
++		for _, payment := range paymentsForThisBlock {
++			if !paymentTouches(registry, payment, ratifiedReassignment.Account) {
++				kept = append(kept, payment)
++			}
++		}
++		paymentsForThisBlock = kept
++	}
+ 	resultingAccounts := ProcessPayments(previousState.Accounts, paymentsForThisBlock, transactionCost)
+ 	resultingAccounts = applyAccountUpdates(scheme, networkID, resultingAccounts, verifiedUpdates, height)
+ 	resultingAccounts = applySlashes(scheme, networkID, resultingAccounts, verifiedEvidence)
+@@ -224,6 +234,11 @@
+ 		if !block.Reassignment.Valid(scheme, networkID, firstValidatorSet(validators), previousState.Accounts, previousState.GovernanceSequence) {
+ 			return LedgerState{}, false // an unratified balance reassignment (not a > ⅔ quorum of the set)
+ 		}
++		for _, payment := range block.Payments {
++			if paymentTouches(registry, payment, block.Reassignment.Account) {
++				return LedgerState{}, false // FIX-TRIAL C12: a payment from/to the reassigned account in its enacting block
++			}
++		}
+ 		nextSequence++
+ 	}
+ 
+@@ -239,3 +254,12 @@
+ 	}
+ 	return nextState, true
+ }
++
++// paymentTouches reports whether p debits or credits `account` (payee resolved pre-block).
++func paymentTouches(registry map[string]string, p Payment, account string) bool {
++	if p.PublicKeyFrom == account {
++		return true
++	}
++	to, ok := resolveRecipient(registry, p)
++	return ok && to == account
++}
+--- a/ledger/parameters.go
++++ b/ledger/parameters.go
+@@ -11,6 +11,10 @@
+ // take. It is used only to check that a governed step timeout is long enough for a proposal/vote to
+ // fan out across the dimension the topology implies — see LedgerParameters.timingConsistent.
+ const AssumedGossipHopMs = 250
++
++// MaxTimingMs (FIX-TRIAL C13) caps BlockIntervalMs and StepTimeoutMs: one week, so a ratified profile
++// can delay the next block (and hence its own revert) by at most a week, far below Duration overflow.
++const MaxTimingMs = 7 * 24 * 60 * 60 * 1000
+ 
+ // LedgerParameters are the network's operating parameters — part of COMMITTED STATE (so every node
+ // agrees on them and the digest covers them) and amendable by governance (a > ⅔ stake vote; see
+@@ -74,7 +78,8 @@
+ // change that would leave the timeout too short for the implied dimension (stranding votes and
+ // stalling consensus) is rejected. Also enforces basic bounds.
+ func (parameters LedgerParameters) TimingConsistent(participants int) bool {
+-	if parameters.StepTimeoutMs <= 0 || parameters.BlockIntervalMs < 0 || parameters.MaxPeers < 0 {
++	if parameters.StepTimeoutMs <= 0 || parameters.BlockIntervalMs < 0 || parameters.MaxPeers < 0 ||
++		parameters.StepTimeoutMs > MaxTimingMs || parameters.BlockIntervalMs > MaxTimingMs {
+ 		return false
+ 	}
+ 	_, dimension := GroupParameters(participants, parameters.MaxPeers)

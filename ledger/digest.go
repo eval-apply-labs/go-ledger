@@ -3,42 +3,52 @@ package ledger
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"sort"
+	"strconv"
 )
 
-// StateDigest is a deterministic SHA-256 digest of the account set. It is what the consensus
-// layer votes on and commits, so two honest nodes that computed the same state produce the
-// same digest and a commit binds the exact applied state (audit A2: a naive vote can be over a
-// value derived from a *different* input than what got applied). Accounts are sorted by public
-// key and every field is length-prefixed, so the digest is canonical and order-independent.
-// (SHA-256, not MD5 -- audit C5.)
-func StateDigest(accounts []Account) [32]byte {
-	sorted := append([]Account(nil), accounts...)
-	// Stable sort so the digest is deterministic even if two accounts share a public key (which the
-	// map-keyed processing shouldn't produce, but the digest must not depend on input order if it did).
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].PublicKey < sorted[j].PublicKey })
-
-	h := sha256.New()
-	var n [4]byte
-	field := func(b []byte) {
-		binary.BigEndian.PutUint32(n[:], uint32(len(b)))
-		h.Write(n[:])
-		h.Write(b)
-	}
-	for _, a := range sorted {
-		amt := "0"
-		if a.Amount != nil {
-			amt = a.Amount.RatString()
+// AccountsDigest is a deterministic SHA-256 digest of the account set (spec 3.5): the tag "go-ledger
+// accounts v2", then every field of every account, length-prefixed, in slice order. It feeds the state
+// digest (LedgerState.Digest), which the block hash the consensus layer votes on and commits covers, so
+// two honest nodes that computed the same state produce the same digest and a commit binds the exact
+// applied state (audit A2: a naive vote can be over a value derived from a *different* input than what
+// got applied).
+// It does not sort: the ledger keeps accounts in strictly ascending order of name, and a decoded state
+// out of that order is refused before its digest is taken (LedgerState.NamesAscending). (SHA-256, not
+// MD5 -- audit C5.)
+func AccountsDigest(accounts []Account) [32]byte {
+	fields := [][]byte{[]byte("go-ledger accounts v2")}
+	for _, account := range accounts {
+		frozen := "0"
+		if account.Frozen {
+			frozen = "1"
 		}
-		field([]byte(a.PublicKey))
-		field([]byte(a.Name))
-		field([]byte(amt))
-		field([]byte(a.ValidatorNode))
-		field([]byte(a.Description))
-		field([]byte(a.Address)) // Address is mutable on-chain state (peer DNS) — must be bound, or a
-		//                          synced checkpoint could carry rewritten gossip addresses (eclipse).
+		fields = append(fields,
+			[]byte(account.Name),
+			[]byte(account.PublicKey),
+			[]byte(FormatAmount(account.Amount)), // a nil amount, never in honest state, is "": not a zero balance
+			[]byte(account.Bank),
+			[]byte(account.Delegate),
+			[]byte(account.Description),
+			[]byte(account.Address), // mutable on-chain state (peer DNS): bound, or a synced checkpoint could rewrite gossip addresses
+			[]byte(frozen),
+			[]byte(account.PendingKey),
+			[]byte(account.PendingBank),
+			[]byte(strconv.FormatInt(account.PendingHeight, 10)))
 	}
-	var out [32]byte
-	copy(out[:], h.Sum(nil))
-	return out
+	return lengthPrefixedDigest(fields...)
+}
+
+// lengthPrefixedDigest is SHA-256 over the fields, each written as its 4-byte big-endian length and
+// then its bytes (lp() in spec 0.2). A digest's first field is its tag, such as "go-ledger state v2".
+func lengthPrefixedDigest(fields ...[]byte) [32]byte {
+	hasher := sha256.New()
+	var lengthPrefix [4]byte
+	for _, field := range fields {
+		binary.BigEndian.PutUint32(lengthPrefix[:], uint32(len(field)))
+		hasher.Write(lengthPrefix[:])
+		hasher.Write(field)
+	}
+	var digest [32]byte
+	copy(digest[:], hasher.Sum(nil))
+	return digest
 }

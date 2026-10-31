@@ -1,0 +1,243 @@
+    0.879ms N0 h=1 START HEIGHT proposer(r0)=N1 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+    0.894ms N1 h=1 START HEIGHT proposer(r0)=N1 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+    0.929ms N2 h=1 START HEIGHT proposer(r0)=N1 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+    1.008ms N3 h=1 START HEIGHT proposer(r0)=N1 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+    1.980ms N3 h=1 proposal ACCEPTED ph=1 r=0 from=N1 valid=true payments=0 driverHeight=1
+    2.120ms N2 h=1 proposal ACCEPTED ph=1 r=0 from=N1 valid=true payments=0 driverHeight=1
+    2.988ms N0 h=1 proposal ACCEPTED ph=1 r=0 from=N1 valid=true payments=0 driverHeight=1
+    9.261ms N0 h=1 COMMIT round=0 payments=0
+   11.169ms N3 h=1 COMMIT round=0 payments=0
+   12.887ms N2 h=1 COMMIT round=0 payments=0
+   13.080ms N1 h=1 COMMIT round=0 payments=0
+   20.351ms N0 h=2 TEST: submitting payment BlockID=5 (h=2) heights=[2 2 2 2]
+   20.913ms N0 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.228ms N3 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.232ms N1 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.235ms N2 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.506ms N0 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.515ms N1 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.548ms N0 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.557ms N3 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.557ms N2 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.606ms N1 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.635ms N2 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.726ms N0 h=2 payment intake BlockID=5 admitted=true err=<nil>
+   21.863ms N3 h=2 payment intake BlockID=5 admitted=true err=<nil>
+  310.246ms N0 h=2 evNextHeight
+  310.451ms N0 h=2 START HEIGHT proposer(r0)=N0 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=0
+  311.116ms N1 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  311.155ms N1 h=2 proposal DROPPED wrong-proposer/bad-sig ph=2 r=0 from=N0 expected(driver h=1)=N1
+  311.175ms N3 h=2 proposal DROPPED wrong-proposer/bad-sig ph=2 r=0 from=N0 expected(driver h=1)=N1
+  311.185ms N3 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  311.201ms N2 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  311.261ms N3 h=2 evNextHeight
+  311.276ms N2 h=2 proposal DROPPED wrong-proposer/bad-sig ph=2 r=0 from=N0 expected(driver h=1)=N1
+  311.384ms N1 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  311.436ms N3 h=2 START HEIGHT proposer(r0)=N0 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=1
+  311.464ms N2 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  311.480ms N2 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  311.499ms N1 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  311.798ms N1 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  311.810ms N2 h=2 vote DROPPED-BY-DRIVER from=N0 vh=2 r=0 t=1 (driver height 1)
+  312.987ms N2 h=2 evNextHeight
+  313.182ms N2 h=2 START HEIGHT proposer(r0)=N0 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=1
+  313.214ms N1 h=2 evNextHeight
+  313.394ms N1 h=2 START HEIGHT proposer(r0)=N0 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=1
+ 3006.179ms N3 h=2 evCatchUp offered cp.height=1
+ 3006.233ms N0 h=2 evCatchUp offered cp.height=1
+ 3006.301ms N2 h=2 evCatchUp offered cp.height=1
+ 3006.651ms N1 h=2 evCatchUp offered cp.height=1
+ 5001.155ms N2 h=2 TIMEOUT step=0 round=0 (driver round 0 step 0)
+ 5001.238ms N0 h=2 REGOSSIP votes=1 proposalHeld(round 0)=true
+ 5001.344ms N1 h=2 REGOSSIP votes=1 proposalHeld(round 0)=false
+ 5001.618ms N2 h=2 REGOSSIP votes=2 proposalHeld(round 0)=false
+ 5001.701ms N3 h=2 TIMEOUT step=0 round=0 (driver round 0 step 0)
+ 5002.042ms N0 h=2 TIMEOUT step=0 round=0 (driver round 0 step 1)
+ 5002.826ms N2 h=2 proposal ACCEPTED ph=2 r=0 from=N0 valid=true payments=0 driverHeight=2
+ 5004.360ms N1 h=2 proposal ACCEPTED ph=2 r=0 from=N0 valid=true payments=0 driverHeight=2
+ 5005.571ms N3 h=2 proposal ACCEPTED ph=2 r=0 from=N0 valid=true payments=0 driverHeight=2
+ 5006.651ms N3 h=2 REGOSSIP votes=2 proposalHeld(round 0)=true
+ 5312.258ms N3 h=2 TIMEOUT step=0 round=0 (driver round 0 step 1)
+ 5313.539ms N1 h=2 TIMEOUT step=0 round=0 (driver round 0 step 1)
+ 5313.571ms N2 h=2 TIMEOUT step=0 round=0 (driver round 0 step 1)
+ 6005.897ms N2 h=2 evCatchUp offered cp.height=1
+ 6005.911ms N3 h=2 evCatchUp offered cp.height=1
+ 6005.922ms N0 h=2 evCatchUp offered cp.height=1
+ 6006.204ms N1 h=2 evCatchUp offered cp.height=1
+ 9005.804ms N3 h=2 evCatchUp offered cp.height=1
+ 9005.828ms N0 h=2 evCatchUp offered cp.height=1
+ 9005.950ms N2 h=2 evCatchUp offered cp.height=1
+ 9006.152ms N1 h=2 evCatchUp offered cp.height=1
+10000.868ms N1 h=2 REGOSSIP votes=4 proposalHeld(round 0)=true
+10000.936ms N3 h=2 REGOSSIP votes=4 proposalHeld(round 0)=true
+10001.358ms N2 h=2 REGOSSIP votes=4 proposalHeld(round 0)=true
+10001.777ms N0 h=2 REGOSSIP votes=4 proposalHeld(round 0)=true
+10006.985ms N2 h=2 TIMEOUT step=1 round=0 (driver round 0 step 1)
+10007.010ms N1 h=2 TIMEOUT step=1 round=0 (driver round 0 step 1)
+10007.589ms N0 h=2 TIMEOUT step=1 round=0 (driver round 0 step 1)
+10008.627ms N3 h=2 TIMEOUT step=1 round=0 (driver round 0 step 1)
+12003.777ms N1 h=2 evCatchUp offered cp.height=1
+12004.318ms N2 h=2 evCatchUp offered cp.height=1
+12004.411ms N3 h=2 evCatchUp offered cp.height=1
+12004.453ms N0 h=2 evCatchUp offered cp.height=1
+15000.970ms N2 h=2 REGOSSIP votes=8 proposalHeld(round 0)=true
+15001.047ms N0 h=2 REGOSSIP votes=8 proposalHeld(round 0)=true
+15001.364ms N1 h=2 REGOSSIP votes=8 proposalHeld(round 0)=true
+15001.900ms N3 h=2 REGOSSIP votes=8 proposalHeld(round 0)=true
+15015.570ms N2 h=2 TIMEOUT step=2 round=0 (driver round 0 step 2)
+15015.937ms N0 h=2 TIMEOUT step=2 round=0 (driver round 0 step 2)
+15017.944ms N3 h=2 TIMEOUT step=2 round=0 (driver round 0 step 2)
+15019.945ms N3 h=2 proposal ACCEPTED ph=2 r=1 from=N2 valid=true payments=0 driverHeight=2
+15020.527ms N1 h=2 TIMEOUT step=2 round=0 (driver round 0 step 2)
+15020.764ms N0 h=2 proposal ACCEPTED ph=2 r=1 from=N2 valid=true payments=0 driverHeight=2
+15020.814ms N1 h=2 proposal ACCEPTED ph=2 r=1 from=N2 valid=true payments=0 driverHeight=2
+15027.041ms N1 h=2 evCatchUp offered cp.height=1
+15027.779ms N1 h=2 COMMIT round=1 payments=0
+15029.605ms N0 h=2 COMMIT round=1 payments=0
+15030.107ms N2 h=2 COMMIT round=1 payments=0
+15034.714ms N3 h=2 COMMIT round=1 payments=0
+15043.659ms N0 h=3 evCatchUp offered cp.height=1
+15049.101ms N2 h=3 evCatchUp offered cp.height=1
+15049.712ms N3 h=3 evCatchUp offered cp.height=2
+15328.705ms N1 h=3 evNextHeight
+15329.060ms N1 h=3 START HEIGHT proposer(r0)=N2 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=0
+15329.940ms N0 h=3 evNextHeight
+15330.231ms N0 h=3 START HEIGHT proposer(r0)=N2 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=0
+15330.279ms N2 h=3 evNextHeight
+15330.536ms N2 h=3 START HEIGHT proposer(r0)=N2 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=0
+15331.406ms N3 h=3 vote DROPPED-BY-DRIVER from=N2 vh=3 r=0 t=1 (driver height 2)
+15332.504ms N3 h=3 proposal DROPPED wrong-proposer/bad-sig ph=3 r=0 from=N2 expected(driver h=2)=N0
+15333.057ms N1 h=3 proposal ACCEPTED ph=3 r=0 from=N2 valid=true payments=0 driverHeight=3
+15333.142ms N3 h=3 vote DROPPED-BY-DRIVER from=N2 vh=3 r=0 t=1 (driver height 2)
+15333.159ms N0 h=3 proposal ACCEPTED ph=3 r=0 from=N2 valid=true payments=0 driverHeight=3
+15333.754ms N3 h=3 vote DROPPED-BY-DRIVER from=N2 vh=3 r=0 t=1 (driver height 2)
+15335.105ms N3 h=3 evNextHeight
+15335.599ms N3 h=3 START HEIGHT proposer(r0)=N2 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=1
+15336.935ms N3 h=3 proposal ACCEPTED ph=3 r=0 from=N2 valid=true payments=0 driverHeight=3
+15341.883ms N1 h=3 COMMIT round=0 payments=0
+15342.307ms N2 h=3 COMMIT round=0 payments=0
+15342.412ms N0 h=3 COMMIT round=0 payments=0
+15343.687ms N1 h=4 proposal DROPPED wrong-height/no-driver ph=3 r=0 from=N2 driver=true
+15344.124ms N3 h=3 COMMIT round=0 payments=0
+15344.296ms N0 h=4 proposal DROPPED wrong-height/no-driver ph=3 r=0 from=N2 driver=true
+15344.803ms N2 h=4 proposal DROPPED wrong-height/no-driver ph=3 r=0 from=N2 driver=true
+15642.240ms N1 h=4 evNextHeight
+15642.560ms N1 h=4 START HEIGHT proposer(r0)=N3 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=0
+15642.613ms N0 h=4 evNextHeight
+15642.694ms N2 h=4 evNextHeight
+15642.854ms N0 h=4 START HEIGHT proposer(r0)=N3 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=0
+15642.981ms N2 h=4 START HEIGHT proposer(r0)=N3 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=0
+15644.543ms N3 h=4 evNextHeight
+15644.889ms N3 h=4 START HEIGHT proposer(r0)=N3 mempoolBlockIDs=[5] candidatePayments=0 heldProposals=0 heldVotes=0
+15647.322ms N2 h=4 proposal ACCEPTED ph=4 r=0 from=N3 valid=true payments=0 driverHeight=4
+15647.368ms N1 h=4 proposal ACCEPTED ph=4 r=0 from=N3 valid=true payments=0 driverHeight=4
+15649.153ms N0 h=4 proposal ACCEPTED ph=4 r=0 from=N3 valid=true payments=0 driverHeight=4
+15655.621ms N0 h=4 COMMIT round=0 payments=0
+15656.082ms N0 h=5 proposal DROPPED wrong-height/no-driver ph=4 r=0 from=N3 driver=true
+15656.375ms N1 h=4 COMMIT round=0 payments=0
+15658.462ms N2 h=4 COMMIT round=0 payments=0
+15659.211ms N1 h=5 proposal DROPPED wrong-height/no-driver ph=4 r=0 from=N3 driver=true
+15663.951ms N3 h=4 COMMIT round=0 payments=0
+15665.584ms N3 h=5 proposal DROPPED wrong-height/no-driver ph=4 r=0 from=N3 driver=true
+15956.094ms N0 h=5 evNextHeight
+15956.426ms N0 h=5 START HEIGHT proposer(r0)=N1 mempoolBlockIDs=[5] candidatePayments=1 heldProposals=0 heldVotes=0
+15957.282ms N1 h=5 evNextHeight
+15957.593ms N1 h=5 START HEIGHT proposer(r0)=N1 mempoolBlockIDs=[5] candidatePayments=1 heldProposals=0 heldVotes=0
+15958.553ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=5 r=0 t=1 (driver height 4)
+15958.616ms N2 h=5 vote DROPPED-BY-DRIVER from=N1 vh=5 r=0 t=1 (driver height 4)
+15958.677ms N2 h=5 evNextHeight
+15958.760ms N3 h=5 proposal DROPPED wrong-proposer/bad-sig ph=5 r=0 from=N1 expected(driver h=4)=N3
+15958.990ms N2 h=5 START HEIGHT proposer(r0)=N1 mempoolBlockIDs=[5] candidatePayments=1 heldProposals=0 heldVotes=1
+15959.111ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=5 r=0 t=1 (driver height 4)
+15959.257ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=5 r=0 t=1 (driver height 4)
+15959.361ms N0 h=5 proposal ACCEPTED ph=5 r=0 from=N1 valid=true payments=1 driverHeight=5
+15959.472ms N2 h=5 proposal ACCEPTED ph=5 r=0 from=N1 valid=true payments=1 driverHeight=5
+15959.627ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=5 r=0 t=1 (driver height 4)
+15959.996ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=5 r=0 t=1 (driver height 4)
+15960.048ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=5 r=0 t=1 (driver height 4)
+15960.333ms N3 h=5 proposal DROPPED wrong-proposer/bad-sig ph=5 r=0 from=N1 expected(driver h=4)=N3
+15961.969ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=5 r=0 t=2 (driver height 4)
+15962.482ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=5 r=0 t=1 (driver height 4)
+15963.896ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=5 r=0 t=1 (driver height 4)
+15964.015ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=5 r=0 t=1 (driver height 4)
+15964.229ms N3 h=5 proposal DROPPED wrong-proposer/bad-sig ph=5 r=0 from=N1 expected(driver h=4)=N3
+15964.346ms N3 h=5 evNextHeight
+15965.308ms N3 h=5 START HEIGHT proposer(r0)=N1 mempoolBlockIDs=[5] candidatePayments=1 heldProposals=0 heldVotes=4
+15968.798ms N1 h=5 COMMIT round=0 payments=1
+15969.062ms N2 h=5 COMMIT round=0 payments=1
+15970.966ms N0 h=5 COMMIT round=0 payments=1
+15988.604ms N1 h=6 payment intake BlockID=5 admitted=false err=stale block id: the payment names an already-committed block
+16269.247ms N1 h=6 evNextHeight
+16269.352ms N2 h=6 evNextHeight
+16269.551ms N1 h=6 START HEIGHT proposer(r0)=N0 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+16269.586ms N2 h=6 START HEIGHT proposer(r0)=N0 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+16271.754ms N0 h=6 evNextHeight
+16271.888ms N0 h=6 START HEIGHT proposer(r0)=N0 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+16272.993ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=6 r=0 t=1 (driver height 5)
+16273.062ms N3 h=5 proposal DROPPED wrong-height/no-driver ph=6 r=0 from=N0 driver=true
+16273.340ms N1 h=6 proposal ACCEPTED ph=6 r=0 from=N0 valid=true payments=0 driverHeight=6
+16273.703ms N2 h=6 proposal ACCEPTED ph=6 r=0 from=N0 valid=true payments=0 driverHeight=6
+16273.752ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=6 r=0 t=1 (driver height 5)
+16273.965ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=1 (driver height 5)
+16275.493ms N3 h=5 proposal DROPPED wrong-height/no-driver ph=6 r=0 from=N0 driver=true
+16275.738ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=6 r=0 t=1 (driver height 5)
+16276.339ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=6 r=0 t=1 (driver height 5)
+16276.366ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=1 (driver height 5)
+16276.427ms N3 h=5 proposal DROPPED wrong-height/no-driver ph=6 r=0 from=N0 driver=true
+16278.200ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=1 (driver height 5)
+16278.582ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=1 (driver height 5)
+16278.888ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=2 (driver height 5)
+16279.119ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=1 (driver height 5)
+16280.266ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=2 (driver height 5)
+16280.534ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=2 (driver height 5)
+16280.569ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=1 (driver height 5)
+16280.602ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=6 r=0 t=2 (driver height 5)
+16281.155ms N1 h=6 COMMIT round=0 payments=0
+16282.511ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=2 (driver height 5)
+16282.675ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=1 (driver height 5)
+16282.692ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=2 (driver height 5)
+16282.782ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=1 (driver height 5)
+16282.973ms N0 h=6 COMMIT round=0 payments=0
+16283.003ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=6 r=0 t=2 (driver height 5)
+16283.193ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=2 (driver height 5)
+16283.333ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=2 (driver height 5)
+16284.239ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=2 (driver height 5)
+16284.102ms N2 h=6 COMMIT round=0 payments=0
+16284.597ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=1 (driver height 5)
+16284.800ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=2 (driver height 5)
+16286.492ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=2 (driver height 5)
+16286.648ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=6 r=0 t=2 (driver height 5)
+16286.722ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=6 r=0 t=2 (driver height 5)
+16286.735ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=1 (driver height 5)
+16287.051ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=6 r=0 t=2 (driver height 5)
+16287.242ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=1 (driver height 5)
+16287.777ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=6 r=0 t=2 (driver height 5)
+16581.234ms N1 h=7 evNextHeight
+16581.371ms N1 h=7 START HEIGHT proposer(r0)=N2 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+16583.978ms N0 h=7 evNextHeight
+16584.055ms N0 h=7 START HEIGHT proposer(r0)=N2 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+16585.158ms N2 h=7 evNextHeight
+16585.224ms N2 h=7 START HEIGHT proposer(r0)=N2 mempoolBlockIDs=[] candidatePayments=0 heldProposals=0 heldVotes=0
+16586.231ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=7 r=0 t=1 (driver height 5)
+16587.294ms N0 h=7 proposal ACCEPTED ph=7 r=0 from=N2 valid=true payments=0 driverHeight=7
+16587.394ms N3 h=5 proposal DROPPED wrong-height/no-driver ph=7 r=0 from=N2 driver=true
+16590.092ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=7 r=0 t=1 (driver height 5)
+16590.233ms N1 h=7 proposal ACCEPTED ph=7 r=0 from=N2 valid=true payments=0 driverHeight=7
+16590.421ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=7 r=0 t=1 (driver height 5)
+16590.611ms N3 h=5 proposal DROPPED wrong-height/no-driver ph=7 r=0 from=N2 driver=true
+16590.697ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=7 r=0 t=1 (driver height 5)
+16590.951ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=7 r=0 t=1 (driver height 5)
+16592.402ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=7 r=0 t=1 (driver height 5)
+16594.693ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=7 r=0 t=2 (driver height 5)
+16594.711ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=7 r=0 t=1 (driver height 5)
+16594.716ms N3 h=5 proposal DROPPED wrong-height/no-driver ph=7 r=0 from=N2 driver=true
+16594.720ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=7 r=0 t=1 (driver height 5)
+16594.991ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=7 r=0 t=2 (driver height 5)
+16595.126ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=7 r=0 t=1 (driver height 5)
+16596.835ms N3 h=5 vote DROPPED-BY-DRIVER from=N0 vh=7 r=0 t=2 (driver height 5)
+16597.177ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=7 r=0 t=1 (driver height 5)
+16597.319ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=7 r=0 t=1 (driver height 5)
+16597.565ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=7 r=0 t=2 (driver height 5)
+16599.457ms N0 h=7 COMMIT round=0 payments=0
+16599.695ms N3 h=5 vote DROPPED-BY-DRIVER from=N2 vh=7 r=0 t=2 (driver height 5)
+16599.725ms N3 h=5 vote DROPPED-BY-DRIVER from=N1 vh=7 r=0 t=2 (driver height 5)

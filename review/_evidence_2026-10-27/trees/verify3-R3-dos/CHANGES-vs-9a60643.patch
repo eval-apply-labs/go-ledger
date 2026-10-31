@@ -1,0 +1,13 @@
+--- a/node/chaos_test.go
++++ b/node/chaos_test.go
+@@ -777,6 +777,10 @@
+ 		}
+ 		time.Sleep(150 * time.Millisecond)
+ 	}
++	for i, nd := range c.nodes {
++		s := nd.Snapshot()
++		t.Logf("node %d height %d admitted=%v", i, s.Height, deriveValidators(s.Accounts, rat(threshold)).Contains(newcomer.PublicKeyBase64()))
++	}
+ 	t.Fatal("newcomer was not admitted as a validator on all nodes under chaos")
+ }
+ 

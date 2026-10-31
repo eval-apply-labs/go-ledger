@@ -1,0 +1,656 @@
+{
+ "what": "Root-causing the three flaky chaos tests after Phase 1 (go1.27.3 and go1.26.4)",
+ "date": "2026-10-27",
+ "integrated": "chaos-lossdup 49c69ae (node: send the decided proposal with the last commit) and chaos-equivocator 7df27aa (driver: precommit the block a node decides); chaos-admission 631a8d5 duplicated the first and chaos-equivocator 01f0f34 was a subset of it",
+ "investigations": [
+  {
+   "test": "TestChaosDynamicAdmissionConverges (node/chaos_test.go:741), \"newcomer was not admitted as a validator on all nodes under chaos\"",
+   "branch_head": "631a8d5 on chaos-admission (one commit on top of 35b4e7f); worktree <scratch>/wt/chaos-admission, clean, not pushed",
+   "rates_before": [
+    {
+     "config": "go1.27.3, go 1.27 line (what ships), branch head 35b4e7f",
+     "failures": 6,
+     "runs": 200,
+     "load": "1-min load average 4.0-10.9; batches of 20 interleaved with the 3 configurations below, -race, GOLEDGER_CHAOS_SLACK=4, -p 1"
+    },
+    {
+     "config": "go1.26.4 (GOTOOLCHAIN=local), go 1.22 line, no toolchain line (the previous setup)",
+     "failures": 6,
+     "runs": 200,
+     "load": "3.8-10.6"
+    },
+    {
+     "config": "go1.27.3 runtime with the go 1.22 line (old GODEBUG defaults, except asynctimerchan, which go1.27.3 removed)",
+     "failures": 4,
+     "runs": 200,
+     "load": "3.6-10.3"
+    },
+    {
+     "config": "go1.26.4, go 1.22 line, GODEBUG=asynctimerchan=0 (new timer channels on the old runtime)",
+     "failures": 1,
+     "runs": 200,
+     "load": "3.9-11.1"
+    },
+    {
+     "config": "instrumented scratch copy of 35b4e7f, go1.27.3, admission deadline cut to 20 s, 2 processes in parallel",
+     "failures": 7,
+     "runs": 600,
+     "load": "about 6-11"
+    }
+   ],
+   "failure_modes": [
+    {
+     "message": "newcomer was not admitted as a validator on all nodes under chaos (V1: a precommit is missing)",
+     "count": 3,
+     "what_happened": "These counts come from the 7 traced failures; all 17 untraced failures in the 800-run measurement had the same message. In these 3, the other three nodes decided a height (1, 1 and 4) and moved on. The stuck node held that height's proposal, all 4 prevotes, and only its own precommit plus one other: 2 of the 3 it needed (quorum 267 of 400). chaosNet had dropped every copy of the 2 missing precommits, both direct sends and relays. Relays stop once a node decides, so no more copies were coming. With no quorum of any precommits, the node never armed the precommit timeout and sat at round 0 for the rest of the run. The others spent about 100 ms at the next height, between two 400 ms re-gossip ticks. The ticks fire at the same moment on all four nodes because they all start together. So the 9697404 re-gossip of the last commit never reached the stuck node."
+    },
+    {
+     "message": "newcomer was not admitted as a validator on all nodes under chaos (V2: the proposal is missing)",
+     "count": 4,
+     "what_happened": "The stuck node, at heights 1, 3, 4 and 5, missed all 3 copies of the deciding round-0 proposal: the proposer's send and two relays, every one dropped (shown in the drop log). It received a quorum of precommits for that block. The quorum of precommits armed the precommit timeout, so it timed out and moved to round 1, where it waited for good. This is the earlier diagnosis of 'stuck at round 1' in a more precise form: in every round-1 case the precommits were there and only the block was missing. Nothing at HEAD ever re-sends a decided proposal: commit() clears heightProposals, reGossipProposal sends only the current round's proposal at the current height, and relay happens only on first receipt. A later problem made it worse in most dumps. The test keeps paying 21 from node 0 to the newcomer, which has no node, until every node has admitted it. With one node stuck, 2 or more payments landed. The three running nodes were then left with 257 of 399 power, below the quorum of 267. They froze at about height 7 with 3 nil prevotes and no precommits. This came after the failure and did not cause it."
+    }
+   ],
+   "root_cause": "The other three nodes decide a height without one node, which has lost every copy of one decisive message: a precommit it needs, or the proposal. That node holds everything else and cannot decide. Two things fail to recover it.\n\nFirst, at 35b4e7f a decided proposal is never re-sent. commit() resets heightProposals, reGossipProposal sends only heightProposals[driver.Round()] at the current height, and relay fires only on first receipt at the current height.\n\nSecond, the last commit's precommits (9697404) go out only on the re-gossip tick, every cfg.Timeout (400 ms in the test, 3 s in production), and only while the next height's driver runs. In the test the next height took about 100 ms, and the ticks are in phase on all nodes. The others passed through it between ticks, after which no node held that height any more.\n\nSo the node needed a checkpoint. chaosNet serves none, so it stayed stuck. Production has the same gap: catchUpSources polls only the configured bootstrap peers when there are any, so a node whose bootstrap peers are down stays behind for good. If its vote is needed, the network halts at the next height, and the re-gossip there sends precommits but never the block.\n\nFix: commit() keeps the decided proposal (lastProposal) and immediately broadcasts it together with the commit's precommits (gossipLastCommit). Every re-gossip tick sends both again. A node already past that height drops them on its height checks.\n\nNo Go 1.27 effect: 6/200 under go1.27.3 and 6/200 under go1.26.4. The stall needs only lost messages and the tick phase. The node's timers are AfterFunc, which the asynctimerchan setting does not affect.",
+   "classification": "production bug",
+   "fixes": [
+    {
+     "commit": "631a8d5",
+     "summary": "chaos: send a height's decision as it commits, to a node still deciding it. New field Node.lastProposal is set in commit() from heightProposals[act.Round]. New helper gossipLastCommit broadcasts lastCommit.Votes and also lastProposal when lastProposal.Height == lastCommit.Height > 0. It is called at the end of commit() and from reGossipVotes, replacing that function's old loop over the last commit's votes. Production code grows by about 10 lines plus comments. Regression test TestTheCommitCarriesTheDecisionToANodeStillAtThatHeight: one node decides height 1. A second node, holding every prevote but not the proposal, is fed only what the first sent from its decisive precommits onward. It must then decide.",
+     "fails_without_fix": "Yes, checked in the scratch copy, by restoring 35b4e7f's node.go (and the same once in the worktree, restored straight after): window_test.go:254 'the node still at height 1 did not decide from what the deciding node sent as it committed'. It also fails with either half of the fix removed: without the commit-time send, and without the proposal in the decision. A first draft that only added the proposal to the periodic re-gossip passed the deterministic test but left V1 (missing precommits) untouched, which is why the commit-time send was added.",
+     "files": "node/node.go, node/window_test.go",
+     "lines": "node/node.go:111 (field), 795-822 (reGossipVotes and gossipLastCommit), 895 (lastProposal set in commit), 917 (gossipLastCommit call in commit); node/window_test.go:222-256 (test)"
+    }
+   ],
+   "rates_after": [
+    {
+     "config": "go1.27.3, go 1.27 line (ships), commit 631a8d5",
+     "failures": 0,
+     "runs": 200,
+     "load": "1-min load average 6.3-15.8 (higher than before); interleaved batches of 20, -race, GOLEDGER_CHAOS_SLACK=4, -p 1"
+    },
+    {
+     "config": "go1.26.4, go 1.22 line (the previous setup), same tree",
+     "failures": 0,
+     "runs": 200,
+     "load": "6.7-15.4"
+    },
+    {
+     "config": "go1.27.3 runtime, go 1.22 line, same tree",
+     "failures": 0,
+     "runs": 200,
+     "load": "7.9-13.4"
+    },
+    {
+     "config": "go1.26.4, go 1.22 line, GODEBUG=asynctimerchan=0, same tree",
+     "failures": 0,
+     "runs": 200,
+     "load": "8.3-16.4"
+    },
+    {
+     "config": "instrumented copy with the fix (same code; only the comment wording differs), 20 s deadline, 2 processes",
+     "failures": 0,
+     "runs": 600,
+     "load": "about 7-10"
+    },
+    {
+     "config": "every TestChaos* test, -count=5 per batch, 4 batches interleaved with 35b4e7f (180/180 passed on 35b4e7f)",
+     "failures": 0,
+     "runs": 180,
+     "load": "9-13.6"
+    }
+   ],
+   "suite": "All checks ran on the exact tree that became commit 631a8d5:\n- gofmt -l . prints nothing.\n- go vet ./... and go vet -C ui ./... pass.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice (node took 32.4 s and 34.5 s; consensus, ledger, signing, cmd/demo and cmd/server ok).\n- go test -C ui -race -count=1 ./... passed twice (27.5 s and 27.7 s).\n- No timing-sensitive failure came up, so no -count=20 rerun was needed.\n- Logs: <scratch>/ca/logs/suites/\n\nRate tables with load per batch:\n- <scratch>/ca/logs/before/summary.tsv\n- <scratch>/ca/logs/after/summary.tsv\n\nFailure traces (per-node event log plus chaosNet drop log): <scratch>/ca/logs/diag2/fail-*.txt",
+   "doubts": "1. The GODEBUG=asynctimerchan=1 comparison cannot be run as asked: go1.27.3 aborts with 'fatal error: removed GODEBUG \"asynctimerchan\" set to old value \"1\"'. To separate a runtime effect from a GODEBUG effect I used two other configurations instead: go1.27.3 with the go 1.22 line, and go1.26.4 with asynctimerchan=0. go126sync's 1/200 against 6/200 is not significant (Fisher p ≈ 0.12).\n2. Load was not controlled. The before batches ran at load average 3.6-11, with my instrumented runs and other agents' chaos tests running alongside. That probably explains 6/200 against the earlier 298/300 for the same go1.26.4 configuration. The after batches ran under more load (6.3-16), so the drop to zero is not a load artifact.\n3. A residual gap remains. A node two or more heights behind still needs a checkpoint, and chaosNet has none. It was not seen in 1,400 runs after the fix.\n4. A separate production gap is not fixed here. catchUpSources never falls back to the gossip peers when bootstrap peers are configured, so a node whose bootstrap peers are dead and which falls 2 or more heights behind never catches up. The fix would be small: poll bootstrap plus transport peers. It is out of scope for this test.\n5. Cost of the fix: every commit now re-sends the decided block once to all peers, and again on each re-gossip tick while the next height runs. That roughly doubles proposal traffic. Nodes already past that height drop it on the first height check.\n6. The test is unchanged, because its assertion is something the protocol promises. Two things about it are worth knowing. Its comment says there is no phantom validator, but the newcomer has no running node once it is admitted. Its retry loop keeps moving node 0's stake to the newcomer while any node lags, which turns one stuck node into a network halt."
+  },
+  {
+   "test": "TestChaosEquivocatorIsSlashedWithoutFork (node/chaos_test.go:600)",
+   "branch_head": "01f0f34fa2cf77600532a5c0ad50f646447d635b (chaos-equivocator: 35b4e7f + 7df27aa + 01f0f34)",
+   "rates_before": [
+    {
+     "config": "35b4e7f, go1.27.3 (go 1.27, toolchain go1.27.3, as shipped), test unchanged (10% loss); two interleaved sets of 200",
+     "failures": 1,
+     "runs": 400,
+     "load": "1-min load 4.3-15.5, mean about 9; other agents running chaos tests"
+    },
+    {
+     "config": "35b4e7f, go1.26.4 with go 1.22 and no toolchain line (the previous setup), GOTOOLCHAIN=local",
+     "failures": 1,
+     "runs": 200,
+     "load": "5.2-15.3, mean 9.3"
+    },
+    {
+     "config": "35b4e7f, go1.26.4 with go 1.26 (gets the 1.23+ GODEBUG defaults on the old runtime; GODEBUG=asynctimerchan=1 aborts under go1.27.3 because the setting was removed)",
+     "failures": 0,
+     "runs": 200,
+     "load": "5.7-16.2, mean 9.0"
+    },
+    {
+     "config": "8f4b3cb, go1.27.3",
+     "failures": 10,
+     "runs": 200,
+     "load": "5.7-14.2, mean 9.4"
+    },
+    {
+     "config": "8f4b3cb, go1.26.4 (go 1.22)",
+     "failures": 6,
+     "runs": 200,
+     "load": "5.7-13.9, mean 9.3"
+    },
+    {
+     "config": "6ad9e3b, go1.27.3",
+     "failures": 6,
+     "runs": 200,
+     "load": "6.1-12.4, mean 9.1"
+    },
+    {
+     "config": "bf7c886 (parent of 9697404), go1.27.3",
+     "failures": 5,
+     "runs": 200,
+     "load": "8.0-11.2, mean 9.3"
+    },
+    {
+     "config": "9697404, go1.27.3",
+     "failures": 0,
+     "runs": 200,
+     "load": "8.1-11.4, mean 9.4"
+    },
+    {
+     "config": "35b4e7f with event tracing (scratch copy), go1.27.3, 10% loss",
+     "failures": 1,
+     "runs": 600,
+     "load": "about 7-11"
+    },
+    {
+     "config": "35b4e7f traced, 20% loss",
+     "failures": 1,
+     "runs": 100,
+     "load": "about 9-12"
+    },
+    {
+     "config": "35b4e7f traced, 30% loss, interleaved with the fix (two sets of 150)",
+     "failures": 15,
+     "runs": 300,
+     "load": "5.0-16 (set means 10.5 and 7.0)"
+    },
+    {
+     "config": "8f4b3cb traced, go1.27.3, 10% loss",
+     "failures": 6,
+     "runs": 120,
+     "load": "7.0-8.5"
+    },
+    {
+     "config": "9a60643 traced, go1.27.3, 10% loss",
+     "failures": 5,
+     "runs": 123,
+     "load": "about 8-11"
+    }
+   ],
+   "failure_modes": [
+    {
+     "message": "the equivocating validator was not slashed out on all honest nodes (R1: precommit lost at the slashing height)",
+     "count": 9,
+     "what_happened": "Traced at 35b4e7f: 1 of 600 runs at 10% loss, and 9 of the 15 failures at 30% loss. At height 2, the height whose block slashes the double-signer, one honest precommit was dropped on all three paths to one node (the direct send and both relays). With the double-signer counted out, that node needs all 4 honest precommits. The others decided, and at height 3 the double-signer was gone, so 3 of 4 was a quorum and they did not wait. The last commit reaches a node still at height 2 only through re-gossip, every 400 ms. All nodes start together, so their ticks fall at the same moments. The others finished height 3 in about 150 ms, between two ticks, and from then on re-gossiped later commits. The node stayed at height 2 for good. Example trace: <scratch>/eqv/logs/diag-head/fail-1793118681568134680.txt (n3's height-2 round-1 precommit was dropped toward n1 by n3, n2 and n0; the others committed h2 at about 2105 ms and h3 at about 2221-2262 ms; the ticks came at about 2000 ms and 2401 ms)."
+    },
+    {
+     "message": "the equivocating validator was not slashed out on all honest nodes (R2: decided on the double-signer's vote before precommitting)",
+     "count": 6,
+     "what_happened": "Traced: 5 of the 15 failures at 35b4e7f at 30% loss, 1 at 20% loss, and 1 of 6 at 8f4b3cb at 10% loss. One node got the double-signer's precommit for the block before its conflicting one, plus three honest precommits, and decided before it had a prevote quorum, so it never precommitted. The other honest nodes had seen both of the double-signer's precommits, so VoteSet counts it out. While it is in the set they need all 4 honest precommits, and the decider's never existed. The commit the decider re-gossips has the same 3 honest votes plus the double-signer's. The decider waited at the next height for them, so the whole network halted. Example: <scratch>/eqv/logs/diag-c99/fail-1793118304923972207.txt (n2 decided at 311 ms with byz,n0,n1,n3 and had only n1,n2,n3 prevotes)."
+    },
+    {
+     "message": "the equivocating validator was not slashed out on all honest nodes (R2': same, but a fourth honest node precommitted nil; NOT fixed)",
+     "count": 4,
+     "what_happened": "1 of the 15 failures at 35b4e7f at 30% loss, and all 3 of the 300 runs that failed with the fix at 30% loss. Never seen at the test's 10% loss. The decider precommitted the block, but its quorum counted the double-signer, and the fourth honest node precommitted nil in that round after its prevote timeout. The nodes that count the double-signer out hold 3 honest precommits for the block. They can never get a fourth, because the decider has moved to the next height. Only a checkpoint catch-up resolves this."
+    },
+    {
+     "message": "the equivocating validator was not slashed out on all honest nodes (M1 at 8f4b3cb, fixed by 9697404)",
+     "count": 4,
+     "what_happened": "4 of 6 traced failures at 8f4b3cb. Before the slash, an honest precommit was dropped on all three paths to one node. The deciders moved to the next height. There they still needed that node, but nobody ever re-sent the precommit, so all nodes waited for good. 9697404 (re-gossip of lastCommit.Votes while the next height runs) fixes this: bf7c886 failed 5/200 and 9697404 0/200 under go1.27.3. TestReGossipCarriesTheLastCommitToANodeStillAtThatHeight fails at head if that loop is removed."
+    },
+    {
+     "message": "network stopped committing after the slash",
+     "count": 2,
+     "what_happened": "Not reproduced at 8f4b3cb, 6ad9e3b, bf7c886, 9697404, 35b4e7f or with the fix: 0 in more than 2,000 untraced and 1,000 traced runs. Reproduced at 9a60643, 2 of 123 traced runs. Mechanism is E14. A precommit timeout armed at an earlier height fired into the next height's driver and moved one of the three post-slash nodes to round 1 before it precommitted in round 0, so the nodes split across rounds and none reached a quorum. Meanwhile the fourth node sat a height behind, because the old driver had taken its proposal in the post-commit window. 4a7fa73 (E14, before 8f4b3cb) fixed this by scoping timers to their height and holding window proposals. Detector output: <scratch>/eqv/scripts/stale9a6.py found such a timer in 4 of the 5 failures at 9a60643, including both of these."
+    }
+   ],
+   "root_cause": "Before the slash commits, the network has no spare votes. There are 4 honest validators plus the double-signer, each with power 100, and the quorum is 334. Every node that has seen both of the double-signer's conflicting votes counts it out, so it needs all 4 honest votes. chaosNet has no checkpoint catch-up source, so a node left at a height without what it needs to finish it stays there for good.\n\nThe test has failed this way for three different reasons over time:\n1) At 9a60643: E14 stale timers and post-commit-window proposals, which caused both failure messages. Fixed by 4a7fa73.\n2) At 8f4b3cb: about 5%, with no Go-version effect (10/200 under go1.27.3, 6/200 under go1.26.4). Mostly an honest precommit lost on every path to one node while the deciders, still needing it, never re-sent it. Fixed by 9697404: bf7c886 5/200, 9697404 0/200.\n3) At 35b4e7f it still fails, 1/400 under go1.27.3 and 1/200 under go1.26.4. There are two production liveness gaps:\n   - R1: at the slashing height, the others stop needing the straggler at the next height. They pass that height before their in-phase 400 ms re-gossip, so the straggler never gets the commit.\n   - R2: a node decides on a quorum that counted the double-signer's vote, before it has precommitted itself. The nodes that counted the double-signer out can never complete that quorum.\n\nIn production, both gaps are repaired by checkpoint catch-up within one poll (at least 3 s), and the whole network waits during that time before the slash. A node whose bootstrap peers are dead never recovers, because catchUpSources then returns only those peers.\n\nE35 is why the decider in R2 still records the evidence, from the late conflicting precommit, so the slash proceeds. E13 matters because in static mode the slashed key keeps its seat, so R2 is possible at every height, not just until the slash.\n\nA third case remains: R2', where the decider did precommit but a fourth honest node precommitted nil. It cannot be fixed with honest votes alone.",
+   "classification": "production bug",
+   "fixes": [
+    {
+     "commit": "7df27aafc86056da046970eeb29670adf4265072",
+     "summary": "chaos: precommit the block a node decides before it has precommitted. When the driver decides a round it has not precommitted in (sentPrecommit false), it first casts its precommit for the decided block, so the commit it hands on carries an honest vote that the nodes counting the double-signer out can use. The block is already decided, so the vote cannot complete any other quorum. The vote goes through castVote and the sign log as usual.",
+     "fails_without_fix": "TestDriverPrecommitsTheBlockItDecides (consensus/driver_test.go:496) fails when consensus/driver.go is reverted to 35b4e7f: 'a node that counts the double-signer out could not complete the quorum the decider saw' (6 of 6 runs; passes 200 of 200 with the fix, keys random each run). At 30% loss in traced runs, R2 went from 5 of 300 to 0 of 300.",
+     "files": "consensus/driver.go, consensus/driver_test.go",
+     "lines": "consensus/driver.go:367-379 (decide branch of step1)"
+    },
+    {
+     "commit": "01f0f34fa2cf77600532a5c0ad50f646447d635b",
+     "summary": "chaos: send the commit as soon as a node decides. commit() now broadcasts the precommits that decided the height at once, through a new sendLastCommit that reGossipVotes also uses, instead of only on the next 400 ms re-gossip tick. A node still at that height gets them before the others can finish the next height. The reGossipVotes comment was updated to match.",
+     "fails_without_fix": "TestDecidingNodeSendsTheCommitAtOnce (node/window_test.go:227) fails when node/node.go is reverted to 35b4e7f: 'the node still at height 1 did not decide it from what the deciding node sent as it decided' (passes 200 of 200 with the fix). At 30% loss in traced runs, R1 went from 9 of 300 to 0 of 300.",
+     "files": "node/node.go, node/window_test.go",
+     "lines": "node/node.go:795-798 (comment), 807-819 (sendLastCommit), 905 (call in commit)"
+    }
+   ],
+   "rates_after": [
+    {
+     "config": "01f0f34, go1.27.3 (as shipped), test unchanged (10% loss); interleaved with a 35b4e7f control that went 0/200",
+     "failures": 0,
+     "runs": 200,
+     "load": "7.3-11.2, mean 9.5"
+    },
+    {
+     "config": "01f0f34, go1.26.4 with go 1.22 (previous setup)",
+     "failures": 0,
+     "runs": 200,
+     "load": "7.8-11.2, mean 9.6"
+    },
+    {
+     "config": "01f0f34, go1.26.4 with go 1.26",
+     "failures": 0,
+     "runs": 200,
+     "load": "8.0-10.8, mean 9.5"
+    },
+    {
+     "config": "01f0f34 traced, 30% loss, interleaved with 35b4e7f (which failed 15/300: R1 9, R2 5, R2' 1)",
+     "failures": 3,
+     "runs": 300,
+     "load": "5.1-16.4 (set means 10.5 and 6.9); all 3 failures are R2'"
+    },
+    {
+     "config": "all 9 TestChaos* tests, go1.27.3, 16 runs each (144 test runs), interleaved with 35b4e7f, which also had 0/144",
+     "failures": 0,
+     "runs": 144,
+     "load": "8.6-11.0, mean 9.6"
+    }
+   ],
+   "suite": "These checks ran on the final tree, under go1.27.3, while other agents' runs kept the 1-min load at about 8.5-10:\n- gofmt -l . printed nothing.\n- go vet ./... and go vet -C ui ./... were clean.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice; node took 33.8 s both times, consensus 14.3 s and 13.0 s.\n- go test -C ui -race -count=1 ./... passed twice, in 25.9 s and 27.5 s.\n- The new tests and TestReGossipCarriesTheLastCommitToANodeStillAtThatHeight also passed with -race -count=200.\n- No timing-sensitive failure occurred, so no -count=20 reruns were needed.\n\nLogs are in <scratch>/eqv/logs/suite/.",
+   "doubts": "1) R2' is not fixed. It appeared 1/300 at 35b4e7f and 3/300 with the fix at 30% loss, and never at the test's 10% loss. A node decides on a quorum that counted the double-signer, and a fourth honest node had precommitted nil, so the nodes that count the double-signer out hold 3 of the 4 honest votes they need. Two ways to close it, both the owner's call:\n   - Count a double-signer's precommit when it is part of a commit for the block. Commit.Verify, and so checkpoint catch-up, already does this. It contradicts docs/consensus.md ('a double-signer cannot help form a quorum') and the burn principle.\n   - Rely on catch-up, which chaosNet lacks.\n\n2) catchUpSources returns only the bootstrap peers when any are configured. A node whose bootstrap peers are dead therefore never falls back to its gossip peers, and never recovers from R2' or from a height it lacks the block for. Before the slash, the whole network waits on such a node. A one-line fallback would fix it; I left it alone because the test never takes that path.\n\n3) A node that lacks the decided block of its own height has no gossip recovery once its peers move on, because nobody re-sends the decided proposal. I did not see this in this test at head. It is the 'stuck without the proposal' mode reported for TestChaosDynamicAdmissionConverges, and that agent may also be editing reGossipVotes or commit, so a merge may conflict with 01f0f34.\n\n4) At the test's own 10% loss the improvement is not statistically shown: 2/800 before, 0/600 after, across toolchains. The evidence is the traced 30%-loss runs (R1 and R2 went from 14 of 300 to 0) and the deterministic tests.\n\n5) Traced runs log every event, which slows the -race event loop, so the mix of failure modes in traced runs may differ from untraced runs.\n\n6) GODEBUG=asynctimerchan=1 makes go1.27.3 abort ('removed GODEBUG asynctimerchan set to old value'). The runtime/GODEBUG split therefore used go1.26.4 with a go 1.26 line instead. No Go 1.27 effect showed: 8f4b3cb failed 10/200 under go1.27.3 and 6/200 under go1.26.4, and 35b4e7f failed 1/400, 1/200 and 0/200 across the three setups.\n\n7) Each node now broadcasts the last commit once more per height (N small votes). Receivers already past that height drop them with a digest comparison before any signature check.\n\n8) The driver now signs a precommit after it already holds a precommit quorum. I argued this is safe: the vote is for the decided block, in a round the node never precommitted in, and goes through the sign log. Still, it changes the protocol and deserves review.\n\n9) post-emudhra-phase1 moved to 7024176 while I worked. I did not touch it, and this branch sits on 35b4e7f.\n\nScripts, trees and every trace are under <scratch>/eqv (logs/, scripts/classify.py, scripts/patch_diag*.py, scripts/interleave.sh)."
+  },
+  {
+   "test": "TestChaosLossDupReorderKeepsAgreementAndProgress (node/chaos_test.go:320)",
+   "branch_head": "49c69ae0e6ddb88fd97f69f35f5ff3aeb81be633 (branch chaos-lossdup, parent 35b4e7f)",
+   "rates_before": [
+    {
+     "config": "go1.27.3, go 1.27 line, GOTOOLCHAIN=auto (ships). 1/200 in the four-config round robin (16:12-17:10) plus 2/200 in an interleaved before/after pair (16:57-17:25). 45/400 runs ended with a validator stranded 2+ heights behind. Logs: <scratch>/lossdup/logs-before/127.log and <scratch>/lossdup/logs-127pair/127-before.log",
+     "failures": 3,
+     "runs": 400,
+     "load": "1-min load 3.7-16.4 at batch start (other agents running)"
+    },
+    {
+     "config": "go1.26.4, go 1.22 line, no toolchain line, GOTOOLCHAIN=local (old setup; tree <scratch>/chaos-lossdup-old). 4/200 in the round robin plus 3/100 in the timer experiment. 28/300 stranded.",
+     "failures": 7,
+     "runs": 300,
+     "load": "3.7-14.8"
+    },
+    {
+     "config": "go1.26.4, go 1.26 line (sync timer channels and new defaults on the old runtime). 3/200 plus 0/100. 34/300 stranded.",
+     "failures": 3,
+     "runs": 300,
+     "load": "4.0-12.4"
+    },
+    {
+     "config": "go1.26.4, go 1.26 line, GODEBUG=asynctimerchan=1 (isolates the timer-channel setting). 12/100 stranded.",
+     "failures": 1,
+     "runs": 100,
+     "load": "5.8-15.8"
+    },
+    {
+     "config": "go1.27.3, go 1.22 line (old GODEBUG defaults on the new runtime; asynctimerchan cannot be set on 1.27). 18/200 stranded.",
+     "failures": 2,
+     "runs": 200,
+     "load": "3.9-11.4"
+    },
+    {
+     "config": "go1.27.3 with GODEBUG=asynctimerchan=1: cannot run. Both the go command and the test binary die at startup with 'fatal error: removed GODEBUG \"asynctimerchan\" set to old value \"1\" in environment', because the setting was removed in Go 1.27. Log: <scratch>/lossdup/suite/go127-asynctimerchan1.log",
+     "failures": 0,
+     "runs": 0,
+     "load": "n/a"
+    },
+    {
+     "config": "Cross-check on another test with the same mechanism: TestChaosDynamicAdmissionConverges, go1.27.3, unchanged HEAD, interleaved with the fixed binary",
+     "failures": 9,
+     "runs": 300,
+     "load": "8.9-12.4"
+    }
+   ],
+   "failure_modes": [
+    {
+     "message": "no payment landed despite 3s of traffic under chaos",
+     "count": 15,
+     "what_happened": "Node 0 got stranded at a height of about 5 or lower, before its first payment block committed. Example trace (<scratch>/lossdup/diag/traces/nopay-1793117973297491259.trace): all three copies of the h5 proposal to n0 were dropped (n2->n0, then the n3 and n1 relays). n1-n3 decided h5 between 0.75 and 0.79 s and moved on. n0 held the 3 precommits but no proposal, prevoted nil at its 400 ms propose timeout and went through useless rounds. Final heights were [5 42 42 42]. Node 0's payments carry BlockID = its own height + 3, so the others refuse them as stale; node 0 never commits again and the merchant balance it sees stays 0 for the whole 16 s wait."
+    },
+    {
+     "message": "under 12% loss+dup+reorder the network should still commit steadily: went 2 -> 5",
+     "count": 1,
+     "what_happened": "Node 0 was stranded at height 2 from the start of the measured window, so heights were [2 5 5 5]. With one validator stranded, the other three need every vote for quorum and have no slack: lost proposals and votes cost rounds with growing timeouts ((r+1)x400 ms). Across 20 such runs the three committed 3-10 blocks in 4 s (median 8), against 16-30 with four live validators. That is the same mechanism as the 'went 2 -> 7' failure in the earlier go1.27.3 suite run."
+    }
+   ],
+   "root_cause": "A validator is left one height behind and never recovers, because after a height is decided nothing re-sends that height's proposal.\n\nCode path:\n- A proposal is broadcast once by the proposer and relayed once by each node that takes it (onProposal, then relay).\n- reGossipProposal re-sends only the driver's current round at the current height.\n- Three of four validators are a quorum and decide in about 100 ms, before the first 400 ms re-gossip tick. From then on the decided proposal is never sent again.\n- A precommit is relayed only by nodes still at that height (countable), so a late precommit has a single path.\n- The commit's precommits (reGossipVotes, lastCommit.Votes) went out without the proposal, and only on the 400 ms tick. By then the others, at about 6 blocks/s, had usually moved past the next height and were sending a later commit.\n\nThe driver decides only when it holds the proposal of the precommit round. In 10 traced strandings, 5 nodes held a 2/3 precommit quorum but no proposal and 5 held the proposal one precommit short. Their propose and precommit timers kept moving them to new rounds that could never decide. A node keeps no blocks, so only a checkpoint from catchUpLoop (every 3 s) can free it. chaosNet has no catch-up source. Neither has a production node whose bootstrap peers are dead, because catchUpSources returns only the configured bootstrap peers whenever any are set.\n\nScratch end-to-end reproduction (<scratch>/lossdup/repro/zz_halt_repro_test.go): one validator down after height 1, plus one validator with a dead bootstrap peer that lost every copy of the height-1 proposal. On HEAD the 4-validator network halts at height 2 for good (3/3 runs). With the fix it resumes in 0.55 s.\n\nMechanism evidence from instrumented runs (<scratch>/lossdup/diag), 80 runs each:\n- baseline: 10 stranded, 2 failed\n- re-sending on the tick only: 7 stranded, 1 failed (not enough)\n- re-sending at commit and on the tick: 0 stranded, 0 failed\n\nProgress threshold: the test asks for 6 blocks in 4 s. That is not stronger than what the protocol delivers at its timeouts with four live validators: at least 16 blocks in all 1140 unstranded runs before the fix, at least 18 in 1000 runs after. Only runs with a stranded validator fell to 3-10. The test is unchanged.\n\nGo version: go1.27.3 does not fail more often. Before the fix the shipped config failed 3/400 and the old setup 7/300, and every configuration stranded a validator in 10-12% of runs. The earlier 2/22 against 0/20 was noise. The requested split cannot be run as asked, because GODEBUG=asynctimerchan=1 is fatal on go1.27.3. On go1.26.4 with the go 1.26 line, asynctimerchan=1 changed nothing (1/100 against 0/100 failures, 12/100 stranded in both).",
+   "classification": "production bug",
+   "fixes": [
+    {
+     "commit": "49c69ae0e6ddb88fd97f69f35f5ff3aeb81be633",
+     "summary": "In node/node.go, commit() now keeps the decided proposal (lastProposal = heightProposals[act.Round]) and calls the new sendLastCommit(). sendLastCommit broadcasts lastCommit.Votes and that proposal (only when its height equals lastCommit's, so stale or zero values are never sent). reGossipVotes now calls sendLastCommit instead of sending lastCommit.Votes itself. A validator still at the decided height therefore gets the full certificate as the others commit, while it is at most one height behind, and again on every re-gossip tick. Production change: about 20 lines including comments. The regression test TestTheLastCommitCarriesItsProposal is in node/window_test.go; it is deterministic, uses handNet and needs no timers.",
+     "fails_without_fix": "TestTheLastCommitCarriesItsProposal was checked in <scratch>/lossdup/revert:\n- On the HEAD node.go it fails at 're-gossip: false', and at 're-gossip: true' when that case runs alone.\n- It also fails when only the send at commit is removed.\n- It also fails when the send at commit carries the proposal but not the precommits.\n\nThe scratch end-to-end halt reproduction fails 3/3 on HEAD and passes 3/3 with the fix.",
+     "files": "node/node.go, node/window_test.go",
+     "lines": "node/node.go:111 (field), 788-825 (reGossipVotes and sendLastCommit), 896 (lastProposal), 918 (send at commit); node/window_test.go:222-266"
+    }
+   ],
+   "rates_after": [
+    {
+     "config": "go1.27.3, go 1.27 line (ships): 0/200 in the four-config round robin plus 0/200 in the interleaved pair; 0/400 stranded. Logs: <scratch>/lossdup/logs-after and <scratch>/lossdup/logs-127pair",
+     "failures": 0,
+     "runs": 400,
+     "load": "4.9-15.4"
+    },
+    {
+     "config": "go1.26.4, go 1.22 line (old setup); 0 stranded",
+     "failures": 0,
+     "runs": 200,
+     "load": "5.0-13.6"
+    },
+    {
+     "config": "go1.26.4, go 1.26 line; 0 stranded",
+     "failures": 0,
+     "runs": 200,
+     "load": "4.6-10.9"
+    },
+    {
+     "config": "go1.27.3, go 1.22 line; 0 stranded",
+     "failures": 0,
+     "runs": 200,
+     "load": "5.9-12.2"
+    },
+    {
+     "config": "Cross-check: TestChaosDynamicAdmissionConverges on go1.27.3 with the fix (before: 9/300)",
+     "failures": 0,
+     "runs": 300,
+     "load": "9.1-11.8"
+    }
+   ],
+   "suite": "All checks were run on the committed tree:\n- gofmt -l . prints nothing.\n- go vet ./... and go vet -C ui ./... pass.\n- GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice (node 33.1 s and 33.6 s).\n- go test -C ui -race -count=1 ./... passed twice (24.6 s and 23.8 s).\n- Load during these runs was 4.5-6.5. Logs: <scratch>/lossdup/final-suite\n\nEarlier, during development, both suites also passed twice each. Every TestChaos* ran 5 times with the fix: 45/45 passed. No timing-sensitive failure appeared, so no -count=20 rerun was needed.",
+   "doubts": "How the numbers were measured: compiled race test binaries (go test -c -race) run directly with -test.count=10 per batch, which is equivalent to -p 1 on one package. The scratch copies had one added t.Logf line (PROGRESS heights) so stranding could be counted; it is not committed and does not change pass or fail. With failures at about 1-2%, the before/after contrast in failures alone is modest (3/400 against 0/400 for the shipped config). The strong signal is stranding: 137/1300 against 0/1000. An early sign that the old setup stranded less (1/68) disappeared with more data (28/300).\n\nThe task's premise about GODEBUG is wrong for this toolchain: GODEBUG=asynctimerchan=1 under go1.27.3 is fatal at startup, not a way back to async timers. Any earlier run made with it did not execute tests.\n\nCost of the fix: each node now re-sends the decided block once per commit and once per re-gossip tick, plus a quorum of precommits at commit. In this 4-node setup that roughly doubles proposal sends per height. Receivers drop the copies cheaply, but large blocks cost bandwidth. The cheaper tick-only variant was measured as not enough (7/80 stranded against 10/80). With production timing (3 s tick, about 1 s blocks), only the send at commit reaches a node that is one height behind in time.\n\nNot fixed, separate production gap: a node more than one height behind still needs a checkpoint. catchUpSources ignores live gossip peers whenever bootstrap peers are configured, so a node whose bootstrap peers are dead never catches up. It is not on this test's path, because chaosNet has no catch-up source at all.\n\nTestChaosDynamicAdmissionConverges (another agent's test) strands the same way, and this fix took it from 9/300 to 0/300 in my cross-check; its owner should confirm."
+  }
+ ],
+ "verifications": [
+  {
+   "test": "TestChaosDynamicAdmissionConverges (node/chaos_test.go:741), failing with \"newcomer was not admitted as a validator on all nodes under chaos\" (chaos_test.go:782)",
+   "confirmed": true,
+   "rates": [
+    {
+     "config": "Pre-fix: export of post-emudhra-phase1 at f894ffe (node/, consensus/, ledger/ and signing/ are identical to 35b4e7f and to the branch's current head cd8229e). go1.27.3 selected by go.mod, -race, GOLEDGER_CHAOS_SLACK=4, -p 1. ABBA-interleaved batches of 20 against the fix, 50 pairs over two phases.",
+     "failures": 8,
+     "runs": 1000,
+     "load": "1-min load 2.9-11.4 at batch start, with uptime logged before and after every batch. Phase 1 ran beside one instrumented diagnostic process, phase 2 beside the instrumented ABBA stream. All 8 failures hit chaos_test.go:782 after the full 60.1-60.3 s deadline."
+    },
+    {
+     "config": "Fix: export of chaos-admission at 631a8d5, same configuration, interleaved with the row above",
+     "failures": 0,
+     "runs": 1000,
+     "load": "2.7-10.8. Fisher exact against the row above: two-sided p = 0.0077."
+    },
+    {
+     "config": "Instrumented pre-fix (adds only a commit log and a node-state dump on failure), GOLEDGER_CHAOS_SLACK=1 (15 s deadline), ABBA-interleaved against the instrumented fix",
+     "failures": 6,
+     "runs": 500,
+     "load": "4.7-8.2"
+    },
+    {
+     "config": "Instrumented fix, same stream",
+     "failures": 0,
+     "runs": 500,
+     "load": "4.5-7.8. Fisher against the row above: p = 0.031. All pre-fix runs (24/1940) against all fix runs (0/1500): p = 2e-6."
+    },
+    {
+     "config": "Instrumented pre-fix, standalone stream run beside phase 1 (slack 1)",
+     "failures": 10,
+     "runs": 440,
+     "load": "about 8-11"
+    },
+    {
+     "config": "TestTheCommitCarriesTheDecisionToANodeStillAtThatHeight on 631a8d5",
+     "failures": 0,
+     "runs": 3
+    },
+    {
+     "config": "Same test with node.go reverted to 35b4e7f",
+     "failures": 3,
+     "runs": 3,
+     "load": "every run fails at window_test.go:254, as the report says"
+    },
+    {
+     "config": "Same test with only the gossipLastCommit() call in commit() removed",
+     "failures": 3,
+     "runs": 3
+    },
+    {
+     "config": "Same test with only the proposal broadcast in gossipLastCommit removed",
+     "failures": 3,
+     "runs": 3
+    },
+    {
+     "config": "My scratch tests (not on any branch): the exact stuck states seen in failures, fed only what the deciding node sends once past the height. V1: proposal, 4 prevotes and 2 of the 3 needed precommits at round 0. V2: at round 1 after timeouts, holding a precommit quorum but no proposal. Run with the fix.",
+     "failures": 0,
+     "runs": 4
+    },
+    {
+     "config": "Same scratch tests with node.go reverted (the deciding node sends 0 messages after it commits)",
+     "failures": 4,
+     "runs": 4
+    },
+    {
+     "config": "GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... on 631a8d5",
+     "failures": 0,
+     "runs": 2,
+     "load": "1-min load 2.3-8.8; node package took 34.0 s and 32.2 s; cmd/demo, cmd/server, consensus, ledger and signing ok"
+    },
+    {
+     "config": "go test -C ui -race -count=1 ./... on 631a8d5",
+     "failures": 0,
+     "runs": 2,
+     "load": "4.9-10.1; 27.6 s and 26.9 s"
+    }
+   ],
+   "problems": [
+    {
+     "severity": "minor",
+     "detail": "The investigator's before and after measurements were not interleaved with each other: before ran 16:11-16:38 and after ran 16:40-16:50, interleaved only across toolchain configurations. Their 6/200 against 0/200 alone gives only p = 0.03. The pre-fix rate also varies a lot over time. My uninstrumented pre-fix side had 3 of its 8 failures in its first 100 runs and then 0 in 400, while the instrumented stream failed 10/440 in the same window. Passing-run durations were identical (0.66-0.68 s), so this is noise and load, not the instrumentation. My ABBA data (8/1000 against 0/1000, p = 0.008) settles it."
+    },
+    {
+     "severity": "minor",
+     "detail": "The cost note understates the extra traffic. At every commit, every node now re-sends every precommit in the commit to all peers, not only the block: about N x |commit| x (N-1) extra vote messages per height across the network, O(N^3). Before the fix that burst went out only on re-gossip ticks during the next height. It is negligible at 4 validators but worth stating for large validator sets."
+    },
+    {
+     "severity": "minor",
+     "detail": "The new regression test pins one stuck state: round 0, no proposal, no precommits held. It does not pin the two states actually seen in failures: V1 (proposal, all prevotes, 2 of 3 precommits) and V2 (round 1 after timeouts, precommit quorum, no proposal). My scratch tests show the fix resolves both and the reverted code resolves neither, so this is a coverage gap, not a defect."
+    },
+    {
+     "severity": "minor",
+     "detail": "The 'production bug' label is narrower than stated. Without Bootstrap configured, catchUpSources falls back to the gossip peers (HTTPTransport.Peers). A production node stuck in V1 or V2 then catches up from a checkpoint within max(3 s, 5 x MinBlockInterval). The stall is permanent only when bootstrap peers are configured but unreachable, or when there is no checkpoint source, as in chaosNet. The fix still removes that stall and the halt at the next height when the stuck node's vote is needed."
+    },
+    {
+     "severity": "minor",
+     "detail": "Two residual gaps remain; neither was observed in 1,500 runs with the fix. (a) A node 2 or more heights behind still needs a checkpoint. (b) Suppose the decision came at round R, more than one round past the stuck node's round, and the proposal copy arrives before the precommits that trigger the round skip; HTTP Broadcast posts each message in its own goroutine and chaosNet randomizes delay, so this can happen. onProposal then drops it (p.Round > round()+1), and the next copy comes only with a re-gossip tick during the next height."
+    }
+   ],
+   "notes": "The root cause and the fix both hold up.\n\n**Rates (check 1):** the pre-fix side failed 8/1000 and the fix side 0/1000, in ABBA-interleaved batches under the required configuration. The instrumented ABBA stream gave 6/500 against 0/500. The fix side showed no failure, panic or data race in any stream.\n\n**Root cause, confirmed with my own instrumentation:** I added a node-state dump on failure to scratch copies only. All 16 instrumented pre-fix failures have the claimed shape: one node stuck 3 to 34 heights behind, holding everything for its height except one decisive message.\n- **V1 (6 cases):** round 0, precommit step, with the proposal, all 4 prevotes and 2 of the 3 precommits needed.\n- **V2 (10 cases):** round 1 after timeouts, with 3 prevotes and 3 precommits for the decided block but no proposal.\n\nUsually the other three then stall at height 7 with 5 validators and 399 power, as reported. When node 0 (the payer) is the stuck one, payments name stale block ids. No node ever admits the newcomer and the rest keep committing (heights 14-36), which matches the investigator's \"most dumps\" wording and their trace -085135. The investigator's own V1 trace (-965626) and height-1 V2 trace (-054378) show the drops they claim. Three of my V2 cases are node 3 at height 1-2 and have no drop log; at height 1 the proposal may also have arrived before evStart (onProposal drops it while heightVals is nil). The fix's own comment names that path, and the fix covers it.\n\n**Mechanism, at unit level:**\n- On 35b4e7f a re-gossip tick during the next height carries 3 precommits and 0 proposals. It rescues V1 but never V2.\n- After a commit, 35b4e7f sends nothing.\n- With the fix, both the commit-time send and the tick rescue both states.\n- Code reading confirms the rest. commit() resets heightProposals, reGossipProposal sends only the current round, relay fires only on first receipt at the current height, and chaosNet has no Peers() or checkpoint source.\n\n**Regression test (check 2):** it passes 3/3 with the fix. It fails 3/3 at window_test.go:254 with node.go reverted, and 3/3 with either half of the fix removed.\n\n**Code review (check 3):**\n- The diff touches only node/node.go (+19/-6) and node/window_test.go (pure addition). chaos_test.go is unchanged, so no assertion is weakened. The existing count-based tests are unaffected: votes_test.go takes its baseline after h.commit, and the proposal_relay tests never cross a commit.\n- Nothing changes in signing (SignProposal, VerifyProposal, SignVote), ledger digests, persistence (Checkpoint, sign log), or the Message wire types. lastProposal lives only in memory, and its guard (Height > 0 and equal to lastCommit.Height) also filters a stale value after fastForward or a restart.\n- Safety is unchanged: only messages signed by their authors are re-sent, and every check applies on receipt. Evidence.Valid compares digests before signatures, so nodes already past the height drop the re-sent precommits cheaply.\n- The fix is minimal: about 10 net code lines, reusing the 9697404 loop. gofmt and go vet are clean, including -C ui.\n\n**Suites (check 4):** both pass twice; see the rates table.\n\n**Housekeeping:**\n- I did not modify or push any worktree or branch. The investigator's worktree is clean at 631a8d5 with no upstream.\n- post-emudhra-phase1 moved from f894ffe to cd8229e during my runs. The new commits touch only review docs, so the baseline still holds.\n- The investigator's \"No Go 1.27 effect\" claim was not re-measured; I ran only go1.27.3, as the task asked.\n\nFiles are in <scratch>/:\n- Rate logs with uptime, each directory with a summary.tsv: verify-chaos-admission-logs/rates/, verify-chaos-admission-logs/rates2/, verify-chaos-admission-logs/diag-ab/, verify-chaos-admission-logs/diag-base/\n- Suite logs: verify-chaos-admission-logs/suites/\n- Trees: verify-chaos-admission (fix), verify-chaos-admission-base (pre-fix), verify-chaos-admission-mut/{reverted,nocommitsend,noproposal,extra-fix,extra-rev}, verify-chaos-admission-diag/{base,fix}\n- My scratch tests: verify-chaos-admission-mut/extra-fix/node/zz_verify_stuck_states_test.go and verify-chaos-admission-mut/extra-fix/node/zz_verify_regossip_test.go\n- Scripts: verify-chaos-admission-tools/ (rates.sh, rates_ab.sh, diag.sh, instrument.py, classify.py, fisher.py, suites.sh)"
+  },
+  {
+   "test": "TestChaosLossDupReorderKeepsAgreementAndProgress (node/chaos_test.go:320). Fix 49c69ae on chaos-lossdup, verified against post-emudhra-phase1 @cd8229e, whose node/ is identical to the fix's parent 35b4e7f.",
+   "confirmed": true,
+   "rates": [
+    {
+     "config": "BEFORE, exact committed test: post-emudhra-phase1 @cd8229e. go1.27.3 (selected by go.mod), -race, GOLEDGER_CHAOS_SLACK=4, compiled binary run with -test.count=10 per batch, one test process per stream. 22 batches interleaved ABBA with AFTER. All 5 failures were 'no payment landed'.",
+     "failures": 5,
+     "runs": 220,
+     "load": "1-min load 6.0-15.4 at batch start. Another verifier's 5 chaos streams were running, plus 2-4 streams of mine."
+    },
+    {
+     "config": "AFTER, exact committed test: chaos-lossdup @49c69ae, same settings, interleaved with the row above",
+     "failures": 0,
+     "runs": 220,
+     "load": "7.6-14.1"
+    },
+    {
+     "config": "BEFORE, instrumented copy (one deferred t.Logf of final heights, pass/fail unchanged), second concurrent ABBA stream. 20/220 runs ended with a validator stranded 2+ heights behind. Both failures were 'no payment landed', with node 0 stranded: [6 48 48 48] and [2 45 45 44].",
+     "failures": 2,
+     "runs": 220,
+     "load": "6.7-15.8"
+    },
+    {
+     "config": "AFTER, instrumented copy: 0/220 stranded",
+     "failures": 0,
+     "runs": 220,
+     "load": "6.0-14.2"
+    },
+    {
+     "config": "BEFORE, diagnostic copy of the scenario: assertions turned into logs, and each stranded node's held state classified after Stop. 19/140 stranded. Failures here = runs that would have failed (2, no payment, node 0 stuck at height 2 or 4).",
+     "failures": 2,
+     "runs": 140,
+     "load": "8.5-13.9"
+    },
+    {
+     "config": "AFTER, diagnostic copy: 0/70 stranded",
+     "failures": 0,
+     "runs": 70,
+     "load": "8.5-13.9"
+    },
+    {
+     "config": "Variant tick-only (fix without the send at commit), instrumented: 8/60 stranded, about the base rate",
+     "failures": 0,
+     "runs": 60,
+     "load": "8.9-13.2"
+    },
+    {
+     "config": "Variant commit-only (fix without the proposal on the tick), instrumented: 0/60 stranded",
+     "failures": 0,
+     "runs": 60,
+     "load": "8.9-13.2"
+    },
+    {
+     "config": "BEFORE at 25% and 30% loss (diagnostic copy): 8/20 stranded, 2 would fail",
+     "failures": 2,
+     "runs": 20,
+     "load": "6.0-11.5"
+    },
+    {
+     "config": "AFTER at 25% loss (30 runs) and 30% loss (20 runs): 0/50 stranded",
+     "failures": 0,
+     "runs": 50,
+     "load": "6.0-11.5"
+    },
+    {
+     "config": "Investigator's scratch halt repro (one validator down plus one node that lost the height-1 proposal and has a dead bootstrap peer), run in my copies on HEAD/base: the network halts at height 2. The commit-only variant also halts 3/3; the fix and the tick-only variant pass 3/3.",
+     "failures": 3,
+     "runs": 3,
+     "load": "about 11"
+    },
+    {
+     "config": "Regression test TestTheLastCommitCarriesItsProposal (plus the neighbouring window tests), fixed tree, -race -count=50",
+     "failures": 0,
+     "runs": 50,
+     "load": "about 10.6"
+    },
+    {
+     "config": "Full suites on the exported fix tree, twice each: GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... (node 34.3 s and 33.4 s) and go test -C ui -race -count=1 ./... (26.2 s and 25.3 s). All packages ok.",
+     "failures": 0,
+     "runs": 4,
+     "load": "8.1-9.6"
+    }
+   ],
+   "problems": [
+    {
+     "severity": "minor",
+     "detail": "Overlapping fixes on sibling branches edit the same node.go lines. chaos-admission 631a8d5 (gossipLastCommit) is functionally the same change: it keeps the decided proposal and sends it with the last commit at commit and on re-gossip. chaos-equivocator 01f0f34 is a subset that sends only the precommits at commit. Merging more than one will conflict, so take one (lossdup's or admission's) and drop the rest. This is not a defect of this fix."
+    },
+    {
+     "severity": "minor",
+     "detail": "The stranding split differs from the report's 5/5. In my 19 diagnosed base strandings, 15 lacked the round-0 proposal while holding the 3 round-0 precommits, and 4 held the proposal with only 2 precommits. In 3 of the 15, the node held the decided block as its own round-1 proposal (same digest) plus the round-0 quorum, and still could not decide, because the driver needs the proposal of the precommit round. The 4 one-short nodes sat in round 0 with no timer armed, which contradicts the report's line that timers kept moving them to new rounds. Neither point changes the conclusion: the fix covers both classes."
+    },
+    {
+     "severity": "minor",
+     "detail": "Cost: every node re-broadcasts the full decided block at every commit and on every re-gossip tick, even when no node is behind. That roughly doubles block traffic per height; the investigator disclosed this. The two parts serve different cases. The send at commit is what fixes the chaos test (tick-only strands 8/60, commit-only 0/60). The tick send of the proposal is what rescues the dead-bootstrap halt repro (commit-only halts 3/3). Both are justified, and the code (7 non-comment lines) is minimal for that."
+    }
+   ],
+   "notes": "Verdict: the root cause and the fix hold up.\n\n1. Failure rates (go1.27.3, -race, GOLEDGER_CHAOS_SLACK=4, ABBA batches of 10, uptime logged per batch):\n- Exact committed test: before 5/220, after 0/220.\n- Instrumented copy: before 2/220, after 0/220.\n- Combined: 7/440 against 0/440, one-sided Fisher p = 0.008.\n- Stranding is the strong signal: 20/220 against 0/220 instrumented (p = 6e-7). With the diagnostic runs added, 39/360 against 0/290.\n- Every failure was 'no payment landed' with node 0 stranded early. No data race and no panic appeared.\n\n2. Root cause, checked independently. A diagnostic copy of the scenario classifies each stranded node's held state after Stop. Every one of 19 base strandings (8 more at 25-30% loss) lacked part of the decided round's certificate: the round's proposal, or one of its precommits. No stranded node held a same-round proposal and a precommit quorum without deciding, so I found nothing pointing to a different bug.\n- The code path matches the report. reGossipProposal sends only the current round at the current height. Late precommits are relayed only by nodes at that height. Base re-gossip sent lastCommit.Votes but never the proposal, and only on the tick.\n- chaosNet has no catch-up source (no Bootstrap, no Peers()). catchUpSources returns only Bootstrap when it is set.\n- Unstranded runs made at least 20 blocks in 4 s before the fix and at least 24 after, against the test's floor of 6. The threshold is not too strict, and the test is unchanged.\n\n3. Regression test. TestTheLastCommitCarriesItsProposal fails on the full revert at re-gossip:false. A copy that runs only the re-gossip case fails at re-gossip:true. Partial reverts:\n- No send at commit: fails.\n- Commit sends only the proposal: fails.\n- Tick send without the proposal: fails the re-gossip case.\n- No proposal anywhere: fails both cases.\nWith the fix it passes 50/50 under -race, with no timers involved.\n\n4. Wire and storage: the diff is node/node.go plus one added test only. The signing fields, the ledger digest, Message/ProposalMsg, the Checkpoint JSON and the sign-log JSON are untouched. lastProposal is unexported and never serialized. Its guard (height > 0 and equal to lastCommit's height) never sends a zero or stale proposal, including after fastForward or a restart.\n- Identical late precommits are rejected in Evidence.Valid before any signature check, so the extra sends are cheap for nodes past the height.\n\n5. Suites and checks: gofmt -l . prints nothing. go vet passes in the root module and in ui. Both suites pass twice.\n\n6. Side claims:\n- GODEBUG=asynctimerchan=1 is fatal at startup on go1.27.3, for both the go command and the test binary.\n- The investigator's logs match their counts: 3/400 failed and 45/400 stranded before, 0 after.\n- I did not re-measure the go1.26.4 configurations.\n\nOther observations:\n- post-emudhra-phase1 moved during my run, to f29b1d6, which touches review docs only. I modified no worktree or branch.\n- Optional hardening: the guard could also check p.Block.StateDigest == lastCommit.BlockDigest. In practice the first-wins rule already makes them equal.\n\nEvidence, all under <scratch>:\n- Streams: vcl-run/streams/exact and vcl-run/streams/instr (summary.tsv plus per-batch logs with uptime).\n- Diagnostic runs: vcl-run/diag, using vcl-diag-base/node/zz_diag_test.go.\n- High-loss probe: vcl-run/probe.\n- Variant runs: vcl-run/variants.\n- Revert results: vcl-run/revert-results.txt (variant trees in vcl-revert).\n- Suite logs: vcl-run/suite.\n- Exported trees: verify-chaos-lossdup (fix) and verify-chaos-lossdup-base."
+  },
+  {
+   "test": "TestChaosEquivocatorIsSlashedWithoutFork (node/chaos_test.go:600)",
+   "confirmed": true,
+   "rates": [
+    {
+     "config": "Shipped test (10% loss), go1.27.3, -race, GOLEDGER_CHAOS_SLACK=4, -p 1, not instrumented. BASE = post-emudhra-phase1 at cd8229e (node/ and consensus/ byte-identical to 35b4e7f). 5 parallel streams of interleaved batches of 10, order alternating each round.",
+     "failures": 2,
+     "runs": 1000,
+     "load": "1-min 2.4-12.0, mean 9.7 (another agent's chaos streams also running)"
+    },
+    {
+     "config": "Same run, FIX = chaos-equivocator 01f0f34",
+     "failures": 0,
+     "runs": 1000,
+     "load": "2.4-12.0, mean 9.7"
+    },
+    {
+     "config": "Shipped 10% loss, instrumented copy, BASE. The only change is a state dump after Stop, so behaviour is identical. 6 streams, interleaved with FIX and the 30% hook config. Modes: R2 3, R1 1.",
+     "failures": 4,
+     "runs": 1020,
+     "load": "6.4-15.8, mean 10.9"
+    },
+    {
+     "config": "Same instrumented 10% run, FIX",
+     "failures": 0,
+     "runs": 1020,
+     "load": "6.4-15.8, mean 10.9"
+    },
+    {
+     "config": "30% loss, instrumented, 4 configs interleaved in 6 streams: BASE. Modes: R1 5, R2 1.",
+     "failures": 6,
+     "runs": 300,
+     "load": "8.2-13.7, mean 11.3"
+    },
+    {
+     "config": "30%, driver fix only (7df27aa driver.go on base). Modes: R1 4.",
+     "failures": 4,
+     "runs": 300,
+     "load": "8.6-14.1, mean 11.6"
+    },
+    {
+     "config": "30%, node fix only (01f0f34 node.go on base). Modes: R2' 1, and 1 straggler at h2 lacking a precommit that may never have been signed without the driver fix.",
+     "failures": 2,
+     "runs": 300,
+     "load": "8.5-14.3, mean 11.5"
+    },
+    {
+     "config": "30%, both fixes. Modes: R1 residual 1.",
+     "failures": 1,
+     "runs": 300,
+     "load": "8.5-14.1, mean 11.7"
+    },
+    {
+     "config": "30%, both fixes plus a commit-history hook (diagnostic only). Modes: R1 residual 2, R2' family 7.",
+     "failures": 9,
+     "runs": 1020,
+     "load": "6.4-15.8, mean 10.9"
+    }
+   ],
+   "problems": [
+    {
+     "severity": "major",
+     "detail": "01f0f34 makes R1 much rarer but does not eliminate it. With both fixes, R1 occurred 3 times in 1,320 runs at 30% loss (seeds 1793124109922520402, 1793124508556330605, 1793124919492074418): a straggler stayed at h2 with byz counted out, lacking one honest precommit, while the others went on to h76-h84. In the two runs with commit history, all three deciders committed h2 with all four honest precommits, so each sent the missing vote at decide time. All three sends, plus the original send and its relays, were lost, and the others passed h3 before the next 400 ms re-gossip. The decide-time send is one more lossy broadcast, so the residual is roughly loss^3 times the old R1 rate. It is not the guarantee in the 01f0f34 commit message ('A node still at that height gets them before the others can finish the next height'), and the report's 'R1 9/300 -> 0/300' is a sampling result. Here R1 went from 5/300 (base) to 3/1320 (fixed), p=0.007. No residual appeared at the shipped 10% loss (0/2020), where it should be negligible. The commit message and report should say the fix mitigates R1. Fully closing it needs catch-up in chaosNet or re-gossip of older commits, which is the owner's call."
+    },
+    {
+     "severity": "minor",
+     "detail": "R2' (not fixed, as the investigator said) is broader than described and is the main remaining failure under heavy loss: 7 of 1,020 fixed-tree runs at 30%, and 0 of 2,020 at 10%. Besides a fourth honest node precommitting nil, it includes a fourth node that never precommitted in the decided round. In seed 1793124748212570441 it left round 0 on the precommit timeout, which the double-signer's first precommit had armed by briefly making 2/3-any. In seed 1793125062321588429 it lacked one honest prevote, so it had no polka. At the slashing height R2' does not halt the network: the others continue and only that node is left behind (seeds 1793124489972479512, 1793125062321588429)."
+    },
+    {
+     "severity": "minor",
+     "detail": "docs/consensus.md was not updated for the new driver rule. Its Precommit bullet ('On ⅔ precommits for a real digest it decides') does not mention that a node now precommits the decided block in a round where it has not precommitted. Its Equivocation section says 'a double-signer cannot help form a quorum'. That was already inaccurate before this fix: a double-signer's first-seen vote counts until its conflicting vote arrives, and R2 and R2' depend on exactly that."
+    },
+    {
+     "severity": "minor",
+     "detail": "The mix of modes at the shipped 10% loss differs from the report's emphasis. Of 4 instrumented base failures at 10%, 3 were R2 and 1 was R1; the report's only traced 10% failure was R1. The fix covers both, so this does not change the conclusion."
+    }
+   ],
+   "notes": "Verdict: the root cause is confirmed. The fix removes the flake at the shipped settings: base 6/2020 vs fix 0/2020 at 10% loss across two interleaved measurements, one-sided Fisher p=0.016. The investigator's 600 runs per side could not show this. The R2 half of the fix is complete. The R1 half only mitigates (see the major problem).\n\nHow I checked:\n- Root cause. I reproduced R1 and R2 independently with a race-free state dump taken after Stop, and classified each failure from the nodes' votes and commit voters. R1: the straggler at h2 has byz counted out and lacks exactly one honest precommit, while the others are far ahead. R2: the decider's h(n) commit holds byz plus three honest votes and not its own; the other nodes hold 300 < 334. Both appeared at base at 10% and at 30%. The investigator's traces (diag-head R1, diag-c99 R2) match.\n- The node and consensus code is identical between my base and 35b4e7f.\n- Attribution, 30% loss, 300 runs each:\n  - driver fix only: 4 failures, all R1; it removes R2 but not R1.\n  - node fix only: 2 failures (1 R2', 1 left-behind straggler).\n  - both fixes: 1 failure (R1 residual).\n  - R2 never appeared with the driver fix: 0 in 4,640 runs across all fixed configs.\n- Regression tests:\n  - TestDriverPrecommitsTheBlockItDecides fails 6/6 with driver.go reverted and passes 200/200 with the fix.\n  - TestDecidingNodeSendsTheCommitAtOnce fails 20/20 with node.go reverted and passes 200/200 with the fix.\n  - Mutation: with sendLastCommit removed from reGossipVotes, the existing TestReGossipCarriesTheLastCommitToANodeStillAtThatHeight fails 5/5 while the new test passes, so both send paths stay covered.\n- Check (3):\n  - Only tests were added; no existing assertion changed.\n  - Nothing in signing/, ledger/, persist.go, messages.go, vote.go or commit.go changed, so no preimage, digest, struct or JSON format changed.\n  - The decide-time precommit goes through castVote and logVote. logVote signs the round's proposal into Locked when it is not yet held.\n  - The change is minimal: a 4-line branch, plus one extracted function and one call.\n- Safety. The new precommit is for the already-decided value, in a round the node never precommitted in. The first such vote can only follow a quorum whose honest members precommitted after a polka (more than 1/3 of power locked), so it can complete no conflicting quorum. No FORK, SUPPLY or DATA RACE in about 6,300 chaos runs.\n- Suites on the fixed tree, load about 3-4:\n  - gofmt -l is empty; go vet is clean for root and ui.\n  - GOLEDGER_CHAOS_SLACK=4 go test -race -count=1 ./... passed twice (36 s; node 34.4 s and 34.9 s).\n  - go test -C ui -race -count=1 ./... passed twice (22.7 s each).\n\nOther notes:\n- My untraced 30% base rate (6/300) is lower than the investigator's traced 15/300, consistent with their doubt 5.\n- post-emudhra-phase1 moved to f29b1d6 during my run. That commit is review-only, and the branch has no node/ or consensus/ changes since 35b4e7f, so the fix applies without overlap.\n- No worktree or branch was modified.\n\nPaths:\n- Fixed tree: <scratch>/verify-chaos-equivocator\n- Base tree: <scratch>/verify-chaos-equivocator-base\n- Instrumented and reverted trees: <scratch>/vce/trees\n- Instrumentation: <scratch>/vce/patch/eqvdump_test.go\n- Scripts: <scratch>/vce/scripts/stream.sh, <scratch>/vce/scripts/tally.sh and <scratch>/vce/scripts/classify.py\n- Logs: <scratch>/vce/logs/m10, <scratch>/vce/logs/s30, <scratch>/vce/logs/p3 and <scratch>/vce/logs/suite"
+  }
+ ]
+}

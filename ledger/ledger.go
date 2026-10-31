@@ -1,226 +1,100 @@
 // Package ledger is the pure, side-effect-free core of the hypernode ledger: account state and the
-// rules for applying a batch of payments, account updates and governance to move committed state from
-// one to the next. It has no I/O and no networking (so it can be audited and unit-tested in complete
-// isolation — the point of the Go rewrite), and it verifies signatures where the rules require it
-// (block/payment/update/vote validity) via the `signing` package, but it holds no keys and does no
-// key management of its own.
+// rules for applying a batch of payments, account updates, name requests, double-sign evidence and
+// governance to move committed state from one to the next. It has no I/O and no networking (so it can
+// be audited and unit-tested in complete isolation — the point of the Go rewrite), and it verifies
+// signatures where the rules require it (block/payment/update/vote validity) via the `signing`
+// package, but it holds no keys and does no key management of its own.
 package ledger
 
 import (
 	"math/big"
-	"sort"
+	"slices"
+	"strconv"
+	"strings"
 )
 
-// Account is one ledger account. Amount is an exact rational (arbitrary precision).
-// No floating-point rounding in the money path.
-type Account struct {
-	PublicKey     string
-	Name          string
-	Amount        *big.Rat
-	ValidatorNode string
+// Account is one name and what the ledger holds for it (spec 3.1). Amount is an exact rational, a
+// whole number of 1e-8 units (see ParseAmount): no floating-point rounding in the money path. At most
+// one of PendingKey and PendingBank is set, and PendingHeight is above 0 exactly when one is.
+type Account struct { // implements json.Marshaler and json.Unmarshaler, in amount.go
+	Name          string   // the identity, a canonical name (CanonicalName)
+	PublicKey     string   // the name's current key (base64); it verifies every message the name signs
+	Amount        *big.Rat // the balance; never nil in state
+	Bank          string   // the bank of record, a name; "" for none
+	Delegate      string   // the name this balance backs as stake; "" for none
 	Description   string
 	Address       string // a validator's gossip address (e.g. "http://10.0.0.2:8080") — the on-chain peer DNS
+	Frozen        bool   // a frozen name neither pays nor is paid, and is never seated
+	PendingKey    string // a key change waiting for PendingHeight; "" for none
+	PendingBank   string // a bank change waiting for PendingHeight; "" for none
+	PendingHeight int64  // the height at whose end the pending change takes effect; 0 for none
 }
 
-// Payment moves Amount from PublicKeyFrom to the recipient. An account's identity IS its public
-// key, so PublicKeyFrom is both the payer and the key its Signature is verified against (see
-// payment.go). Comment, BlockID and PrevStateDigest are all part of the signed fields.
+// FindAccount returns the account with the given name, and whether there is one.
+func FindAccount(accounts []Account, name string) (Account, bool) {
+	index, found := findAccountIndex(accounts, name)
+	if !found {
+		return Account{}, false
+	}
+	return accounts[index], true
+}
+
+// findAccountIndex returns the index of the account with the given name, and whether there is one.
+// Accounts are kept in strictly ascending order of name (see LedgerState.NamesAscending), so it
+// searches by halves.
+func findAccountIndex(accounts []Account, name string) (int, bool) {
+	return slices.BinarySearchFunc(accounts, name, func(account Account, name string) int {
+		return strings.Compare(account.Name, name)
+	})
+}
+
+// AccountAmount returns the balance of the account named name in `accounts`, or zero if there is none.
+func AccountAmount(accounts []Account, name string) *big.Rat {
+	if account, found := FindAccount(accounts, name); found && account.Amount != nil {
+		return account.Amount
+	}
+	return new(big.Rat)
+}
+
+// LedgerState is the full committed state: the accounts, the operating parameters, the governance
+// sequence and the height. Its Digest is a block's StateDigest, which the block hash that consensus
+// commits covers, so agreement on that hash is agreement on the accounts, the parameters in force, the
+// governance sequence AND the height of the last block applied.
 //
-// The recipient is EXACTLY ONE of PublicKeyTo (a raw key) or ToName (a registered on-chain name).
-// A name is part of the signed content and is resolved against the committed registry by every node
-// independently at apply time — the wallet's node never translates it, so a dishonest node cannot
-// remap a name to a different key (the resolution the network agrees on is the one that pays).
-type Payment struct {
-	PublicKeyFrom string // payer's public key (base64); also the verification key
-	PublicKeyTo   string // payee's public key (base64); empty when paying by name
-	ToName        string // payee's registered name; resolved on-chain at apply time (empty when paying by key)
-	Amount        *big.Rat
-	Comment       string
-	BlockID       int64
-	// PrevStateDigest optionally pins the payment to a specific chain history: if non-empty, the
-	// payment is included only in a block whose PrevStateDigest matches (hex). Empty = BlockID-only
-	// (the default, and all an ordinary user needs). This is the fork-resistant tier: a payment
-	// pinned to one history cannot be replayed on a fork whose block at the same height had a
-	// different predecessor. It is meaningful only when the payer TRUSTS the node reporting the live
-	// tip — in practice their OWN node: pinning to a tip an untrusted node told you buys nothing. So
-	// this tier goes with self-hosting — run a node if you hold significant value; everyone else
-	// relies on BlockID, which already prevents ordinary replay.
-	PrevStateDigest string
-	Signature       string // base64 payer signature over the canonical fields (domain "payment")
-}
-
-// ProcessPayments applies a batch of payments to a set of accounts and returns the new
-// account set. It is a pure function of (accounts, payments, transactionCost); the input
-// slices are not mutated. The result is sorted by public key for deterministic output.
+// GovernanceSequence is a monotonic counter incremented by each applied governance action (a parameter
+// change or a ⅔ name action). Every such certificate binds to the sequence it amends and is
+// applied only while that sequence is current; applying it bumps the sequence, so the certificate is
+// single-use and CANNOT be replayed after state cycles back (the value-bound guards alone could not
+// guarantee that). Votes still accumulate freely because the sequence is stable between governance
+// actions.
 //
-// Integrity invariant (audit B1 / B2): a payment may move value only if its amount is at
-// least the transaction cost (hence strictly positive) AND its payer is an existing account.
-// Checking neither allows two ways to MINT supply:
-//
-//	B1  a negative amount is never overdraft-banned and the "credit - debit" step subtracts
-//	    the negative, ballooning the payer's balance;
-//	B2  a non-existent payer is synthesised at zero, driven negative and dropped, so the
-//	    payee's credit is minted from nothing.
-//
-// This port enforces the guard up front so neither mint is representable.
-
-// nameRegistry maps each registered name to its owning account key — the committed name registry
-// (unique: applyAccountUpdates enforces first-come uniqueness).
-func nameRegistry(accounts []Account) map[string]string {
-	nameOwner := make(map[string]string)
-	for _, a := range accounts {
-		if a.Name != "" {
-			nameOwner[a.Name] = a.PublicKey
-		}
-	}
-	return nameOwner
+// Height is the height of the last block applied, 0 for the genesis. ApplyBlock takes only the block at
+// Height + 1, so a block labelled with another height never applies, whoever calls it (E1).
+type LedgerState struct {
+	Accounts           []Account // strictly ascending byte order of Name (NamesAscending); the digest hashes this order
+	Parameters         LedgerParameters
+	GovernanceSequence int64
+	Height             int64
 }
 
-// resolveRecipient returns the account key a payment credits and whether it names exactly one
-// recipient that resolves against `nameOwner` (a pre-block registry). This is the SINGLE source of
-// truth for recipient validity, shared by ProcessPayments (which credits the resolved key) and the
-// block-layer filters (which refuse a payment that resolves to nobody, so it can never be carried
-// into a committed block as a zero-fee no-op that still consumes block space and a per-node
-// signature verification). A payment naming both a key and a name, or neither, is ambiguous → false.
-func resolveRecipient(nameOwner map[string]string, p Payment) (to string, ok bool) {
-	switch {
-	case p.ToName != "" && p.PublicKeyTo != "":
-		return "", false // ambiguous: both a key and a name
-	case p.ToName != "":
-		owner, registered := nameOwner[p.ToName]
-		return owner, registered
-	case p.PublicKeyTo != "":
-		return p.PublicKeyTo, true // paying a raw key (the account may not exist yet — the credit creates it)
-	default:
-		return "", false // no recipient at all
-	}
+// Digest is the state digest over the accounts, the parameters, the governance sequence and the height
+// (spec 3.5).
+func (ledgerState LedgerState) Digest() [32]byte {
+	accountsDigest := AccountsDigest(ledgerState.Accounts)
+	parametersDigest := ledgerState.Parameters.Digest()
+	return lengthPrefixedDigest([]byte("go-ledger state v2"), accountsDigest[:], parametersDigest[:],
+		[]byte(strconv.FormatInt(ledgerState.GovernanceSequence, 10)), []byte(strconv.FormatInt(ledgerState.Height, 10)))
 }
 
-// RecipientResolves reports whether p names exactly one recipient resolvable against `accounts` (the
-// pre-block state). ProposeBlock/ApplyBlock and node.admitPayment use it to keep an unresolvable
-// payment out of a block entirely: the transaction fee is charged only to payments that actually
-// move value, so a signature-valid payment to an unregistered name (or with an ambiguous/absent
-// recipient) must not be able to occupy permanent block space for free.
-func RecipientResolves(accounts []Account, p Payment) bool {
-	_, ok := resolveRecipient(nameRegistry(accounts), p)
-	return ok
-}
-
-func ProcessPayments(accounts []Account, payments []Payment, transactionCost *big.Rat) []Account {
-	if transactionCost == nil || transactionCost.Sign() < 0 {
-		// Treat an unset cost as zero rather than panicking on Cmp. A NEGATIVE cost is clamped for the
-		// same conservation reason: it would credit each payee Amount-cost > Amount (minting |cost| per
-		// payment) and let negative amounts through the below-cost filter. Config load and governance
-		// (LedgerParameters.Acceptable) both refuse a negative cost; this keeps supply conserved even
-		// for a caller that bypasses them.
-		transactionCost = new(big.Rat)
-	}
-	byKey := make(map[string]Account, len(accounts))
-	for _, a := range accounts {
-		byKey[a.PublicKey] = a
-	}
-	nameOwner := nameRegistry(accounts)
-
-	// B1/B2 guard: keep only strictly-valid payments; and collapse duplicate CONTENT so a malleated
-	// signature (a second valid encoding of the same payment) can never debit the payer twice, even
-	// in a hand-crafted block. Deterministic (first occurrence wins over the block's fixed order), so
-	// every node computes the same result. Note: two payments the payer genuinely means as distinct
-	// must differ in a field (e.g. the Comment) — identical content collapses to one.
-	seen := make(map[string]bool)
-	var valid []Payment
-	var payee []string // resolved recipient key, parallel to valid
-	for _, p := range payments {
-		if p.Amount == nil || p.Amount.Cmp(transactionCost) < 0 {
-			continue // nil, or below cost -- so zero and every negative are excluded
-		}
-		if _, ok := byKey[p.PublicKeyFrom]; !ok {
-			continue // payer must exist
-		}
-		// Exactly one recipient form, resolved against the PRE-BLOCK registry (updates apply after
-		// payments — see ApplyBlock), so every node picks the same owner even if the name moves in this
-		// very block. An unresolvable recipient is dropped here — and, so it can never be a zero-fee
-		// no-op occupying block space, also refused before the block by ProposeBlock/ApplyBlock (via
-		// RecipientResolves) and at intake by node.admitPayment.
-		to, ok := resolveRecipient(nameOwner, p)
-		if !ok {
-			continue
-		}
-		id := PaymentID(p)
-		if seen[id] {
-			continue // duplicate content (e.g. a malleated-signature copy) -- apply once
-		}
-		seen[id] = true
-		valid = append(valid, p)
-		payee = append(payee, to)
-	}
-
-	// Ban any payer whose total outgoing would overdraw their balance. Deliberate (see findings.md,
-	// design decision): honest intake refuses such payments up front (node.admitPayment), so a
-	// committed overdraw implies a misused/cloned key or a proposer that bypassed intake.
-	outgoing := map[string]*big.Rat{}
-	for _, p := range valid {
-		addRat(outgoing, p.PublicKeyFrom, p.Amount)
-	}
-	banned := map[string]bool{}
-	for key, out := range outgoing {
-		if a, ok := byKey[key]; ok && a.Amount.Cmp(out) < 0 {
-			banned[key] = true
+// NamesAscending reports whether the state's accounts are in strictly ascending byte order of name,
+// which also proves the names unique. The ledger keeps them so, the digest hashes them in that order,
+// and every lookup by name relies on it, so a decoded state (a snapshot, a peer's checkpoint, the state
+// a wallet reads) is refused before any other check unless they are.
+func (ledgerState LedgerState) NamesAscending() bool {
+	for i := 1; i < len(ledgerState.Accounts); i++ {
+		if ledgerState.Accounts[i-1].Name >= ledgerState.Accounts[i].Name {
+			return false
 		}
 	}
-
-	debit := map[string]*big.Rat{}  // payer -> total sent
-	credit := map[string]*big.Rat{} // payee -> total received (net of the transaction cost)
-	for i, p := range valid {
-		if banned[p.PublicKeyFrom] {
-			continue
-		}
-		addRat(debit, p.PublicKeyFrom, p.Amount)
-		if p.Amount.Cmp(transactionCost) > 0 {
-			addRat(credit, payee[i], new(big.Rat).Sub(p.Amount, transactionCost))
-		}
-	}
-
-	affected := map[string]bool{}
-	for k := range debit {
-		affected[k] = true
-	}
-	for k := range credit {
-		affected[k] = true
-	}
-
-	result := make([]Account, 0, len(accounts))
-	for _, a := range accounts {
-		if !banned[a.PublicKey] && !affected[a.PublicKey] {
-			result = append(result, a)
-		}
-	}
-	for k := range affected {
-		old, ok := byKey[k]
-		if !ok {
-			old = Account{PublicKey: k, Amount: new(big.Rat), ValidatorNode: k}
-		}
-		amt := new(big.Rat).Set(old.Amount)
-		if c, ok := credit[k]; ok {
-			amt.Add(amt, c)
-		}
-		if d, ok := debit[k]; ok {
-			amt.Sub(amt, d)
-		}
-		if amt.Sign() > 0 { // non-positive balances are dropped
-			na := old
-			na.Amount = amt
-			result = append(result, na)
-		}
-	}
-
-	sort.Slice(result, func(i, j int) bool { return result[i].PublicKey < result[j].PublicKey })
-	return result
-}
-
-func addRat(m map[string]*big.Rat, key string, v *big.Rat) {
-	if cur, ok := m[key]; ok {
-		cur.Add(cur, v)
-	} else {
-		m[key] = new(big.Rat).Set(v)
-	}
+	return true
 }
