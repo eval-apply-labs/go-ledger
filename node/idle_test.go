@@ -32,7 +32,7 @@ func keepBusy(t *testing.T, name string, nodes ...*Node) {
 	}
 	update := busyUpdate(name, lowest+MaxBlockIDLookahead)
 	for _, node := range nodes {
-		if err := node.AdmitUpdate(update); err != nil {
+		if _, err := node.AdmitUpdate(update); err != nil {
 			t.Fatalf("a node refused the update that keeps the network busy: %v", err)
 		}
 	}
@@ -66,7 +66,8 @@ func (recorder *recordingTransport) total() int {
 
 // idleBank runs bank-a, the sole validator of a chain where alice and bob, each holding 10, have bank-a
 // as their bank of record, until it has committed block 1 and gone idle at height 2. Its step timeout is
-// the least a parameter change accepts.
+// the least a parameter change accepts. Its heartbeat is IdleHeartbeat, five minutes, so whatever moves
+// the chain within a test's seconds is work.
 func idleBank(t *testing.T, tweak func(genesis *ledger.LedgerState)) *Node {
 	t.Helper()
 	genesis := testGenesis([]ledger.Account{testAccount("bank-a", "100"), banked("alice", "10", "bank-a"), banked("bob", "10", "bank-a")},
@@ -80,14 +81,16 @@ func idleBank(t *testing.T, tweak func(genesis *ledger.LedgerState)) *Node {
 	waitFor(t, 5*time.Second, func() bool { return node.Snapshot().Height == 2 }, "the bank did not commit block 1")
 	time.Sleep(100 * time.Millisecond) // past the post-commit window: idle
 	if node.Snapshot().Height != 2 {
-		t.Fatal("premise: with nothing to do, the bank commits nothing after block 1")
+		t.Fatal("premise: with nothing to do, the bank commits nothing after block 1 before the heartbeat")
 	}
 	return node
 }
 
 // A fresh network commits block 1 with nothing pooled, since no block has been committed yet (spec
 // 6.6): a new wallet then has a commit to pin, which verifies against the genesis set. After it the
-// network has no work, and commits nothing more.
+// network has no work, and commits nothing more until the heartbeat. Then the four validators commit
+// an empty block 2 together: the first whose heartbeat fires starts the height, and its proposal or
+// vote wakes the others.
 func TestFreshNetworkCommitsBlockOneThenIdles(t *testing.T) {
 	names := validatorNames(4)
 	var accounts []ledger.Account
@@ -95,12 +98,16 @@ func TestFreshNetworkCommitsBlockOneThenIdles(t *testing.T) {
 		accounts = append(accounts, testAccount(name, "100"))
 	}
 	chain, genesis := staticChain(names...), testGenesis(accounts, 400*time.Millisecond, 20*time.Millisecond)
+	heartbeat := testHeartbeat()
 	bus := newBus()
 	nodes := make([]*Node, len(names))
 	for i, name := range names {
-		nodes[i] = New(testConfig(chain, name, genesis), bus)
+		config := testConfig(chain, name, genesis)
+		config.idleHeartbeat = heartbeat
+		nodes[i] = New(config, bus)
 		bus.register(name, nodes[i])
 	}
+	started := time.Now()
 	for _, node := range nodes {
 		node.Start()
 		defer node.Stop()
@@ -109,23 +116,48 @@ func TestFreshNetworkCommitsBlockOneThenIdles(t *testing.T) {
 	time.Sleep(500 * time.Millisecond) // 25 block intervals
 	for i, node := range nodes {
 		if height := node.Snapshot().Height; height != 2 {
-			t.Fatalf("node %d went on to height %d with nothing to do", i, height)
+			t.Fatalf("node %d went on to height %d with nothing to do, before the heartbeat", i, height)
 		}
 	}
 	checkpoint := nodes[0].Snapshot().checkpoint()
 	if checkpoint.Commit.Height != 1 || !nodes[0].verifyCheckpoint(checkpoint, chain.ValidatorRule.SetFor(genesis)) {
 		t.Fatal("the checkpoint does not carry a commit of block 1 that verifies against the genesis set")
 	}
+
+	waitFor(t, heartbeat+5*time.Second, allReach(nodes, 3), "the heartbeat did not commit block 2 on every node")
+	if elapsed := time.Since(started); elapsed < heartbeat {
+		t.Fatalf("block 2 committed %v after the start, before the heartbeat of %v", elapsed, heartbeat)
+	}
+	for i, node := range nodes {
+		if node.Snapshot().LastBlock != nodes[0].Snapshot().LastBlock {
+			t.Fatalf("node %d committed another block 2 than node 0", i)
+		}
+	}
 }
 
-// An idle chain signs, sends, re-gossips and records nothing (spec 6.6): after block 1 the sole
-// validator sends no message through ten re-gossip intervals, its record holds block 1 alone, and its
-// sign log is the empty one for height 2.
-func TestIdleChainCommitsNothing(t *testing.T) {
+// testHeartbeat is the idle heartbeat of the tests that wait for it: short, and stretched by
+// GOLEDGER_CHAOS_SLACK like their deadlines, since they check that nothing happens before it.
+func testHeartbeat() time.Duration { return 1500 * time.Millisecond * testTimeSlack }
+
+// emptyContent reports whether a block carries nothing.
+func emptyContent(content ledger.BlockContent) bool {
+	return len(content.Payments)+len(content.AccountUpdates)+len(content.NameRequests)+len(content.VoteEvidence)+
+		len(content.ProposalEvidence) == 0 && content.ParameterChange == nil && content.Reassignment == nil
+}
+
+// An idle chain signs, sends, re-gossips and records nothing until the heartbeat (spec 6.6): after
+// block 1 the sole validator sends no message through ten re-gossip intervals, its record holds block 1
+// alone, and its sign log is the empty one for height 2. Then the heartbeat starts height 2 with no
+// work: the node proposes an empty block and commits it, the record keeps it like any block, and the
+// sign log is the empty one for height 3.
+func TestIdleChainCommitsNothingBeforeTheHeartbeat(t *testing.T) {
 	config := testConfig(staticChain("validator"), "validator", testGenesis([]ledger.Account{testAccount("validator", "100")}, 50*time.Millisecond, 20*time.Millisecond))
 	config.SnapshotPath = filepath.Join(t.TempDir(), "snapshot.json")
+	heartbeat := testHeartbeat()
+	config.idleHeartbeat = heartbeat
 	recorder := &recordingTransport{}
 	node := New(config, recorder)
+	started := time.Now()
 	node.Start()
 	defer node.Stop()
 	waitFor(t, 5*time.Second, func() bool { return node.Snapshot().Height == 2 }, "block 1 was not committed")
@@ -133,14 +165,31 @@ func TestIdleChainCommitsNothing(t *testing.T) {
 	sent := recorder.total()
 	time.Sleep(500 * time.Millisecond)
 	if height := node.Snapshot().Height; height != 2 || recorder.total() != sent {
-		t.Fatalf("idle, the node went on to height %d and sent %d more messages", height, recorder.total()-sent)
+		t.Fatalf("idle, the node went on to height %d and sent %d more messages before the heartbeat", height, recorder.total()-sent)
 	}
 	if entries := rollingEntries(t, node); len(entries) != 1 || entries[0].Height != 1 {
 		t.Fatalf("the record holds %d entries, want block 1's alone", len(entries))
 	}
-	var logged signLog
-	if data, err := os.ReadFile(node.signLogPath()); err != nil || json.Unmarshal(data, &logged) != nil || logged.Height != 2 || len(logged.Votes)+len(logged.Proposals) != 0 {
-		t.Fatalf("the sign log is not the empty one for height 2: %+v (%v)", logged, err)
+	checkEmptySignLog := func(height int64) {
+		t.Helper()
+		var logged signLog
+		if data, err := os.ReadFile(node.signLogPath()); err != nil || json.Unmarshal(data, &logged) != nil || logged.Height != height || len(logged.Votes)+len(logged.Proposals) != 0 {
+			t.Fatalf("the sign log is not the empty one for height %d: %+v (%v)", height, logged, err)
+		}
+	}
+	checkEmptySignLog(2)
+
+	waitFor(t, heartbeat+5*time.Second, func() bool { return node.Snapshot().Height == 3 }, "the heartbeat did not commit block 2")
+	checkEmptySignLog(3)
+	if elapsed := time.Since(started); elapsed < heartbeat {
+		t.Fatalf("block 2 committed %v after the start, before the heartbeat of %v", elapsed, heartbeat)
+	}
+	proposal := recorder.proposalAt(2)
+	if proposal == nil || !emptyContent(proposal.Block.Content) {
+		t.Fatal("the node did not propose an empty block 2")
+	}
+	if entries := rollingEntries(t, node); len(entries) < 2 || entries[1].Height != 2 || entries[1].Commit.BlockHash != proposal.Proposal.BlockHash {
+		t.Fatal("the record does not keep the empty block 2 after block 1")
 	}
 }
 
@@ -156,13 +205,13 @@ func TestPaymentWakesAnIdleChain(t *testing.T) {
 			return func() bool { return balance(node.Snapshot().Accounts, "bob").Cmp(rational("10.9")) == 0 }
 		},
 		"an update": func(t *testing.T, node *Node) func() bool {
-			if err := node.AdmitUpdate(signedUpdate(ledger.AccountUpdate{Name: "alice", Description: "awake", BlockID: 2})); err != nil {
+			if _, err := node.AdmitUpdate(signedUpdate(ledger.AccountUpdate{Name: "alice", Description: "awake", BlockID: 2})); err != nil {
 				t.Fatal(err)
 			}
 			return describedAs(node, "alice", "awake")
 		},
 		"a name request": func(t *testing.T, node *Node) func() bool {
-			if err := node.AdmitNameRequest(nameRequestOf(ledger.FreezeKind, "alice", "alice", "", "", 2)); err != nil {
+			if _, err := node.AdmitNameRequest(nameRequestOf(ledger.FreezeKind, "alice", "alice", "", "", 2)); err != nil {
 				t.Fatal(err)
 			}
 			return frozen(node, "alice")
@@ -215,13 +264,62 @@ func TestReplacingCertificateWakesAnIdleNode(t *testing.T) {
 			node.handle(event{kind: eventReassignmentCertificate, reassignment: &action, admit: make(chan admission, 1)})
 		},
 	} {
-		node := requestNode(signing.MLDSA65{})
+		node := requestNode(signing.NetworkScheme())
 		node.startHeight() // the sole validator commits block 1 within the call
 		node.startHeight()
 		replace(node)
 		if node.lastCommit.Height != 2 {
 			t.Errorf("%s replacing a pooled one did not wake the idle node", kind)
 		}
+	}
+}
+
+// The heartbeat starts only the height the node idles at (spec 6.6). In the post-commit window it
+// starts nothing. Idle at height 2, the node arms a heartbeat for height 2. One for a height the node
+// has left starts nothing, and arms no other. The one for height 2 starts the height with no work, and
+// the node, the round's proposer, proposes an empty block. Once the height has started, the heartbeat
+// of a second timer armed there starts no second driver.
+func TestIdleHeartbeatStartsOnlyTheHeightTheNodeIdlesAt(t *testing.T) {
+	network := newHandNet(t, 4)
+	self := network.proposer(2, 0)
+	if network.proposer(1, 0) == self {
+		t.Fatal("premise: with four equal validators heights 1 and 2 have different proposers")
+	}
+	node, recorder := network.node(self)
+	node.config.idleHeartbeat = 10 * time.Millisecond // the step timeout and the block interval are an hour
+	network.commit(node, self, 1)
+	heartbeat := func(height int64) { node.handle(event{kind: eventIdleHeartbeat, height: height}) }
+	nextTimer := func() (event, bool) {
+		select {
+		case fired := <-node.events:
+			return fired, true
+		case <-time.After(100 * time.Millisecond * testTimeSlack):
+			return event{}, false
+		}
+	}
+
+	heartbeat(2)
+	if node.driver != nil || recorder.proposalAt(2) != nil {
+		t.Fatal("a heartbeat started the next height in the post-commit window")
+	}
+	node.handle(event{kind: eventNextHeight, height: node.height()}) // the window's timer
+	armed, fired := nextTimer()
+	if !node.idle || !fired || armed.kind != eventIdleHeartbeat || armed.height != 2 {
+		t.Fatal("idle at height 2, the node did not arm a heartbeat for height 2")
+	}
+	heartbeat(1)
+	if _, fired := nextTimer(); !node.idle || node.driver != nil || fired {
+		t.Fatal("the heartbeat of a height the node has left started the height in progress, or armed another heartbeat")
+	}
+	node.handle(armed)
+	proposal := recorder.proposalAt(2)
+	if node.idle || node.driver == nil || proposal == nil || !emptyContent(proposal.Block.Content) {
+		t.Fatal("the heartbeat did not start the idle height, with an empty proposal")
+	}
+	driver, sent := node.driver, recorder.total()
+	heartbeat(2)
+	if node.driver != driver || recorder.total() != sent {
+		t.Fatal("a second heartbeat at the started height started a second driver")
 	}
 }
 
@@ -261,7 +359,7 @@ func TestPeerVoteWakesAnIdleNode(t *testing.T) {
 // it has no work.
 func TestPendingChangeKeepsTheChainMoving(t *testing.T) {
 	node := idleBank(t, func(genesis *ledger.LedgerState) { genesis.Parameters.ChangeDelayBlocks = 5 })
-	if err := node.AdmitNameRequest(nameRequestOf(ledger.KeyChangeKind, "alice", "alice", "bank-a", "alice-new", 2)); err != nil {
+	if _, err := node.AdmitNameRequest(nameRequestOf(ledger.KeyChangeKind, "alice", "alice", "bank-a", "alice-new", 2)); err != nil {
 		t.Fatal(err)
 	}
 	rekeyed := func() bool {
@@ -303,7 +401,7 @@ func TestFutureBlockIdKeepsTheChainMoving(t *testing.T) {
 			return admitRequest(node, nameRequestOf(ledger.FreezeKind, "alice", "alice", "", "", 2+MaxBlockIDLookahead))
 		},
 	} {
-		node := requestNode(signing.MLDSA65{})
+		node := requestNode(signing.NetworkScheme())
 		node.startHeight() // the sole validator commits block 1 within the call
 		node.startHeight()
 		if !node.idle {
@@ -355,8 +453,9 @@ func TestRestartMidHeightResumesWhileIdle(t *testing.T) {
 // Spec review record #2: a validator back without its sign log may have voted at its height, and signs
 // nothing for two re-gossip intervals, so that peers bring its earlier votes back first (see
 // startFirstHeight). A peer's countable vote arriving first must not wake it early: wakeIfIdle acts
-// only on a node that startHeight left idle. Here the node is the round's proposer, and woken early it
-// would propose a block and prevote it at once, against its earlier prevote.
+// only on a node that startHeight left idle, and so does the idle heartbeat. Here the node is the
+// round's proposer, and woken early it would propose a block and prevote it at once, against its
+// earlier prevote.
 func TestNodeBackWithoutItsSignLogSignsNothingBeforeTheRegossip(t *testing.T) {
 	network := newHandNet(t, 4)
 	self := network.proposer(2, 0)
@@ -373,12 +472,16 @@ func TestNodeBackWithoutItsSignLogSignsNothingBeforeTheRegossip(t *testing.T) {
 		t.Fatalf("premise: the node opens at height 2 from its snapshot (err %v)", err)
 	}
 	node.started = true
-	node.startFirstHeight() // the re-gossip wait: its timer would fire in an hour
+	node.startFirstHeight() // the wait of a node back without its sign log: its timer would fire in an hour
 
 	peerVote := network.vote(peer, 2, 0, consensus.Prevote, [32]byte{1})
 	node.handle(event{kind: eventVote, vote: &peerVote})
 	if node.driver != nil || recorder.proposalAt(2) != nil || len(recorder.votes(network.name(self), 2, 0, consensus.Prevote)) != 0 {
-		t.Fatal("a peer's vote started the height during the re-gossip wait")
+		t.Fatal("a peer's vote started the height during the wait of a node back without its sign log")
+	}
+	node.handle(event{kind: eventIdleHeartbeat, height: 2})
+	if node.driver != nil || recorder.proposalAt(2) != nil {
+		t.Fatal("a heartbeat started the height during the wait of a node back without its sign log")
 	}
 	earlier := network.vote(self, 2, 0, consensus.Prevote, [32]byte{1}) // signed before the log was lost; a peer re-gossips it
 	node.handle(event{kind: eventVote, vote: &earlier})

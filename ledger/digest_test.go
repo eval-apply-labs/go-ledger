@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"math/big"
+	"strconv"
 	"testing"
 )
 
@@ -51,20 +52,22 @@ func TestStateDigestCoversTheHeight(t *testing.T) {
 
 // The accounts digest is SHA-256 over lp() fields (spec 0.2 and 3.5), built here by hand: the tag
 // "go-ledger accounts v2", then, for each account in slice order, its name, key, amount (the canonical
-// decimal of spec 3.3: 10.5, never 21/2), bank, delegate, description, address, frozen mark (1 or 0),
-// pending key, pending bank and pending height (in decimal; 0 for none). It hashes the slice order and
-// never sorts: the ledger keeps the accounts in name order, and a decoded state out of that order is
-// refused first (NamesAscending).
+// decimal of spec 3.3: 10.5, never 21/2), bank, delegate, description, public address, frozen mark (1
+// or 0), pending key, pending bank and pending height (in decimal; 0 for none), and last the number of
+// its IP addresses, in decimal, and each of them. It hashes the slice order and never sorts: the ledger
+// keeps the accounts in name order, and a decoded state out of that order is refused first
+// (NamesAscending).
 func TestAccountsDigestLayout(t *testing.T) {
 	accounts := []Account{
 		{Name: "alice", PublicKey: "key-a", Amount: rational("10.5"), Bank: "bank-a", Delegate: "bank-a", Description: "the bakery", Frozen: true},
-		{Name: "bank-a", PublicKey: "key-b", Amount: rational("1000"), Delegate: "bank-a", Address: "http://10.0.0.2:8080", PendingKey: "key-c", PendingHeight: 86412},
+		{Name: "bank-a", PublicKey: "key-b", Amount: rational("1000"), Delegate: "bank-a", PublicAddress: "https://bank-a.example",
+			IPAddresses: []string{"10.0.0.2", "2001:db8::2"}, PendingKey: "key-c", PendingHeight: 86412},
 		{Name: "carol", PublicKey: "key-d", Amount: new(big.Rat), Bank: "bank-a", PendingBank: "bank-b", PendingHeight: 7},
 	}
 	preimage := lengthPrefixedPreimage("go-ledger accounts v2",
-		"alice", "key-a", "10.5", "bank-a", "bank-a", "the bakery", "", "1", "", "", "0",
-		"bank-a", "key-b", "1000", "", "bank-a", "", "http://10.0.0.2:8080", "0", "key-c", "", "86412",
-		"carol", "key-d", "0", "bank-a", "", "", "", "0", "", "bank-b", "7")
+		"alice", "key-a", "10.5", "bank-a", "bank-a", "the bakery", "", "1", "", "", "0", "0",
+		"bank-a", "key-b", "1000", "", "bank-a", "", "https://bank-a.example", "0", "key-c", "", "86412", "2", "10.0.0.2", "2001:db8::2",
+		"carol", "key-d", "0", "bank-a", "", "", "", "0", "", "bank-b", "7", "0")
 	if sha256.Sum256(preimage) != AccountsDigest(accounts) {
 		t.Fatal("the accounts digest does not follow the spec 3.5 layout")
 	}
@@ -81,7 +84,7 @@ func TestStateDigestLayout(t *testing.T) {
 	parameters := DefaultParameters()
 	parameters.TransactionCost = rational("0.25")
 	parametersPreimage := lengthPrefixedPreimage("go-ledger parameters v2",
-		"0.25", "1000", "3000", "0", "6400", "1", "86400", "604800", "100000", "10000000")
+		"0.25", "1000", "3000", "0", strconv.FormatInt(parameters.MaxMessageBytes, 10), "1", "86400", "604800", "100000", "10000000")
 	if sha256.Sum256(parametersPreimage) != parameters.Digest() {
 		t.Fatal("the parameter digest does not follow the spec 3.5 layout")
 	}

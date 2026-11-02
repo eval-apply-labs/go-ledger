@@ -156,7 +156,11 @@ zero re-mint).
   change, left for later.
 - Unauthenticated write API / single-loop DoS (#10, MEDIUM) — a deployment concern (front the node with
   TLS + an allowlist / rate-limit) rather than a code fix; the 1 MiB body bound stays as the in-process
-  guard.
+  guard. (2026-11-01, Phase 3: the deployment now does this. The gossip routes have a port of their
+  own, behind an allow list of the validators' IP addresses, which the engine enforces in its own
+  process; the public routes are behind a CDN, which limits each client, and the fetcher's global
+  cap; and the operator port, which serves every route, is never published. The gossip port has no
+  TLS: every message on it is signed, and nothing on it is secret. See `docs/security.md`.)
 - Variadic `validators` footgun (#25) and `ApplyBlock` bool-vs-error (#26) — ergonomics/design, no
   behavioural bug (the node always passes the set); left to avoid churn.
 - f+1 skip counts vote types separately (#18, LOW) — strictly safe, only slower catch-up.

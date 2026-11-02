@@ -12,7 +12,8 @@
  .balance { font-size: 2rem; font-weight: 600; }
  .key { font-family: ui-monospace, monospace; font-size: 0.8rem; word-break: break-all; color: #555; }
  label { display: block; margin: 0.6rem 0 0.15rem; font-size: 0.9rem; }
- input[type=text] { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+ input[type=text], textarea { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+ textarea { font-family: ui-monospace, monospace; font-size: 0.8rem; }
  button { margin-top: 0.9rem; padding: 0.55rem 1.1rem; border: 0; border-radius: 6px; background: #2d6cdf; color: #fff; font-size: 1rem; cursor: pointer; }
  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
  th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #eee; }
@@ -34,7 +35,7 @@
 
  <div class="card">
    {{if .Name}}
-   <div class="muted">your balance (block {{.Height}})</div>
+   <div class="muted">your balance ({{if eq .KeptFrom "file"}}as of height {{.Height}}, from a file{{else if .KeptFrom}}as of height {{.Height}}, read before{{else}}block {{.Height}}{{end}})</div>
    <div class="balance">{{.Balance}}</div>
    <div class="muted" style="margin-top:0.5rem;">your name: <strong>{{.Name}}</strong></div>
    {{else if .Becomes}}
@@ -50,6 +51,16 @@
    {{if .Frozen}}<p class="err">Your name is frozen. Only a ⅔ vote of the banks can unfreeze it, with a new key. Contact your bank.</p>{{end}}
    {{if .PendingChange}}<p class="warn">A {{.PendingChange}} on your name takes effect at block {{.PendingAt}}. If you did not ask for it, freeze your name now.</p>{{end}}
    {{if .FreezeStatus}}<p class="warn">{{.FreezeStatus}}</p>{{end}}
+   {{if eq .KeptFrom "file"}}<p class="warn">This page shows the state as of height {{.Height}}, from a file: your bank's node can't be
+   reached, or its state is older. Save payments as text, for a carrier to take to a bank. The wallet
+   uses your bank's node again as soon as its state is as new.</p>{{end}}
+   {{if eq .KeptFrom "node"}}<p class="warn">This page shows the state as of height {{.Height}}, which the wallet read
+   before: your bank's node now serves an older state, as a cache may for a few seconds, or as a node
+   that fell behind does. The wallet uses your bank's node's state again as soon as it is as new.</p>{{end}}
+   {{if .Banks.Behind}}<p class="err">{{.Banks.Behind}}</p>{{end}}
+   {{if .Banks.Stalled}}<p class="warn">{{.Banks.Stalled}}</p>{{end}}
+   {{if .Banks.Unchecked}}<p class="warn">{{.Banks.Unchecked}}</p>{{end}}
+   {{if .Banks.Aligned}}<div class="muted" style="margin-top:0.5rem;">{{.Banks.Aligned}}</div>{{end}}
    {{if and .FreezeName (not .Frozen)}}
    <form method="post" action="/freeze"><button type="submit" class="danger">Freeze {{.FreezeName}}</button></form>
    {{end}}
@@ -80,11 +91,27 @@
    </ul>
    <p class="muted">Names can look alike. If this is not the bank you expect for {{.To}}, do not pay.</p>
    <form method="post" action="/send">
-     <input type="hidden" name="step" value="confirm">
      <input type="hidden" name="to" value="{{.To}}">
      <input type="hidden" name="amount" value="{{.Amount}}">
-     <button type="submit">Sign and send</button> <a href="/">cancel</a>
+     <button type="submit" name="step" value="confirm">Sign and send</button>
+     <button type="submit" name="step" value="save">Sign and save as text</button> <a href="/">cancel</a>
    </form>
+   <p class="muted">When your bank can't be reached, save the payment as text instead, and hand it to
+   whoever carries messages to a bank next.</p>
+ </div>
+ {{end}}
+
+ {{with .Saved}}
+ <div class="card review">
+   <h2>Your payment, saved as text</h2>
+   <ul>
+     <li>pay <strong>{{.Amount}}</strong> to <strong>{{.To}}</strong>, for block {{.BlockID}}</li>
+   </ul>
+   <textarea readonly rows="6">{{.Text}}</textarea>
+   <p class="muted">Nothing was sent. Copy this text and hand it to whoever carries messages to a bank:
+   any bank can take it in. If block {{.BlockID}} passes before a bank takes it in, the payment lapses
+   and nothing is taken. Each payment you sign names a block of its own, so don't sign this payment
+   again while this text may still arrive: both could be paid.</p>
  </div>
  {{end}}
 
@@ -100,20 +127,38 @@
  </div>
 
  <div class="card">
-   <h2>Description, delegation and address</h2>
-   <p class="muted">Describe yourself, choose the validator your balance backs as stake, or, for a
-   validator, publish the address its peers reach it at. Leave a field blank to keep it as it is, or
-   write - to clear it.</p>
+   <h2>Description, delegation and addresses</h2>
+   <p class="muted">Describe yourself, choose the validator your balance backs as stake, or publish where
+   your name is reached: your public address (a bank's public face, or your website) and up to 4 IP
+   addresses (a validator's are where the other validators send it their messages). What you publish is
+   public. Leave a field blank to keep it as it is, or write - to clear it.</p>
    <form method="post" action="/update">
      <label for="description">description</label>
      <input type="text" id="description" name="description" placeholder="e.g. Alice's bakery">
      <label for="delegate">delegate your stake to (a validator's name; your own to back yourself)</label>
      <input type="text" id="delegate" name="delegate" placeholder="e.g. {{if .Name}}{{.Name}}{{else}}bank-a{{end}}">
-     <label for="address">address (a validator's gossip URL)</label>
-     <input type="text" id="address" name="address" placeholder="e.g. http://10.0.0.2:8080">
+     <label for="publicAddress">public address</label>
+     <input type="text" id="publicAddress" name="publicAddress" placeholder="e.g. https://bank-a.example">
+     <label for="ipAddresses">IP addresses (separated by spaces; they replace the ones you published)</label>
+     <input type="text" id="ipAddresses" name="ipAddresses" placeholder="e.g. 203.0.113.7 2001:db8::7">
      <button type="submit">Update</button>
    </form>
  </div>
+
+ {{if or (not .Verified) (eq .KeptFrom "file")}}
+ <div class="card">
+   <h2>Load a checkpoint from a file</h2>
+   <p class="muted">When your bank's node can't be reached, someone may carry in a bank's checkpoint file
+   (its hdls/checkpoint). Paste it here. The wallet checks it against the banks it trusts, as it checks
+   your bank's node, and refuses a forged one or another network's. It then shows your balance as of
+   that file's height, while your bank's node can't be reached or serves an older state.</p>
+   <form method="post" action="/checkpoint">
+     <label for="checkpoint">checkpoint file</label>
+     <textarea id="checkpoint" name="checkpoint" rows="4" required></textarea>
+     <button type="submit">Load checkpoint</button>
+   </form>
+ </div>
+ {{end}}
 
  <div class="card">
    <h2>Accounts on the ledger</h2>

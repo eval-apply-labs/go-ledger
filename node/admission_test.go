@@ -73,7 +73,7 @@ func TestDynamicValidatorAdmission(t *testing.T) {
 // ledger-level enforcement in ProposeBlock/ApplyBlock, which catches a proposer that bypassed this).
 func TestIntakeRefusesOversizedPayment(t *testing.T) {
 	genesis := testGenesis([]ledger.Account{selfDelegated("founder", "1000"), testAccount("payee", "0")}, 5*time.Second, 50*time.Millisecond)
-	genesis.Parameters.MaxMessageBytes = ledger.MinMessageBytes
+	genesis.Parameters.MaxMessageBytes = ledger.MinMessageBytes()
 	node := New(testConfig(dynamicChain("100"), "founder", genesis), NewHTTPTransport(nil))
 	node.Start()
 	defer node.Stop()
@@ -82,7 +82,7 @@ func TestIntakeRefusesOversizedPayment(t *testing.T) {
 		t.Fatalf("a plain payment should fit the bound, got: %v", err)
 	}
 	huge, _ := ledger.SignPayment(testSigner("founder"), ledger.Payment{From: "founder", To: "payee", Amount: rational("1"),
-		Comment: strings.Repeat("x", 4*ledger.MinMessageBytes), BlockID: MaxBlockIDLookahead})
+		Comment: strings.Repeat("x", int(4*ledger.MinMessageBytes())), BlockID: MaxBlockIDLookahead})
 	if _, err := node.AdmitPayment(huge); err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("an oversized payment must be refused at intake, got: %v", err)
 	}

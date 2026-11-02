@@ -1,0 +1,124 @@
+# Four banks on one machine: the quickstart network. Each bank is an engine (cmd/server) and a fetcher
+# (cmd/fetcher), both from the go-ledger image (deploy/Dockerfile). make quickstart writes
+# deploy/quickstart/ with cmd/quickstart (the keys, the genesis, the node configs and network.env),
+# builds the images, then starts this file:
+#
+#   docker compose -f deploy/compose.yaml --env-file deploy/quickstart/network.env up -d
+#
+# - The engines gossip on the gossip port, 8070, at the fixed IP addresses below, which the genesis
+#   lists. Each engine's allow list lets in only those addresses. The port is not published.
+# - The fetchers have fixed IP addresses too, so that no container of this file takes an address from
+#   the network's pool: one that took a stopped engine's would be let in by the others.
+# - Each engine's operator port, 8080, serves every route, for its fetcher. It is not published either.
+#   On a real network it sits on the bank's own network; here every container shares one.
+# - Each fetcher is its bank's public face and its public address on chain, such as
+#   http://bank-a-fetcher:8080. It is published on this machine only, at 127.0.0.1:18081 to 18084, for
+#   a wallet.
+# - Each engine keeps its data in a volume, which its fetcher mounts read-only. Both run as the image's
+#   user, 65532, since the engine keeps its record files readable by that user only.
+# - Each node config holds its bank's private key, and is mounted read-only as a secret.
+# - GENESIS_HASH_PREFIX, from network.env, is the first 16 hex digits of the genesis hash. The engine
+#   names its record files with it, so that each network's are apart.
+
+services:
+  bank-a-engine:
+    image: go-ledger
+    command: ["/server", "-config", "/run/secrets/bank-a-config"]
+    secrets: [bank-a-config]
+    volumes: ["./quickstart/genesis.json:/genesis.json:ro", "bank-a-data:/data"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.11
+  bank-a-fetcher:
+    image: go-ledger
+    command: ["/fetcher", "-engine", "http://bank-a-engine:8080", "-folder", "/data/public",
+      "-record", "/data/snapshot.json.${GENESIS_HASH_PREFIX:?pass --env-file deploy/quickstart/network.env}.record",
+      "-lifelong", "/data/snapshot.json.${GENESIS_HASH_PREFIX:?pass --env-file deploy/quickstart/network.env}.lifelong.jsonl"]
+    volumes: ["bank-a-data:/data:ro"]
+    ports: ["127.0.0.1:18081:8080"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.21
+    depends_on: [bank-a-engine] # the engine mounts the volume first, writable, so it gets /data's owner
+
+  bank-b-engine:
+    image: go-ledger
+    command: ["/server", "-config", "/run/secrets/bank-b-config"]
+    secrets: [bank-b-config]
+    volumes: ["./quickstart/genesis.json:/genesis.json:ro", "bank-b-data:/data"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.12
+  bank-b-fetcher:
+    image: go-ledger
+    command: ["/fetcher", "-engine", "http://bank-b-engine:8080", "-folder", "/data/public",
+      "-record", "/data/snapshot.json.${GENESIS_HASH_PREFIX:?pass --env-file deploy/quickstart/network.env}.record",
+      "-lifelong", "/data/snapshot.json.${GENESIS_HASH_PREFIX:?pass --env-file deploy/quickstart/network.env}.lifelong.jsonl"]
+    volumes: ["bank-b-data:/data:ro"]
+    ports: ["127.0.0.1:18082:8080"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.22
+    depends_on: [bank-b-engine]
+
+  bank-c-engine:
+    image: go-ledger
+    command: ["/server", "-config", "/run/secrets/bank-c-config"]
+    secrets: [bank-c-config]
+    volumes: ["./quickstart/genesis.json:/genesis.json:ro", "bank-c-data:/data"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.13
+  bank-c-fetcher:
+    image: go-ledger
+    command: ["/fetcher", "-engine", "http://bank-c-engine:8080", "-folder", "/data/public",
+      "-record", "/data/snapshot.json.${GENESIS_HASH_PREFIX:?pass --env-file deploy/quickstart/network.env}.record",
+      "-lifelong", "/data/snapshot.json.${GENESIS_HASH_PREFIX:?pass --env-file deploy/quickstart/network.env}.lifelong.jsonl"]
+    volumes: ["bank-c-data:/data:ro"]
+    ports: ["127.0.0.1:18083:8080"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.23
+    depends_on: [bank-c-engine]
+
+  bank-d-engine:
+    image: go-ledger
+    command: ["/server", "-config", "/run/secrets/bank-d-config"]
+    secrets: [bank-d-config]
+    volumes: ["./quickstart/genesis.json:/genesis.json:ro", "bank-d-data:/data"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.14
+  bank-d-fetcher:
+    image: go-ledger
+    command: ["/fetcher", "-engine", "http://bank-d-engine:8080", "-folder", "/data/public",
+      "-record", "/data/snapshot.json.${GENESIS_HASH_PREFIX:?pass --env-file deploy/quickstart/network.env}.record",
+      "-lifelong", "/data/snapshot.json.${GENESIS_HASH_PREFIX:?pass --env-file deploy/quickstart/network.env}.lifelong.jsonl"]
+    volumes: ["bank-d-data:/data:ro"]
+    ports: ["127.0.0.1:18084:8080"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.24
+    depends_on: [bank-d-engine]
+
+networks:
+  ledger:
+    ipam:
+      config:
+        - subnet: 172.28.70.0/24
+
+volumes:
+  bank-a-data:
+  bank-b-data:
+  bank-c-data:
+  bank-d-data:
+
+secrets:
+  bank-a-config:
+    file: ./quickstart/bank-a.json
+  bank-b-config:
+    file: ./quickstart/bank-b.json
+  bank-c-config:
+    file: ./quickstart/bank-c.json
+  bank-d-config:
+    file: ./quickstart/bank-d.json

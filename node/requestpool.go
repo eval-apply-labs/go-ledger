@@ -98,19 +98,19 @@ func (pool *requestPool) keep(wanted func(ledger.NameRequest) bool) {
 	pool.pending = kept
 }
 
-// AdmitNameRequest runs the name-request intake (spec 4.3) and returns nil once the request is pooled,
-// now or before, or the reason it was refused. Its shape, its checks against the committed view and,
-// last, its signatures run here, off the loop (checkNameRequest); the loop runs the checks against the
-// state again, confirms the signers' keys, and pools it (admitNameRequest).
-func (node *Node) AdmitNameRequest(request ledger.NameRequest) error {
+// AdmitNameRequest runs the name-request intake (spec 4.3) and returns its verdict, as AdmitPayment
+// does: whether the request was newly pooled, and relayed, or the reason it was refused. One already
+// pooled is neither. Its shape, its checks against the committed view and, last, its signatures run
+// here, off the loop (checkNameRequest); the loop runs the checks against the state again, confirms the
+// signers' keys, and pools it (admitNameRequest).
+func (node *Node) AdmitNameRequest(request ledger.NameRequest) (newlyPooled bool, err error) {
 	requestorKey, bankKey, err := node.checkNameRequest(request)
 	if err != nil {
-		return err
+		return false, err
 	}
 	verdict := make(chan admission, 1)
 	node.enqueue(event{kind: eventNameRequest, nameRequest: &request, verifiedKey: requestorKey, verifiedBankKey: bankKey, admit: verdict})
-	_, err = node.awaitAdmission(verdict)
-	return err
+	return node.awaitAdmission(verdict)
 }
 
 // checkNameRequest is the name-request intake's work off the loop (spec 4.3 steps 1 to 3): the shape,

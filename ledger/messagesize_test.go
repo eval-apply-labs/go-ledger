@@ -14,12 +14,12 @@ import (
 // buy an arbitrarily large permanent ledger entry.
 func TestMessageSizeBoundEnforcedInProposeAndApply(t *testing.T) {
 	previousState := buildLedgerState(2, []Account{namedAccount("payer", "100"), namedAccount("payee", "0"), seatedAccount()}, rational("0.1"))
-	previousState.Parameters.MaxMessageBytes = MinMessageBytes
+	previousState.Parameters.MaxMessageBytes = MinMessageBytes()
 	const height = 3
 
 	small := signedPayment("payer", "payee", "1", height)
 	huge, err := SignPayment(testSigner("payer"), Payment{From: "payer", To: "payee", Amount: big.NewRat(1, 1),
-		Comment: strings.Repeat("x", 4*MinMessageBytes), BlockID: height})
+		Comment: strings.Repeat("x", int(4*MinMessageBytes())), BlockID: height})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestMessageSizeBoundEnforcedInProposeAndApply(t *testing.T) {
 	}
 
 	// Same bound for account updates (an unbounded description is a free permanent state write).
-	hugeUpdate := signedUpdate(AccountUpdate{Name: "payer", Description: strings.Repeat("x", 4*MinMessageBytes), BlockID: height})
+	hugeUpdate := signedUpdate(AccountUpdate{Name: "payer", Description: strings.Repeat("x", int(4*MinMessageBytes())), BlockID: height})
 	block = ProposeBlock(testChain(), previousState, zeroHash, zeroHash, BlockContent{AccountUpdates: []AccountUpdate{hugeUpdate}})
 	if len(block.Content.AccountUpdates) != 0 {
 		t.Fatal("ProposeBlock must drop an oversized account update")
@@ -58,8 +58,8 @@ func TestMaxMessageBytesGovernanceFloor(t *testing.T) {
 		maxMessageBytes int64
 		acceptable      bool
 	}{
-		{0, true}, {MinMessageBytes, true}, {12000, true},
-		{MinMessageBytes - 1, false}, {2000, false}, {1, false}, {-1, false},
+		{0, true}, {MinMessageBytes(), true}, {MinMessageBytes() + 7000, true},
+		{MinMessageBytes() - 1, false}, {MinMessageBytes() / 2, false}, {1, false}, {-1, false},
 	} {
 		parameters := base
 		parameters.MaxMessageBytes = testCase.maxMessageBytes
@@ -114,7 +114,7 @@ func TestProposalStaysUnderTheContentBudget(t *testing.T) {
 // MinMessageBytes, fits the largest payment whose comment needs no escaping: a 280-byte comment (the
 // default comment limit), two 32-byte names, a pin, a 27-character amount and a 19-digit block id. Its
 // default fits that payment with every comment byte escaped, as JSON writes <, > and & in six bytes.
-// Payments no longer carry two 1952-byte keys, so a vote may now bound messages at the floor, and the
+// Payments no longer carry two public keys, so a vote may now bound messages at the floor, and the
 // default refuses a payment padded with a 2000-byte comment, seven times the default comment limit.
 func TestMinimumMessageBoundFitsAPayment(t *testing.T) {
 	largest := func(comment string) Payment {
@@ -125,8 +125,23 @@ func TestMinimumMessageBoundFitsAPayment(t *testing.T) {
 	plain, escaped, padded := largest(strings.Repeat("x", 280)), largest(strings.Repeat("<", 280)), largest(strings.Repeat("x", 2000))
 	defaultBound := DefaultParameters().MaxMessageBytes
 	t.Logf("the largest payment: %d bytes, %d with its comment escaped", serializedSize(plain), serializedSize(escaped))
-	if !WithinMessageBound(MinMessageBytes, plain) {
-		t.Errorf("the floor, %d bytes, does not fit the largest payment (%d bytes)", MinMessageBytes, serializedSize(plain))
+	signatureLength := int(signatureBase64Length())
+	if serializedSize(plain) != paymentBytesBesideTheSignature+signatureLength || serializedSize(escaped)-serializedSize(plain) != commentEscapingBytes {
+		t.Errorf("the largest payment is %d bytes beside its signature, and escaping its comment adds %d; want %d and %d",
+			serializedSize(plain)-signatureLength, serializedSize(escaped)-serializedSize(plain), paymentBytesBesideTheSignature, commentEscapingBytes)
+	}
+	if !WithinMessageBound(MinMessageBytes(), plain) {
+		t.Errorf("the floor, %d bytes, does not fit the largest payment (%d bytes)", MinMessageBytes(), serializedSize(plain))
+	}
+	// Each bound is its payment rounded up to a hundred: with ML-DSA-65's signature, 5000 and 6400.
+	for _, bound := range []struct {
+		name    string
+		bytes   int64
+		payment Payment
+	}{{"the floor", MinMessageBytes(), plain}, {"the default bound", defaultBound, escaped}} {
+		if size := int64(serializedSize(bound.payment)); bound.bytes%100 != 0 || bound.bytes < size || bound.bytes-100 >= size {
+			t.Errorf("%s is %d bytes, want its payment's %d rounded up to a hundred", bound.name, bound.bytes, size)
+		}
 	}
 	if !WithinMessageBound(defaultBound, escaped) {
 		t.Errorf("the default bound, %d bytes, does not fit the largest payment with its comment escaped (%d bytes)", defaultBound, serializedSize(escaped))
@@ -135,8 +150,8 @@ func TestMinimumMessageBoundFitsAPayment(t *testing.T) {
 		t.Errorf("the default bound, %d bytes, fits a payment padded with a 2000-byte comment (%d bytes)", defaultBound, serializedSize(padded))
 	}
 	atTheFloor := DefaultParameters()
-	atTheFloor.MaxMessageBytes = 5000
+	atTheFloor.MaxMessageBytes = MinMessageBytes()
 	if !atTheFloor.Acceptable(4) {
-		t.Error("a vote may not bound messages at 5000 bytes, though every payment by name fits")
+		t.Errorf("a vote may not bound messages at %d bytes, though every payment by name fits", MinMessageBytes())
 	}
 }

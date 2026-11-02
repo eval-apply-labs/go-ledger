@@ -36,7 +36,8 @@ func (node *Node) retireDriver() {
 // the height had decided, which no driver counts any more. Both precommits must verify under the key
 // the set that signed the commit holds for the validator's name, the key the proof convicts. An idle
 // node wakes for it (spec 6.6: the candidate carries it), or the proof would wait in memory for other
-// work, and a restart of every node meanwhile, as for a release upgrade, would lose it (spec 6.4).
+// work or the idle heartbeat, and a restart of every node meanwhile, as for a release upgrade, would
+// lose it (spec 6.4).
 func (node *Node) recordLateDoubleSign(vote consensus.Vote) {
 	if vote.Type != consensus.Precommit || vote.Height != node.lastCommit.Height || vote.Round != node.lastCommit.Round {
 		return

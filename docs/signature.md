@@ -1,6 +1,7 @@
 # Signatures
 
-Area: **signature**, the part Phase 3 moves into a signer container of its own. Code: `signing/`,
+Area: **signature**, the part that is to move into a signer container of its own. Phase 3 built the
+other containers, but not the signer: the engine still holds the key. Code: `signing/`,
 `cmd/keygen/`, and the sign log, which lives in `node/persist.go` today.
 
 This doc covers the signature scheme, what every signature binds, keys and `keygen`, the sign log
@@ -9,7 +10,9 @@ that keeps a node from signing twice, and what a double-sign costs.
 ## The scheme: ML-DSA-65
 
 The network has one signature scheme, ML-DSA-65 (FIPS 204), from Go's standard library
-(`crypto/mldsa`). The code is `signing.MLDSA65`.
+(`crypto/mldsa`). The code is `signing/mldsa65.go`. `signing.NetworkScheme()` is the one place that
+chooses it, and no code outside `signing/mldsa65*.go` names ML-DSA; comments elsewhere give its sizes
+only as the example.
 
 | Item | Raw size | In base64 |
 |---|---|---|
@@ -20,16 +23,36 @@ The network has one signature scheme, ML-DSA-65 (FIPS 204), from Go's standard l
 - **Signing is deterministic** (`SignDeterministic`, no context string). The consensus driver needs a
   signature to be a function of what is signed. So every relayed copy of a vote is the same bytes,
   and a node drops a copy of a vote it holds before any check.
-- **Verification refuses a wrong size first.** `MLDSA65.Verify` refuses a key or a signature of any
+- **Verification refuses a wrong size first.** `mldsa65.Verify` refuses a key or a signature of any
   other size before any work, and never panics. Anyone can send a node a signature to check.
 - **One spelling per key.** Keys and signatures travel as standard base64. Only the canonical
   spelling verifies (`signing.CanonicalBase64`), because the ledger compares keys as strings.
+- **Every key that enters is one the scheme accepts.** `Scheme.ValidatePublicKey` refuses a key of
+  the wrong size, one that does not decode, and a degenerate one, as the scheme defines it: a weak
+  key it refuses, or a second encoding of a key. `Verify` refuses every key it refuses.
+  `signing.ValidatePublicKeyBase64` checks the canonical spelling, then asks the scheme, and every key
+  that enters goes through it: a genesis account's, the node config's, a key typed in the wallet, and
+  the new key of a name request or a ⅔ name action. The genesis, the config and the wallet show the
+  scheme's reason. ML-DSA-65 has no second encoding of a key, but it has weak keys, under which a
+  signature with z = 0 and no hint verifies with no private key, and `crypto/mldsa`, like FIPS 204,
+  accepts them all. `mldsa65.ValidatePublicKey` refuses the most degenerate: a key whose t1 has every
+  coefficient 0 or 1023, under which anyone can sign every message, as
+  `TestMLDSA65RefusesKeysAnyoneCanSignUnder` shows by forging a signature under each kind. It is a
+  sanity check, not a guarantee. Other keys with small t1 coefficients let anyone sign many messages
+  or all of them (one coefficient of 1 and the rest 0, or every coefficient 1: all 100 messages
+  tried; every coefficient 2: about 80), and the scheme takes them, as the same test records. No short
+  check covers that family, since whether the forgery works depends on the message; a key's holder
+  can let anyone sign anyway, by publishing its seed; and honest key generation does not make such
+  keys. Ed25519 has both weak keys and second encodings, the points of small order and the y
+  coordinates of p or above, and an Ed25519 scheme refuses them
+  (`review/_evidence_phase2/scheme-drop-in/ed25519.go`).
 - **One implementation is a consensus rule.** Every node must accept exactly the signatures every
   other node accepts. Every node runs the same release, built on Go's `crypto/mldsa`. A build that
   selects the FIPS 140-3 v1.0.0 module, which lacks ML-DSA, does not compile
-  (`signing/fips140v1.go`).
+  (`signing/mldsa65_fips140v1.go`).
 - **The scheme is fixed at genesis.** Changing it means a new network (see
-  [operating-a-network.md](operating-a-network.md#starting-a-new-network)).
+  [operating-a-network.md](operating-a-network.md#starting-a-new-network)), built with the scheme's
+  files replaced (README, *Cryptographic agility*).
 
 Measured on the development machine: a signature takes about 0.9 ms, a verification about
 0.25 ms, and deriving a key from its seed 0.36 ms. So a signer parses the seed once
@@ -66,7 +89,7 @@ one genesis only.
 `cmd/server` also signs once at start, in the `key-self-test` domain, to prove its key pair works.
 That signature is never sent. The requestor signs in the domain of its request's kind, so a signer
 that sees only the domain can tell a bank paying for a customer's registration from a holder
-changing its own key. In Phase 3 the signer is to serve a bank's desk only `registration`,
+changing its own key. The signer, still to come, is to serve a bank's desk only `registration`,
 `name-request-bank` and `freeze`.
 
 A message's id hashes its signed fields, never its signature (`ledger.PaymentID`,
@@ -118,9 +141,13 @@ may have signed before (below).
   serves. The node also keeps the last decided proposal, its block included, in memory until the
   next commit or catch-up, to re-send the last commit.
 - A node back without the log of the height it starts at (a dead disk, an older backup) may have
-  signed there before. It signs nothing there for two re-gossip intervals, so that its peers'
-  re-gossip, once an interval, brings its own earlier votes and proposal back first, then resumes
-  from them (`Node.waitForOwnSignatures`). It waits so at every height it may have signed at: the
+  signed there before. It signs nothing there for 2 × max(`stepTimeoutMs`, `minimumStepTimeoutMs`)
+  (`Node.ownSignaturesWait`): two re-gossip intervals with the slow-down switch off, so that its
+  peers' re-gossip, once an interval, brings its own earlier votes and proposal back first; and
+  twice the switch when the switch is longer, so that in pigeon mode the next carry brings them.
+  Then it resumes from them
+  (`Node.waitForOwnSignatures`). A restart that keeps its sign log never waits, so a long switch
+  delays only a node that lost its log. It waits so at every height it may have signed at: the
   one it starts at; each later one it commits into, up to the highest at which a vote or proposal
   of its own, verified under its key, comes back to it (`Node.noteOwnSignature`); and the network's
   height, where a catch-up from one of those takes it. While it waits at a height, its log stays at
@@ -181,5 +208,6 @@ Only consensus votes and proposals have a conflict slot. Two different payments,
 requests or governance votes from one key are not evidence: wallets keep no sign log, and an honest
 retry must never freeze a name. A stolen key is stopped by its holder's freeze instead.
 
-Phase 3 (planned, not built): the signer refuses a second, different signature for the same height,
-round and type, and writes that to disk before it signs.
+Still to come is the signer: a container of its own that holds the key, refuses a second, different
+signature for the same height, round and type, and writes that to disk before it signs (see
+[TODO.md](../TODO.md)). Until then the engine holds the key, and its sign log does this job.

@@ -67,19 +67,18 @@ func (pool *updatePool) keep(wanted func(ledger.AccountUpdate) bool) {
 	pool.pending = kept
 }
 
-// AdmitUpdate runs the account-update intake (spec 4.2) and returns nil once the update is pooled, now
-// or before, or the reason it was refused. As for a payment, the checks against the committed view and
-// the signature run here (checkUpdate), and the loop runs the cheap checks again and pools it
-// (admitUpdate).
-func (node *Node) AdmitUpdate(update ledger.AccountUpdate) error {
+// AdmitUpdate runs the account-update intake (spec 4.2) and returns its verdict, as AdmitPayment does:
+// whether the update was newly pooled, and relayed, or the reason it was refused. One already pooled is
+// neither. As for a payment, the checks against the committed view and the signature run here
+// (checkUpdate), and the loop runs the cheap checks again and pools it (admitUpdate).
+func (node *Node) AdmitUpdate(update ledger.AccountUpdate) (newlyPooled bool, err error) {
 	verifiedKey, err := node.checkUpdate(update)
 	if err != nil {
-		return err
+		return false, err
 	}
 	verdict := make(chan admission, 1)
 	node.enqueue(event{kind: eventUpdate, update: &update, verifiedKey: verifiedKey, admit: verdict})
-	_, err = node.awaitAdmission(verdict)
-	return err
+	return node.awaitAdmission(verdict)
 }
 
 // checkUpdate is the account-update intake's work off the loop (spec 4.2 steps 1 to 3), against the

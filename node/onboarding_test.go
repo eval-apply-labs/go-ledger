@@ -140,15 +140,15 @@ func TestCheckpointGivingRealNamesForeignKeysIsRefused(t *testing.T) {
 	}
 }
 
-// countingScheme is ML-DSA-65 that counts its signature checks.
-type countingScheme struct { // implements signing.Scheme: MLDSA65's methods, with Verify replaced
-	signing.MLDSA65
+// countingScheme is the network's scheme, counting its signature checks.
+type countingScheme struct { // implements signing.Scheme: the network scheme's methods, with Verify replaced
+	signing.Scheme
 	checks *atomic.Int64
 }
 
 func (scheme countingScheme) Verify(publicKey, message, signature []byte) bool {
 	scheme.checks.Add(1)
-	return scheme.MLDSA65.Verify(publicKey, message, signature)
+	return scheme.Scheme.Verify(publicKey, message, signature)
 }
 
 // A peer can pad a checkpoint's commit with copies of one anchor name's vote, each signed under some
@@ -164,7 +164,7 @@ func TestAnchorChecksOneVotePerName(t *testing.T) {
 	genesis := testGenesis(accounts, time.Second, 0)
 	checks := &atomic.Int64{}
 	chain := staticChain(names...)
-	chain.Scheme = countingScheme{checks: checks}
+	chain.Scheme = countingScheme{Scheme: signing.NetworkScheme(), checks: checks}
 	joiner := New(testConfig(chain, "joiner", genesis), NewHTTPTransport(nil))
 
 	// The real set signs, except that validator-0's vote is the impostor's; then 20 copies of that vote.
@@ -237,7 +237,7 @@ func TestPaddedCheckpointIsRefusedBeforeAnyPadIsVerified(t *testing.T) {
 	genesis := testGenesis(accounts, time.Second, 0)
 	checks := &atomic.Int64{}
 	chain := staticChain(names...)
-	chain.Scheme = countingScheme{checks: checks}
+	chain.Scheme = countingScheme{Scheme: signing.NetworkScheme(), checks: checks}
 	joiner := New(testConfig(chain, "joiner", genesis), NewHTTPTransport(nil))
 	anchor := joiner.view.Load().validators
 

@@ -42,8 +42,8 @@ is to be read and written in the spelled-out style. The spec was written as chan
 | Booleans in digests and signed fields | `1` or `0` |
 | Amounts | the canonical decimal of §3.3, in digests, signed fields and JSON alike |
 | 32-byte digests and nonces | the raw 32 bytes in digests and preimages; in JSON, Go's default for `[32]byte` (an array of 32 numbers), as today |
-| Public keys | standard base64 with padding, canonical (`signing.CanonicalBase64`), of exactly 1952 bytes: 2604 characters |
-| Signatures | the same, of exactly 3309 bytes: 4412 characters |
+| Public keys | standard base64 with padding, canonical (`signing.CanonicalBase64`), of bytes the scheme's `ValidatePublicKey` accepts: the right size, decodable, not degenerate (as the scheme defines it: a second encoding of a key, or a weak key it refuses). With ML-DSA-65 that is 1952 bytes (2604 characters) whose t1 does not have every coefficient 0 or 1023: under such a key anyone can sign every message, with no private key. That is a sanity check on the most degenerate weak keys, not a guarantee: other keys with small t1 coefficients let anyone sign many or all messages, and pass, since no short check covers them, a key's holder can let anyone sign anyway by publishing its seed, and honest key generation does not make them (`mldsa65.ValidatePublicKey`; review follow-up, 2026-11-01). `signing.ValidatePublicKeyBase64` checks both, for every key that enters: genesis accounts, the node config, a key typed in the wallet, and the `NewKey` of a name request or a name action |
+| Signatures | standard base64 with padding, canonical, of exactly 3309 bytes: 4412 characters |
 | Private keys | a 32-byte seed (`mldsa.NewPrivateKey(mldsa.MLDSA65(), seed)`); base64, 44 characters |
 | JSON keys of ledger, consensus and node wire types | the Go field names, with no tags, as today. A tag the rename pass added to keep an old wire key goes when this spec redefines the type. HTTP views and config files keep their lowercase tags. |
 
@@ -153,7 +153,7 @@ spelling, a malformed amount parameter (naming it), and any key that matches no 
 Then `ValidateGenesis` refuses the file, with a message naming the field, if:
 
 1. `networkName` or an account `name` is not canonical (§3.2), or two accounts share a name.
-2. A `publicKey` is not canonical base64 of 1952 bytes, or two accounts share a key.
+2. A `publicKey` is not a public key in its one spelling (§0.2), or two accounts share a key.
 3. An `amount` does not parse (§3.3), or exceeds `maxAccountBalance`. Zero is allowed.
 4. A `delegate` is neither "" nor an account name.
 5. A `bank` is neither "" nor an account name, is the account's own name, or is not seated in the
@@ -163,6 +163,8 @@ Then `ValidateGenesis` refuses the file, with a message naming the field, if:
    Dynamic mode: `validatorThreshold` does not parse or is not above 0.
 7. The parameters fail `Acceptable` (§3.4) for the genesis validator count.
 8. The genesis seats no name.
+9. An `address` is neither "" nor an address in its one plain form (§4.2, `ledger.CanonicalAddress`;
+   review follow-up, 2026-11-01).
 
 ### 2.3 Genesis state, genesis hash and network id
 
@@ -192,12 +194,12 @@ Then `ValidateGenesis` refuses the file, with a message naming the field, if:
 | `blockIntervalMs` | `1000` | as today |
 | `stepTimeoutMs` | `3000` | as today |
 | `maxPeers` | `0` | as today |
-| `maxMessageBytes` | `6400` | owner to confirm (§12): fits the largest payment, 6361 bytes when every comment byte is escaped |
-| `newKeyFee` | `1` | owner to confirm |
+| `maxMessageBytes` | `6400` | kept (§12, 2026-11-01): fits the largest payment, 6361 bytes when every comment byte is escaped; it follows the scheme's signature size |
+| `newKeyFee` | `1` | kept (§12, 2026-11-01) |
 | `changeDelayBlocks` | `86400` | decided: about a day at one block per second |
-| `retainBlocks` | `604800` | owner to confirm: a week at one block per second |
-| `maxPaymentAmount` | `100000` | owner to confirm |
-| `maxAccountBalance` | `10000000` | owner to confirm |
+| `retainBlocks` | `604800` | kept (§12, 2026-11-01): a week at one block per second |
+| `maxPaymentAmount` | `100000` | kept (§12, 2026-11-01) |
+| `maxAccountBalance` | `10000000` | kept (§12, 2026-11-01) |
 
 ### 2.5 Example
 
@@ -237,7 +239,7 @@ type Account struct {
 	Bank          string
 	Delegate      string   // the name this balance backs as stake; "" for none
 	Description   string
-	Address       string   // the gossip URL a validator publishes (peer DNS)
+	Address       string   // the gossip URL a validator publishes (peer DNS): "" or a plain address (§4.2)
 	Frozen        bool
 	PendingKey    string   // a key change waiting for PendingHeight; "" for none
 	PendingBank   string   // a bank change waiting for PendingHeight; "" for none
@@ -260,7 +262,7 @@ A frozen account has no pending change. A key in state is the current key of exa
 ### 3.2 Names
 
 - A name is 1 to 32 bytes of lowercase ASCII letters, digits and hyphens. It starts and ends with
-  a letter or a digit: `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`. Owner to confirm (§12).
+  a letter or a digit: `^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$`. Kept by the owner (§12, 2026-11-01).
 - The canonical form is the name itself. Nothing is normalised in the protocol: `Alice` is not a
   name. The wallet lowercases and trims what a person types, shows the result, and refuses
   anything else.
@@ -312,7 +314,7 @@ type LedgerParameters struct {
 - `fields()` lists the parameters in exactly the order above, each as text (amounts canonical,
   integers decimal). It feeds both the parameter digest and the parameter-vote preimage, as today.
 - `Acceptable(participants)` must refuse a nil amount and any value outside the bounds in the
-  comments. The ceilings (owner to confirm, §12 Q22) keep `h + ChangeDelayBlocks` and
+  comments. The ceilings (kept by the owner, §12 Q22) keep `h + ChangeDelayBlocks` and
   `h + RetainBlocks` far inside int64, so one vote or one typo cannot file changes that never fall
   due. `MaxPeers` and `MaxMessageBytes` are int64, so a 32-bit node decodes every value a 64-bit
   node does.
@@ -460,8 +462,22 @@ type AccountUpdate struct {
 }
 ```
 
-"-" is never a name (§3.2), so it can mean "none" (owner to confirm, §12 Q23). Without it a
+"-" is never a name (§3.2), so it can mean "none" (kept by the owner, §12 Q23). Without it a
 delegation, for example a treasury's (E42), or a published address (E11) could never be withdrawn.
+
+An address has one plain form (`ledger.CanonicalAddress`, review follow-up, 2026-11-01): `http://` or
+`https://`, a host in lowercase, and an optional `:port` from 1 to 65535 with no leading zero, with
+nothing after it: no user info, no path (not even `/`), no query and no fragment. The host is a host
+name in lowercase (dot-joined labels of 1 to 63 letters, digits and hyphens, not starting or ending
+with a hyphen; an IPv4 address is one) or an IPv6 address in brackets, of hexadecimal digits, colons
+and dots, with no zone. The grammar is written out in the code, not left to a URL parser, because a
+block's validity depends on it and every node must take the same addresses whichever Go release built
+it. So an address has one spelling, as a name does. An explicit default port (`http://host:80`) is taken: it
+names the same node, and nothing compares addresses. Nodes gossip to an address and wallets ask it
+for its height (§7.2), so anything more in it would make another request of it: the review found that
+a path or a query turned a wallet's question into a request for the wallet's own page, which asked
+again without end, and could reach any URL on the wallet's network. The genesis (§2.2) and every
+update (intake step 2, rule 20) refuse any other form.
 
 ```json
 {"Name":"alice","Delegate":"bank-a","Description":"","Address":"","BlockID":1043,
@@ -477,8 +493,9 @@ delegation, for example a treasury's (E42), or a published address (E11) could n
   1. The body is at most 1 MiB and decodes. `Name` is canonical; `Delegate` is "", "-" or
      canonical; the signature has the exact size; at least one of `Delegate`, `Description`,
      `Address` is set.
-  2. Against S: `H <= BlockID <= H + 64`; the JSON is at most `MaxMessageBytes`; `Name` exists and
-     is not frozen; `Delegate` is "", "-", or exists and is not frozen.
+  2. Against S: `H <= BlockID <= H + 64`; the JSON is at most `MaxMessageBytes`; `Address` is "",
+     "-" or a plain address (above); `Name` exists and is not frozen; `Delegate` is "", "-", or
+     exists and is not frozen.
   3. The signature verifies under `Name`'s key in S.
   4. On the loop: step 2 again; the key is unchanged; an update with the same id already pooled is
      accepted again; no other update is pooled for the same `Name` and `BlockID`. Then it is pooled
@@ -536,7 +553,8 @@ type NameRequest struct {
 - **Shape checks, for every kind, before anything else:** `Kind` is one of the four; `Name`,
   `Requestor` and every non-empty `Bank` are canonical names; `Requestor` equals `Name` except in a
   registration; each field the table marks "" or null is empty, and each other field is set;
-  `NewKey` and every signature the kind uses have the exact size; `BlockID > 0`.
+  `NewKey` is a public key in its one spelling (§0.2), and every signature the kind uses has the
+  exact size; `BlockID > 0`.
 - Bank and new-key signatures are not double-sign evidence. Two different requests for one name are
   logged for operators and freeze nothing: wallets keep no sign log, so a re-signed retry must never
   freeze an honest name.
@@ -559,7 +577,7 @@ type NameRequest struct {
      so a request that breaks both gets the fee's reason. A full pool and a taken slot share one
      logged refusal.
      The route answers `202`, or `409` with the reason.
-- `node.MaxRequestLookahead` is 3,600 blocks, an hour at one block per second (owner to confirm,
+- `node.MaxRequestLookahead` is 3,600 blocks, an hour at one block per second (kept by the owner,
   §12 Q24), against 64 for payments and updates. Every signature covers `BlockID`, and three
   people may sign one request on different machines, so they need more than a minute when the
   chain is moving. Pending fees and one request per `Name` and `BlockID` still bound the pool. A
@@ -658,8 +676,8 @@ type Reassignment struct {
   3. `PreviousAmount` and `NewAmount` are both null or both set. If set, `PreviousAmount` equals
      the name's balance (0 for a new name), and `NewAmount` is at most
      `max(MaxAccountBalance, PreviousAmount)`;
-  4. if `NewKey` is set, it has the exact size, is no name's current key, and `NewKeySignature`
-     verifies under it; if not, `NewKeySignature` is "";
+  4. if `NewKey` is set, it is a public key in its one spelling (§0.2), is no name's current key,
+     and `NewKeySignature` verifies under it; if not, `NewKeySignature` is "";
   5. `Bank` is "" or "-", or exists, is not frozen, and is not `Name`;
   6. for a new name (no account has it): `NewKey` and `NewAmount` are set, and `Freeze` and
      `Unfreeze` are not;
@@ -971,9 +989,9 @@ state; nothing a block does counts for its own checks.
 
 **G. Account updates**
 
-20. Each has `BlockID == h`, a valid signature, a size at most `MaxMessageBytes`, a `Name` that
-    exists and is not frozen, a `Delegate` that is "", "-", or exists and is not frozen, and at
-    least one field set.
+20. Each has `BlockID == h`, a valid signature, a size at most `MaxMessageBytes`, an `Address` that
+    is "", "-" or a plain address (§4.2), a `Name` that exists and is not frozen, a `Delegate` that
+    is "", "-", or exists and is not frozen, and at least one field set.
 21. At most one update per `Name`; neither `Name` nor `Delegate` is in L.
 
 **H. The one-third cap**, only when the block carries evidence
@@ -1146,8 +1164,8 @@ the timings reaches them within a second (owner, 2026-10-31, code note C21; it w
    key; the served `Checkpoint` never carries them. `loadSnapshot` reloads them and prunes them by
    item 4 against the loaded state. Until the next snapshot write, a proof lives only in memory (the
    running driver's vote sets, a late precommit, a second proposal), and a restart loses it. A proof
-   the cap holds back while the chain idles stays in memory until other work brings a commit (§6.6;
-   accepted on 2026-10-31, §12).
+   the cap holds back while the chain idles stays in memory until other work or the idle heartbeat
+   brings a commit, at most `IdleHeartbeat` later (§6.6; accepted on 2026-10-31, §12).
 
 ### 6.5 Intake, pools and the committed view
 
@@ -1167,11 +1185,12 @@ the timings reaches them within a second (owner, 2026-10-31, code note C21; it w
 - Gossip: new message type `MessageNameRequest`, beside the renamed `MessagePayment` and the rest,
   with relay key `"request:" + request id`.
 
-### 6.6 Idle chain (owner to confirm)
+### 6.6 Idle chain
 
 - After a commit, the next height starts after `BlockIntervalMs`, as today (at a height a node back
-  without its sign log waits at, after the longer of it and two re-gossip intervals, §6.9), but only
-  when there is work. Work is any of: the chain has committed no block yet (so block 1 always
+  without its sign log waits at, after the longer of it and two re-gossip intervals, §6.9), when
+  there is work. With none, it starts `IdleHeartbeat` later, five minutes (the heartbeat, below; the
+  owner's option C of Q5). Work is any of: the chain has committed no block yet (so block 1 always
   commits, and a new wallet has a commit to pin); the candidate block carries something; a pool
   holds an entry for a later block; some account has a pending change; the sign log holds a vote or
   proposal for the height (a restart mid-height; the empty log of §6.9 does not count); the node
@@ -1179,28 +1198,48 @@ the timings reaches them within a second (owner, 2026-10-31, code note C21; it w
 - A node with no driver is in one of three states: the window after a commit (`BlockIntervalMs`,
   or two re-gossip intervals if longer at a height it waits at), the re-gossip wait of a node back
   without its sign log (`waitForOwnSignatures`, §6.9), or idle. Only `startHeight` sets the `idle`
-  field: right after it builds the candidate, if `hasWork` is false, it sets `idle` and returns with
-  no driver. Otherwise it clears `idle` and goes on. The wait clears it too, after a catch-up.
-- An idle node signs nothing and re-gossips nothing. `wakeIfIdle` does nothing unless `idle` is
-  set; then it calls `startHeight`. It is called once a payment, update, name request or certificate
-  is pooled (a certificate that replaces a pooled one too: it may be the first a block can carry),
-  once `onProposal` takes a proposal, once `rememberVote` keeps a countable vote, and once
-  `recordLateDoubleSign` keeps a proof (S10's check: otherwise the proof waits in memory, and a
-  restart of every node meanwhile loses it; kept, 2026-10-31, §12). The
-  two waits keep their own timers, so a peer's vote during the lost-log wait cannot make the node
-  sign before its own earlier votes come back, and a payment in the post-commit window does not
-  start the next height early.
-- So a chain that nobody uses commits and records nothing. A pending change keeps it moving at
-  `BlockIntervalMs` until it falls due, so `ChangeDelayBlocks` keeps its meaning of about a day. An
-  entry for a later block keeps it moving until that block, or that entry would never land. So one
-  name can keep the chain busy for free with updates (Q5): the cost is the busy rate of §9.3, and
-  the ⅔ can freeze such a name.
+  field: right after it builds the candidate, if `hasWork` is false, it sets `idle`, arms the
+  heartbeat and returns with no driver. Otherwise it clears `idle` and goes on. The wait clears it
+  too, after a catch-up.
+- An idle node signs nothing and re-gossips nothing until work or the heartbeat comes. `wakeIfIdle`
+  does nothing unless `idle` is set; then it calls `startHeight`. It is called once a payment,
+  update, name request or certificate is pooled (a certificate that replaces a pooled one too: it
+  may be the first a block can carry), once `onProposal` takes a proposal, once `rememberVote` keeps
+  a countable vote, and once `recordLateDoubleSign` keeps a proof (S10's check: otherwise the proof
+  waits in memory, and a restart of every node meanwhile loses it; kept, 2026-10-31, §12). The two
+  waits keep their own timers, so a peer's vote during the lost-log wait cannot make the node sign
+  before its own earlier votes come back, and a payment in the post-commit window does not start
+  the next height early.
+- The heartbeat. When `startHeight` leaves a height idle, it arms a timer (`armIdleHeartbeat`) that
+  hands the loop an `eventIdleHeartbeat` for that height `IdleHeartbeat` later. `onIdleHeartbeat`
+  acts only if the node is still idle at that height: it marks the height (`heartbeatHeight`),
+  which `hasWork` counts as work, and calls `startHeight`. With no work the candidate is an ordinary
+  empty block, which `ProposeBlock` builds from empty pools, `ApplyBlock` accepts and the record
+  keeps like any other (§6.8); the first node whose heartbeat fires proposes or votes, and that
+  wakes the others. Like the post-commit timer, the heartbeat belongs to the height that armed it,
+  so a commit or a catch-up makes it stale; and like `wakeIfIdle` it acts only on `idle`, so it
+  cannot cut either wait short, nor start a second driver once work has started the height. A node
+  woken and left idle again at a height arms another; the first to fire starts the height.
+- Why a heartbeat: a block about every `IdleHeartbeat`, after the post-commit window
+  (`BlockIntervalMs`), shows that the validators are alive and agree, and lets a wallet tell an idle
+  chain from a stalled one: no new height for well over `IdleHeartbeat + BlockIntervalMs` means a
+  stall. A ⅔ vote may raise `BlockIntervalMs` to a day, and the idle chain's blocks then come as
+  rarely (review follow-up, 2026-11-01). So `node.IdleHeartbeat` is a constant, not a governed
+  parameter, and a wallet can rely on it. Tests set a shorter one through `Config`'s unexported
+  `idleHeartbeat` field.
+- So a chain that nobody uses commits and records one empty block per heartbeat, 288 a day; the
+  cost is in §9.3. A pending change keeps it moving at `BlockIntervalMs` until it falls due, so
+  `ChangeDelayBlocks` keeps its meaning of about a day. An entry for a later block keeps it moving
+  until that block, or that entry would never land. So one name can keep the chain busy for free
+  with updates (Q5): the cost is the busy rate of §9.3, and the ⅔ can freeze such a name.
 - Catch-up asks a peer's `/hdls/status` first, and fetches `/hdls/checkpoint` only from a peer whose
   height is ahead (a checkpoint is now about 2.9 KB per account).
 - Code: `hasWork(candidateBlock ledger.Block) bool` and `wakeIfIdle()` in new file
   `node/idle.go`. Slice S5 adds the `idle` field to `Node`, the check in `startHeight` and every
   `wakeIfIdle` call above, with stub bodies (`hasWork` returns true, `wakeIfIdle` does nothing);
-  slice S10 fills in the two bodies.
+  slice S10 fills in the two bodies. The heartbeat (after Q5's decision) adds, in the same file, the
+  constant `IdleHeartbeat`, `armIdleHeartbeat` and `onIdleHeartbeat`, and in `node/node.go` the
+  `heartbeatHeight` field, the `eventIdleHeartbeat` event and the call in `startHeight`.
 
 ### 6.7 Catch-up, trust anchor, checkpoint verification
 
@@ -1380,6 +1419,10 @@ under the node's own key. Beyond the new message formats:
 | `GET /hdls/governance` | the ten parameters; validators by name; pooled name actions with their new fields |
 | `GET /hdls/record`, `/hdls/lifelong-record` | **new** (§6.8) |
 
+Every request a node or a wallet makes, to gossip, to catch up or to read a node, goes through
+`node.NewHTTPClient`, which follows no redirect: a 3xx answer is a failed one, so no node, and no one
+on the plain-HTTP path, can send a request on to another URL (review follow-up, 2026-11-01).
+
 ## 7. Wallet and admin UI
 
 ### 7.1 Key generation and key file
@@ -1413,9 +1456,60 @@ under the node's own key. Beyond the new message formats:
   starts with the `-network` flag followed by `/`, checks that the first checkpoint's `Validators`
   hash to its header's `ValidatorsHash`, verifies the checkpoint against them, and pins both. Later
   it believes a state only when pinned names holding more than ⅔ of the pinned power signed it,
-  each under its pinned key. The pin does not update itself: when banks re-key or change, the bank
-  hands over a new list, as Phase 1's docs say. Until then, if banks holding a third or more of the
-  pinned power are frozen or re-keyed, no state verifies (Q17).
+  each under its pinned key.
+- The pin follows the chain (Q17). When a state verifies under the pin, its checkpoint is consistent
+  (its `Validators` hash to the header's `ValidatorsHash`), and its commit is a quorum of those
+  `Validators` too, the wallet pins them in place of the old set and rewrites `<keyfile>.trust` (a
+  new file renamed over the old one). The network id never changes. So the pin moves only to a set
+  that more than ⅔ of the previous pin signed for, never by the looser rule of a node's catch-up,
+  where anchor names holding more than ⅓ suffice (§6.7): a pin may hold keys that leaked, often the
+  reason a bank was frozen or re-keyed. If the file no longer holds the pin the wallet holds, because someone put a list there
+  while the wallet ran, the wallet follows the chain in memory and keeps the file, which it reads at
+  its next start.
+- If banks holding a third or more of the pinned power were frozen or re-keyed between two of the
+  wallet's reads, no state verifies until a new list is installed. When the commit is a quorum of the
+  set its checkpoint carries, the pages say so in plain words: the banks that sign have changed since
+  this wallet last checked. They name the two ways a new list is installed. Get the current list
+  from any bank, the `.trust` file of the bank's own wallet, save it as `<keyfile>.trust`, and
+  restart the wallet. Or switch to another bank: delete `<keyfile>.trust` and restart the wallet with
+  that bank's node, at the bank, so that it pins on first use. The wallet reads the file only at
+  start. The freeze button still works. Any node, or anyone on the plain-HTTP path, can make the
+  pages say this, by serving a made-up set that signs for itself, and so invite the user to pin its
+  list. So the message also says: take a new list, or pin again, only at a bank, never through a
+  node you do not trust (review follow-up, 2026-11-01).
+- After a state verifies at committed height H, the main page asks the other banks (Q25). It asks
+  the node of each validator of that state for `/hdls/status`, at the address the validator's
+  account publishes (none for an empty address), all at once, waiting at most 2 seconds and reading
+  each answer up to the bound of the wallet's own status read. An answer counts only if it names the
+  pinned network id. The wallet builds the URL from the address's scheme and host alone
+  (`statusURLAt`), never by appending to the text; its client follows no redirect (§6.10); and the
+  questions end with the page's request, once the browser leaves the page. The main page answers
+  `/` alone, so a question to the wallet's own address is not found and asks nothing. Before these,
+  a validator publishing `http://<wallet>/?`, or a node redirecting to the wallet's page, made one
+  page view ask the wallet's own page, which asked again, without end (review follow-up, 2026-11-01).
+  Then:
+  - **Behind.** Banks holding more than ⅓ of the set's power report a committed height above H + 10.
+    The page warns that its node may be hiding newer blocks, with each bank's height and the share
+    of the power ahead. The 10 blocks cover the network's moves while the wallet reads its
+    checkpoint (at most 5 seconds) and asks (at most 2), and nodes a block apart, at the default
+    of a block a second. A hidden change keeps the chain committing a block each `BlockIntervalMs`
+    until it falls due (§6.6), so the warning comes about 10 blocks after the change is filed.
+  - **Unchecked.** The banks that answered hold no more than ⅔ of the power: the page says it could
+    only check banks holding X% of the power.
+  - **Aligned.** More than ⅔ answered and the node is not behind: the page says quietly that the
+    state is as current as theirs.
+  - **Stalled.** The wallet remembers, in memory, when it first saw the network's newest committed
+    height: the newest height that banks holding more than ⅓ of the power reach, or H if newer. When
+    that has not moved for twice the longest an idle chain waits between blocks, 2 ×
+    (`node.IdleHeartbeat` + the verified state's `BlockIntervalMs`), about 10 minutes at the default
+    interval, the page warns that the chain may have stalled (`chainStallAfter`; review follow-up,
+    2026-11-01: it was 2 × the heartbeat alone, which a raised `BlockIntervalMs` outlasts).
+
+  The heights are not signed, and need not be: they choose a note on the page, never the state it
+  shows, which the pinned ⅔ signed. Lying nodes raise a false "behind" only if their banks hold more
+  than ⅓ of the power, and make a node that hides blocks look aligned only if they hold more than ⅓
+  too: of the more than ⅔ that answered, the honest banks would otherwise hold more than ⅓ and report
+  the newer blocks. A page reads one state and asks once, so nothing is cached.
 - The wallet signs with the pinned network id.
 - It reads the checkpoint once per page, not once per field. Its accounts table shows each name's
   bank of record, frozen mark and balance, and a key fingerprint on demand, never full keys (2.6 KB
@@ -1456,7 +1550,9 @@ Block numbers:
 - **Key change, or a sale.** The new wallet shows its key. The holder's wallet drafts a key change
   to it (the bank of record and the fee filled in) and signs. The new wallet signs the proof of
   possession, the bank's desk co-signs, and someone submits. Both wallets show the pending change
-  until it applies; then the new wallet owns the name.
+  until it applies; then the new wallet owns the name. A bank that hides a change from its customer
+  keeps serving the state from before it was filed; the other banks then report newer blocks, and
+  the customer's main page says its node may be hiding them (§7.2, Q25).
 - **Bank change.** The holder drafts it with the new bank and signs; the new bank's desk co-signs;
   it is submitted, and the change is pending for the delay.
 - **Freeze.** One button on the main page. After a confirm step the wallet signs a freeze for its
@@ -1495,6 +1591,9 @@ the key into the signer, which serves the desk only `registration`, `name-reques
   it, with a new key. Contact your bank."
 - The wallet's key is no longer its name's key: it shows "not registered", names the last name it
   held (from `<keyfile>.state`), and says that the name now has another key.
+- No state verifies because the banks that sign changed: the plain-words refusal of §7.2 (Q17).
+- The other banks report newer blocks, could not be checked, or the chain stopped moving: the notes
+  of §7.2 (Q25).
 
 ### 7.6 Admin page
 
@@ -1609,11 +1708,18 @@ must not select the FIPS 140-3 v1.0.0 module, which lacks `crypto/mldsa`.
 | 7 (5) | 27.4 KB | 46.2 KB | 2.37 GB | 16.6 GB |
 | 21 (15) | 72.2 KB | 128.6 KB | 6.23 GB | 43.6 GB |
 
-A chain nobody uses records nothing (§6.6). A pending change keeps the chain moving for
-`ChangeDelayBlocks` blocks: a key change costs one day of record, 1.6 GB with 4 validators. Free
-updates can keep it moving for good (Q5); the last column bounds what that costs. In dynamic mode
-most busy blocks change the set (§6.8), so most entries carry it: 2.52 GB a day with 4 validators
-and 11.1 GB with 21, or 17.7 GB and 77.8 GB over the default retention.
+A chain nobody uses records one empty block per `IdleHeartbeat` (§6.6): 288 entries a day, 2,016
+a week. An empty block moves no stake, so in dynamic mode too only the first entry of each unit file
+carries the set, about 3 a day. That is about 5.3 MB a day and 37 MB a week with 4 validators, and
+21 MB a day and 147 MB a week with 21. At that rate the default `RetainBlocks` covers 2,100 days,
+so an unused chain's record grows for about 5.8 years before pruning holds it at the last column's
+size.
+
+A pending change keeps the chain moving for `ChangeDelayBlocks` blocks: a key change costs one day
+of record, 1.6 GB with 4 validators. Free updates can keep it moving for good (Q5); the last column
+bounds what that costs. In dynamic mode most busy blocks change the set (§6.8), so most entries
+carry it: 2.52 GB a day with 4 validators and 11.1 GB with 21, or 17.7 GB and 77.8 GB over the
+default retention.
 
 ### 9.4 CPU per block
 
@@ -2087,30 +2193,64 @@ build began:
   and UI.
 - **2026-10-30** (§10.2): slice S12, a guide to reading the code, which is also the last
   read-through before the push.
+- **2026-11-01** (the rest of this table). The owner:
+  - Q1: keep the default ("dont bother" with a lookalike check).
+  - Q5: option C, a slow heartbeat while idle. A node that finds no work starts the height anyway
+    `node.IdleHeartbeat` (5 minutes) later, so an idle chain commits an empty block about every 5
+    minutes, and runs at full speed when there is work (§6.6). Updates stay free. The owner's
+    earlier design always had a heartbeat: "option c makes the most sense, even every 5 minutes
+    would be good". Since then, the idle-chain cases kept on 2026-10-31 (a proof the one-third cap
+    holds back, the wallet's payment counter waiting for the chain) last a few heartbeats at most.
+  - Q12: keep the default: a double-sign freezes the name and takes no money. The owner: "q12 yes
+    that's fine".
+  - Q16: keep the default: "if we are at the point that all banks are frozen you might as well
+    restart a new chain".
+  - Q17: the pin follows the chain. Each checkpoint that pinned names holding more than ⅔ of the
+    pinned power signed, and whose commit is a quorum of the set it carries, moves the pin to that
+    set; never the ⅓ anchor a node uses, as an old pin may hold leaked keys. When the pin falls too
+    far behind, the wallet says the banks changed, and how to take a new list or switch banks (a
+    bank change needs only the new bank). The owner: "the practical option is to switch banks, as
+    the bank is frozen but the customers can still move around", and, on why following signed
+    checkpoints is sound, "any 'current state' message is signed from the bank once and then shown
+    from the CDN" (§7.2).
+  - Q25: yes. The wallet asks the nodes of the banks in its verified state how far the chain has
+    gone, and says whether its node is behind, how much of the power it could check, whether the
+    banks are aligned, and whether the chain has stalled (no new block for twice the heartbeat and the
+    block interval).
+    The owner: "interrogate enough banks so you have 2/3 of the voting power, so you are as
+    informed as them on the current state" (§7.2).
+  - Every other row: keep the builder default ("keep the rest as defaults"), the readings R1 to R11
+    of §0.3 with them.
+  - Not a row of this table, the owner's design for keys: "the method should be a
+    validate(publickey) which takes care not only of the size but also on these kind of degenerate
+    cases". `Scheme.ValidatePublicKey` checks every key that enters. For ML-DSA-65 it also refuses
+    the most degenerate of the weak keys found while building it: a t1 with every coefficient 0 or
+    1023, under which anyone can sign every message (§0.2, `TestMLDSA65RefusesKeysAnyoneCanSignUnder`).
+    Other keys with small t1 coefficients let anyone sign many or all messages too, and pass: no
+    short check covers them, a key's holder can let anyone sign anyway by publishing its seed, and
+    honest key generation does not make them (review follow-up, 2026-11-01).
 
-Still open: every builder default in the table but Q21 (Q3, Q4 and Q24 carry an owner decision
-beside theirs), and the readings R1 to R11 of §0.3. The open points of S10 and S11 are decided
-(above).
+Nothing is open: every row is decided, by the owner or as the builder default the owner kept.
 
 | # | Question | Builder default | Why |
 |---|---|---|---|
-| Q1 | Name character set and canonical form | 1 to 32 lowercase ASCII letters, digits and hyphens, starting and ending with a letter or digit; no normalisation in the protocol | one spelling per name (E34's lesson for keys); DNS-like and readable; the wallet lowercases input. Lookalikes remain (`rn` and `m`, `vv` and `w`, `1` and `l`, `0` and `o`), so the wallet shows the payee's bank before paying. Option: the ledger refuses a name whose skeleton matches an existing name's, about ten lines |
+| Q1 | Name character set and canonical form | **Kept, 2026-11-01.** 1 to 32 lowercase ASCII letters, digits and hyphens, starting and ending with a letter or digit; no normalisation in the protocol | one spelling per name (E34's lesson for keys); DNS-like and readable; the wallet lowercases input. Lookalikes remain (`rn` and `m`, `vv` and `w`, `1` and `l`, `0` and `o`), so the wallet shows the payee's bank before paying. Option: the ledger refuses a name whose skeleton matches an existing name's, about ten lines |
 | Q2 | `NewKeyFee` default | `1` (ten payments at a cost of `0.1`) | a request is 16 KB, as much block space as 3.5 payments, and costs three signature checks per node |
 | Q3 | Caps defaults | `maxPaymentAmount` 100,000; `maxAccountBalance` 10,000,000. Owner, 2026-10-28: no rule ties `maxPaymentAmount` to `transactionCost`; the docs say how not to configure it | roomy for a village currency (the demo holds 1,425 in all), but real numbers an operator must think about; both ⅔-amendable |
-| Q4 | `RetainBlocks` default | 604,800 (a week at one block per second). Owner, 2026-10-30: the record's files are units of 100 heights named by network (§6.8); the default itself is still the builders' | 11 GB worst case with 4 banks, 44 GB with 21 (18 GB and 78 GB in dynamic mode, §9.3); a chain nobody uses adds nothing |
-| Q5 | Idle-chain policy | start a height only when there is work (§6.6); updates stay free and count as work | a chain nobody uses then signs, re-gossips and records nothing (catch-up still asks the peers' status). Costs: a pending change keeps blocks coming for a day, 1.6 GB of record with 4 banks; and one name can keep the chain busy for free with updates, at the busy rate of §9.3, until the ⅔ freeze it. Alternatives: a fee on updates, or recording only blocks that carry a message |
-| Q6 | `MaxMessageBytes` and the block budget | 6,400 bytes, floor 5,000; block content 768 KiB as today; at most 8 evidence items per block; `/hdls/proposal` takes 2 MiB | the largest payment is 6,361 bytes when every comment byte is escaped (4,961 otherwise); 768 KiB holds 173 payments; a 21-bank certificate is about 100 KB |
+| Q4 | `RetainBlocks` default | 604,800 (a week at one block per second). Owner, 2026-10-30: the record's files are units of 100 heights named by network (§6.8); the default itself is still the builders' | 11 GB worst case with 4 banks, 44 GB with 21 (18 GB and 78 GB in dynamic mode, §9.3); an idle chain adds one empty block every 5 minutes, about 37 MB a week with 4 banks (Q5) |
+| Q5 | Idle-chain policy | **Decided 2026-11-01: a heartbeat while idle.** Start a height when there is work, and otherwise after `node.IdleHeartbeat`, 5 minutes (§6.6); updates stay free and count as work. Until then: start a height only when there is work | a chain nobody uses then signs, re-gossips and records nothing (catch-up still asks the peers' status). Costs: a pending change keeps blocks coming for a day, 1.6 GB of record with 4 banks; and one name can keep the chain busy for free with updates, at the busy rate of §9.3, until the ⅔ freeze it. Alternatives: a fee on updates, or recording only blocks that carry a message |
+| Q6 | `MaxMessageBytes` and the block budget | 6,400 bytes, floor 5,000, with ML-DSA-65: both follow the scheme's signature size since the scheme became a drop-in; block content 768 KiB as today; at most 8 evidence items per block; `/hdls/proposal` takes 2 MiB | the largest payment is 6,361 bytes when every comment byte is escaped (4,961 otherwise); 768 KiB holds 173 payments; a 21-bank certificate is about 100 KB |
 | Q7 | How the requestor reaches the bank's co-signature in Phase 2 | request text between wallets, within the lead of Q24; the desk is the Requests page of the bank operator's wallet, which holds the bank's one key (§7.4) | no signing route on the network-exposed node (the audit's C1 lesson); the same flow as governance votes |
 | Q8 | R1: does `AccountUpdate` keep `Description` and `Address`? | keep both | `Address` is the peer DNS; nothing in the plan removes it |
 | Q9 | R2: may genesis and ⅔-created names have no bank of record? | yes | a single-bank network's bank cannot be its own bank |
 | Q10 | R3: may a seated requestor be its own co-signing bank? | yes | otherwise a genesis bank cannot pay for a customer's registration |
 | Q11 | R4: must a registration's bank and a bank change's new bank be seated? | yes; a key change's bank needs no seat | otherwise any name could become a bank of record and co-sign for a thief |
-| Q12 | R5: does a double-sign still take the balance? | no; the freeze replaces the slash, and the ⅔ decide about the money | an honest fault must not cost money; the ⅔ can claw back |
+| Q12 | R5: does a double-sign still take the balance? | **Kept, 2026-11-01** ("that's fine"). no; the freeze replaces the slash, and the ⅔ decide about the money | an honest fault must not cost money; the ⅔ can claw back |
 | Q13 | R6: does every freeze win its block against payments, updates and requests of that name? | yes | E5's rule, extended; a victim's freeze beats a thief's same-block payment |
 | Q14 | R7: does the ⅔ action clear a pending change of its name? | yes, always | the ⅔ decision must not be overwritten a day later |
 | Q15 | R8: a floor for `ChangeDelayBlocks` | 1; a cut affects only later requests | tests and the demo need small values; the ⅔ can set any delay they choose |
-| Q16 | R9: must every block leave at least one name seated? | yes; the item that would empty the set is left out, never the whole block | otherwise a block can empty the set and halt the chain for good. Cost: the last seated bank has no emergency brake (the demo's founder cannot freeze itself) |
-| Q17 | Should the wallet pin follow re-keyed banks by itself? | no; the bank hands over a new list | the plan's model; a self-updating pin is a light client, which is later work. Cost: once banks holding a third or more of the pinned power are frozen or re-keyed, no state verifies until the new list arrives; the freeze button still works |
+| Q16 | R9: must every block leave at least one name seated? | **Kept, 2026-11-01.** yes; the item that would empty the set is left out, never the whole block | otherwise a block can empty the set and halt the chain for good. Cost: the last seated bank has no emergency brake (the demo's founder cannot freeze itself) |
+| Q17 | Should the wallet pin follow re-keyed banks by itself? | **Decided 2026-11-01: yes, under the ⅔ rule** (§7.2), with a message saying how to take a new list or switch banks when it falls too far behind. Until then: no; the bank hands over a new list | the plan's model; a self-updating pin is a light client, which is later work. Cost: once banks holding a third or more of the pinned power are frozen or re-keyed, no state verifies until the new list arrives; the freeze button still works |
 | Q18 | Checkpoint size limit | keep 64 MiB (about 23,000 accounts) | a village network is far below; raise it with the network |
 | Q19 | R10: does a frozen account's balance stop backing its delegate? | yes | otherwise a thief who re-delegated stolen balances keeps that power after the victims freeze, and with a third of it vetoes the ⅔ for good; the cap still counts it (§5.2) |
 | Q20 | R11: does a freeze clear the pending changes the frozen name co-signed? | yes, when the freeze applies | a key change co-signed with a leaked bank key must not land a day later, even if the ⅔ re-key the bank within the day; honest customers file again, and the fee is not refunded |
@@ -2118,7 +2258,7 @@ beside theirs), and the readings R1 to R11 of §0.3. The open points of S10 and 
 | Q22 | Parameter ceilings | `changeDelayBlocks` ≤ 2,592,000 (30 days), `retainBlocks` ≤ 315,360,000 (ten years), `maxMessageBytes` ≤ 1,048,576, `maxPeers` ≤ 1,000 | `h + value` stays inside int64, and a typo cannot leave every later change pending for good, as E19 did for the timings |
 | Q23 | How does an update or the name action set a field to none? | "-" clears `Delegate`, `Description` and `Address`, and the action's `Bank` | "-" is never a name. Otherwise a delegation (E42's treasury), a published address (E11) or a bank of record could never be withdrawn |
 | Q24 | Signing window for name requests | intake takes `BlockID` up to H + 3,600; the wallet's lead is 120 blocks by default. Owner, 2026-10-30: a freeze gets H + 64, the payments' window | every signature covers `BlockID`, and a sale has three signers on different machines. A long lead keeps a busy chain moving until that block (§6.6) |
-| Q25 | Should the wallet read a second validator's node? | no; it refuses an older state, reports a freeze that did not land, and the manual says one node gives one view | a bank of record that colludes with a thief can hide a pending change from its customer. Reading another pinned validator's checkpoint at its on-chain address, about 30 lines, would catch that when the address is reachable |
+| Q25 | Should the wallet read a second validator's node? | **Decided 2026-11-01: yes, the banks holding the power** (§7.2): behind, unchecked, aligned or stalled. Until then: no; it refuses an older state, reports a freeze that did not land, and the manual says one node gives one view | a bank of record that colludes with a thief can hide a pending change from its customer. Reading another pinned validator's checkpoint at its on-chain address, about 30 lines, would catch that when the address is reachable |
 
 ## Appendix: Review record
 

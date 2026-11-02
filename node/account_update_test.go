@@ -40,7 +40,7 @@ func TestNodeAppliesAnUpdateEndToEnd(t *testing.T) {
 	defer validatorNode.Stop()
 
 	update := signedUpdate(ledger.AccountUpdate{Name: "alice", Delegate: "bank-a", Description: "the founder", BlockID: validatorNode.Snapshot().Height + 4})
-	if err := validatorNode.AdmitUpdate(update); err != nil {
+	if _, err := validatorNode.AdmitUpdate(update); err != nil {
 		t.Fatalf("a valid update was refused: %v", err)
 	}
 	waitFor(t, 5*time.Second, describedAs(validatorNode, "alice", "the founder"), "the update did not reach committed state")

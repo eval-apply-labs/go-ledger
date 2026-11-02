@@ -1,0 +1,12 @@
+# The images build from the repository's root, and copy only the Go sources they need (deploy/*Dockerfile).
+# This keeps the rest out of what is sent to the builder at all: above all the quickstart's private keys.
+deploy/quickstart
+bin
+.git
+# The wallet's files, in case a developer ran it from ui/, which deploy/ui.Dockerfile copies whole: a key
+# file named *.json (wallet.json by default), the files the wallet writes beside it (<key file>.state and
+# .trust, and the temporary ones it renames into place), and a .state or .trust file of any other name.
+ui/**/*.json
+ui/**/*.json.*
+ui/**/*.state
+ui/**/*.trust

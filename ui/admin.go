@@ -114,7 +114,7 @@ func (wallet *Wallet) DraftParameters(checkpoint node.Checkpoint, form parameter
 	}
 	if !next.Acceptable(participants) {
 		return voteDraft{}, fmt.Errorf("the network does not accept these parameters: max message bytes must be 0 (unbounded) or %d to %d, the new key fee and the two caps above 0, the change delay 1 to %d blocks, the retention %d to %d blocks",
-			ledger.MinMessageBytes, ledger.MaxMessageBytesLimit, ledger.MaxChangeDelayBlocks, ledger.MinRetainBlocks, ledger.MaxRetainBlocks)
+			ledger.MinMessageBytes(), ledger.MaxMessageBytesLimit, ledger.MaxChangeDelayBlocks, ledger.MinRetainBlocks, ledger.MaxRetainBlocks)
 	}
 	change := ledger.ParameterChange{NewParameters: next, PreviousParametersDigest: state.Parameters.Digest(), Sequence: state.GovernanceSequence}
 	certificate, _ := json.Marshal(change)
@@ -295,7 +295,7 @@ func (wallet *Wallet) SignReassignment(checkpoint node.Checkpoint, draft string)
 	if err := action.FitsState(state); err != nil {
 		return voteDraft{}, false, fmt.Errorf("the network does not accept this action: %w", err)
 	}
-	if action.NewKey != "" && !ledger.VerifyReassignmentNewKey(signing.MLDSA65{}, wallet.pinnedNetworkID(), action) {
+	if action.NewKey != "" && !ledger.VerifyReassignmentNewKey(signing.NetworkScheme(), wallet.pinnedNetworkID(), action) {
 		return voteDraft{}, false, errors.New("the new key's proof of possession does not verify: hand the draft to the new key's wallet again, and sign the text it hands back")
 	}
 	name, err := wallet.registeredName(checkpoint)
@@ -347,13 +347,13 @@ func (wallet *Wallet) SubmitParameters(pasted string) error {
 	for _, signed := range votes {
 		for _, vote := range signed.Votes {
 			if tally.Add(vote.Validator, func(publicKey string) bool {
-				return ledger.VerifyParameterVote(signing.MLDSA65{}, wallet.pinnedNetworkID(), publicKey, change.NewParameters, change.PreviousParametersDigest, change.Sequence, vote)
+				return ledger.VerifyParameterVote(signing.NetworkScheme(), wallet.pinnedNetworkID(), publicKey, change.NewParameters, change.PreviousParametersDigest, change.Sequence, vote)
 			}) {
 				change.Votes = append(change.Votes, vote)
 			}
 		}
 	}
-	if !change.Valid(signing.MLDSA65{}, wallet.pinnedNetworkID(), validators, checkpoint.State.Parameters, checkpoint.State.GovernanceSequence) {
+	if !change.Valid(signing.NetworkScheme(), wallet.pinnedNetworkID(), validators, checkpoint.State.Parameters, checkpoint.State.GovernanceSequence) {
 		return incomplete(tally.Power(), validators.Quorum(), "the parameters or the governance sequence these votes amend have moved since they were signed, or the new values are out of bounds for the current validators")
 	}
 	return wallet.postJSON("/hdls/parameter-vote", change)
@@ -384,7 +384,7 @@ func (wallet *Wallet) SubmitReassignment(pasted string) error {
 	for _, signed := range votes {
 		for _, vote := range signed.Votes {
 			if tally.Add(vote.Validator, func(publicKey string) bool {
-				return ledger.VerifyReassignmentVote(signing.MLDSA65{}, wallet.pinnedNetworkID(), publicKey, action, vote)
+				return ledger.VerifyReassignmentVote(signing.NetworkScheme(), wallet.pinnedNetworkID(), publicKey, action, vote)
 			}) {
 				action.Votes = append(action.Votes, vote)
 			}
@@ -398,7 +398,7 @@ func (wallet *Wallet) SubmitReassignment(pasted string) error {
 	// one text cannot block a good one in another.
 	for _, signed := range votes {
 		action.NewKeySignature = signed.NewKeySignature
-		if action.Valid(signing.MLDSA65{}, wallet.pinnedNetworkID(), validators, checkpoint.State) {
+		if action.Valid(signing.NetworkScheme(), wallet.pinnedNetworkID(), validators, checkpoint.State) {
 			return wallet.postJSON("/hdls/reassignment-vote", action)
 		}
 	}

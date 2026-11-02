@@ -8,12 +8,13 @@ import (
 )
 
 // Chain is the fixed facts of one chain: the signature scheme, the effective network id every signature
-// binds (NetworkID), the genesis hash block 1 builds on (GenesisHash), and how the validator set follows
-// from the state.
+// binds (NetworkID), the genesis hash block 1 builds on (GenesisHash), the port validators gossip on,
+// and how the validator set follows from the state.
 type Chain struct {
 	Scheme        signing.Scheme
 	NetworkID     string
 	GenesisHash   [32]byte // block 1's PreviousBlockHash; tests may leave it zero
+	GossipPort    int      // the genesis's gossipPort: every validator gossips on it, at each of its IP addresses
 	ValidatorRule ValidatorRule
 }
 

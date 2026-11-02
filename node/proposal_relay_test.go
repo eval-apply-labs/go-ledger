@@ -1,9 +1,7 @@
 package node
 
 import (
-	"bytes"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"testing"
@@ -125,9 +123,7 @@ func TestProposerEquivocationIsDroppedAndLoggedOnce(t *testing.T) {
 	network := newHandNet(t, 4)
 	self := network.nonProposer(1)
 	node, recorder := network.node(self)
-	var logged bytes.Buffer
-	defer log.SetOutput(log.Writer())
-	log.SetOutput(&logged)
+	logged := captureLog(t)
 
 	first := network.proposal(node, 1, 0, ledger.BlockContent{})
 	second := network.proposal(node, 1, 0, network.payment(self, 1, "5"))
@@ -142,7 +138,7 @@ func TestProposerEquivocationIsDroppedAndLoggedOnce(t *testing.T) {
 		t.Fatal("the node applied and stored the proposer's second block for the round")
 	}
 	logOutput := logged.String()
-	if strings.Count(logOutput, "\n") != 1 || !strings.Contains(logOutput, first.Proposal.Proposer) ||
+	if strings.Count(logOutput, "proposal equivocation") != 1 || !strings.Contains(logOutput, first.Proposal.Proposer) ||
 		!strings.Contains(logOutput, fmt.Sprintf("%x", first.Proposal.BlockHash)) || !strings.Contains(logOutput, fmt.Sprintf("%x", second.Proposal.BlockHash)) {
 		t.Fatalf("want one log line naming the proposer and both blocks, got %q", logOutput)
 	}
@@ -155,9 +151,7 @@ func TestNonceOnlyDifferenceIsReportedAsEquivocation(t *testing.T) {
 	network := newHandNet(t, 4)
 	self := network.nonProposer(1)
 	node, _ := network.node(self)
-	var logged bytes.Buffer
-	defer log.SetOutput(log.Writer())
-	log.SetOutput(&logged)
+	logged := captureLog(t)
 
 	first := network.proposal(node, 1, 0, ledger.BlockContent{})
 	second := network.sign(network.proposer(1, 0), 1, 0, ledger.ProposeBlock(network.chain, node.state, node.lastBlockHash, [32]byte{1}, ledger.BlockContent{}))

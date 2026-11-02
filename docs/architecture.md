@@ -1,9 +1,10 @@
 # Architecture
 
-Area: **node**, the engine that Phase 3 runs in a container of its own. Code: `ledger/`,
-`consensus/`, and `node/` but its HTTP side. This doc maps the packages, then describes the ledger's
-rules, the block, the pools, the event loop, the idle chain and the signature record. Consensus is
-in [consensus.md](consensus.md) and the ⅔ certificates in [governance.md](governance.md).
+Area: **node**: the engine, which runs in a container of its own (`deploy/Dockerfile`). Code:
+`ledger/`, `consensus/`, and `node/` but its HTTP side. This doc maps the packages, then describes
+the ledger's rules, the block, the pools, the event loop, the idle chain, the signature record, the
+public folder and the bundle. Consensus is in [consensus.md](consensus.md) and the ⅔ certificates in
+[governance.md](governance.md).
 
 The principle is the one that motivated the port from the Java original (see the
 [README](../README.md#origins)): keep the rules pure and auditable, and isolate the I/O. The parts
@@ -24,20 +25,24 @@ hard to test (timing, networking) is a thin shell with one concurrency model.
        └────────────── signing                     ML-DSA-65 and the domains (pure)
 ```
 
-Imports point down only. `ledger` uses the consensus validator set, the ⅔ certificate tally
-(`CertificateTally`) and the two evidence types, never the driver. `ledger`, `consensus` and
-`signing` do no I/O and read no clock.
+Imports point down only. Two more commands sit beside them: `cmd/fetcher` imports only `ledger`,
+and `cmd/quickstart` only `ledger` and `signing`. `ledger` uses the consensus validator set, the ⅔
+certificate tally (`CertificateTally`) and the two evidence types, never the driver. `ledger`,
+`consensus` and `signing` do no I/O and read no clock: no file of theirs but a test imports `time`
+(`TestNoRuleReadsTheClock`).
 
 | Area | Code |
 |---|---|
 | signature ([signature.md](signature.md)) | `signing/`, `cmd/keygen/`, the sign log in `node/persist.go` |
 | node (this doc) | `ledger/`, `consensus/`, `node/` but its HTTP side |
-| API/CDN ([api.md](api.md)) | `node/httptransport.go` (the record routes too), `node/relay.go`, `node/topology.go`, `node/peerdns.go`, the fetches in `node/sync.go`, `cmd/server/`, `cmd/demo/` |
+| API/CDN ([api.md](api.md)) | `node/httptransport.go` (the record, bundle and checkpoint routes too), `node/allowlist.go`, `node/relay.go`, `node/topology.go`, `node/peerdns.go`, the fetches in `node/sync.go`, `cmd/server/`, `cmd/fetcher/`, `cmd/demo/`, `cmd/quickstart/`, `deploy/` |
 | UI ([`ui/README.md`](../ui/README.md)) | `ui/` |
 
 `cmd/keygen` prints a fresh ML-DSA-65 key pair, the private key as the 32-byte seed it derives
-from. `cmd/server` runs one node from a config file and a genesis file. `cmd/demo` runs one node and
-one wallet on one machine.
+from. `cmd/server` runs one node, the engine, from a config file and a genesis file. `cmd/fetcher`
+serves a bank's public face from the files the engine writes. `cmd/demo` runs one node and one
+wallet on one machine, and `cmd/quickstart` writes a network of four banks for the compose file in
+`deploy/`.
 
 ## The state
 
@@ -48,8 +53,9 @@ height. The accounts are kept in strictly ascending byte order of name; a decode
 order is refused before anything else (`LedgerState.NamesAscending`).
 
 `ledger.Account` holds one name: `Name`, `PublicKey` (the name's current key), `Amount`, `Bank`
-(its bank of record), `Delegate` (the name its balance backs as stake), `Description`, `Address`
-(a validator's gossip URL), `Frozen`, and at most one pending change: `PendingKey` or
+(its bank of record), `Delegate` (the name its balance backs as stake), `Description`,
+`PublicAddress` (its public face, such as a bank's CDN name), `IPAddresses` (at most 4; a
+validator's gossip addresses), `Frozen`, and at most one pending change: `PendingKey` or
 `PendingBank`, due at the end of block `PendingHeight`.
 
 - **Names.** 1 to 32 lowercase ASCII letters, digits and hyphens, starting and ending with a letter
@@ -71,8 +77,10 @@ order is refused before anything else (`LedgerState.NamesAscending`).
   burned. `ledger.ProcessPayments` moves value only for a payment of at least the cost between two
   existing names (audit B1, B2), applies identical content once, and bans a payer whose payments in
   one block overdraw it: its pre-block balance is destroyed. Honest intake never lets that happen.
-- **Account updates** (`ledger.AccountUpdate`): set `Delegate`, `Description` and `Address`. `""`
-  leaves a field, `-` clears it. An update is free. It never names or renames an account.
+- **Account updates** (`ledger.AccountUpdate`): set `Delegate`, `Description`, `PublicAddress` and
+  `IPAddresses`. `""` leaves a field, `-` clears it. For `IPAddresses`, an empty list leaves them,
+  `["-"]` clears them, and any other list replaces the whole list. An update is free. It never
+  names or renames an account.
 - **Name requests** (`ledger.NameRequest`), four kinds, all in one pool and one route:
   - a *registration* binds a free name to a new key. The requestor pays the fee and signs; a seated
     bank, which is the requestor itself or the requestor's bank of record, co-signs and becomes the
@@ -161,15 +169,22 @@ At each height `Node.startHeight` draws a nonce, builds a candidate block with `
 starts a consensus driver for the height. The driver's actions are executed by `Node.process`:
 send a proposal or a vote, arm a timer, or commit. `Node.commit` applies the decided block, saves
 the snapshot, empties the sign log once the snapshot is on disk, writes the signature record,
-publishes the committed view, reconciles the pools, re-resolves peers, sends the last commit to
-peers still at that height, and starts the next height after `BlockIntervalMs`.
+publishes the committed view (with the gossip port's allow list), reconciles the pools, re-resolves
+peers, sends the last commit to peers still at that height, writes the public folder, and starts
+the next height after `BlockIntervalMs`.
+
+A re-gossip tick comes every `stepTimeoutMs` in force (`Node.reGossipLoop`). On it the loop
+re-sends what it holds for the height (see [consensus.md](consensus.md#intake-of-proposals-and-votes)),
+writes the public bundle, and pulls the other validators' public bundles when the height is stuck
+(below).
 
 The snapshot file, at `snapshotPath`, holds the network id, the committed checkpoint and the
 node's pending proofs (`node.savedSnapshot`). `backupPath` mirrors it, one write at a time.
 
 ## The idle chain
 
-A height starts only when there is work (`Node.hasWork`). Work is any of:
+A height starts at once when there is work (`Node.hasWork`), and otherwise only after the idle
+heartbeat, `node.IdleHeartbeat`, five minutes. Work is any of:
 
 - no block committed yet, so block 1 always commits and a new wallet has a commit to pin;
 - the candidate block carries something;
@@ -178,15 +193,27 @@ A height starts only when there is work (`Node.hasWork`). Work is any of:
 - the sign log holds a vote or proposal for the height (a restart mid-height);
 - a peer's proposal or countable vote for the height has arrived.
 
-Otherwise the node sets `idle` and runs no driver. An idle node signs, re-gossips and records
-nothing. `Node.wakeIfIdle` starts the height once a payment, update, name request or certificate is
-pooled, a proposal is taken, a countable vote is kept, or a late double-sign is kept as a proof.
+Otherwise the node sets `idle`, runs no driver, and arms the heartbeat (`Node.armIdleHeartbeat`).
+An idle node signs, re-gossips and records nothing. `Node.wakeIfIdle` starts the height once a
+payment, update, name request or certificate is pooled, a proposal is taken, a countable vote is
+kept, or a late double-sign is kept as a proof. If none comes, the heartbeat fires
+`IdleHeartbeat` after the node went idle, and `Node.onIdleHeartbeat` starts the height with no work:
+the block is an ordinary empty one, committed and recorded like any other. The first validator whose
+heartbeat fires proposes or votes, and that wakes the others. The heartbeat starts only the height
+it was armed at, and only while the node is still idle there: it never cuts short the window after
+a commit or the wait of a node back without its sign log, and never starts a second driver.
 
-What this costs: a pending change keeps the chain moving at `BlockIntervalMs` for
+Why a heartbeat: a block about every five minutes (the heartbeat starts once the window after a
+commit, `blockIntervalMs`, has passed) shows that the validators are alive and agree, and lets a
+wallet tell an idle chain from a stalled one. It is a constant, not a ⅔-governed parameter, so a
+wallet can rely on it.
+
+What this costs: an unused chain records 288 empty blocks a day, about 5.3 MB with 4 validators and
+21 MB with 21. A pending change keeps the chain moving at `BlockIntervalMs` for
 `ChangeDelayBlocks` blocks, about a day. Updates are free and count as work, so one name can keep
 the chain busy for nothing; the ⅔ can freeze such a name. A late double-sign wakes an idle chain.
 A proof that the one-third cap holds back does not keep the chain moving, and while the chain
-idles it lives only in memory until the next commit writes the snapshot.
+idles it lives only in memory until the next commit writes the snapshot, at most a heartbeat later.
 
 ## The signature record
 
@@ -212,3 +239,121 @@ updates, name requests, nonces and state digests are never written.
   A failed write is logged, never fatal, and a partial last line is skipped when read.
 
 The routes that serve it are in [api.md](api.md#the-record-routes).
+
+## The public folder
+
+With `publicPath` set, the engine writes the files its fetcher serves to the public
+(`node/publicfolder.go`). The fetcher reads them, and the record files, and never writes.
+
+| File | Content | Written |
+|---|---|---|
+| `hdls/status` | the `/hdls/status` answer, byte for byte | as the node opens, and after each commit and catch-up |
+| `hdls/checkpoint` | the `/hdls/checkpoint` answer, byte for byte | as above |
+| `hdls/accounts` | the `/hdls/accounts` answer, byte for byte | as above |
+| `hdls/governance` | the `/hdls/governance` answer, byte for byte | as above, and when a certificate is newly pooled |
+| `hdls/resolve/name/<name>` | the name's record | when a commit or catch-up changes the record |
+| `hdls/resolve/key/<SHA-256 of the key's bytes, in hex>` | the same record, found by key | as above; the old key's file goes when the key changes |
+| `hdls/bundle` | the public bundle: the consensus part of the node's bundle (below), at most 8 MiB | made with the files of a commit or catch-up, and at each re-gossip tick; written only when it changed |
+
+- **A name's record** (`Node.publishNameRecord`) has the fields `/hdls/resolve` answers, but the
+  committed height and state digest, which change at every block: every file would be rewritten at
+  every block. It holds nothing else, so every bank of one chain publishes the same bytes for a
+  name. A balance or a delegate, which the record leaves out, changes no record. A name is never
+  deleted, so its file stays; names are safe file names, since the name grammar allows only `a` to
+  `z`, `0` to `9` and inner hyphens.
+- **The order.** `hdls/status` comes last, after the commit's record entry is on disk: the fetcher
+  takes a record unit as complete, for good, once the status's height in progress has passed it.
+- **Off the loop.** The loop makes each file's content, as it makes the snapshot's. A writer
+  goroutine writes the files one at a time, in the order they were queued, and a file queued again
+  before its write has started takes the newer content. So a slow disk costs one write of each
+  file's newest content, never a backlog of old ones. `Stop` waits for the writer.
+- **Whole files only.** Each write goes to a temporary file of its own in `.incoming`, then is
+  renamed into place, so a reader never sees a part of a file. No other writer can rename that file
+  or write into it, even one that shares the folder by mistake. The fetcher never serves
+  `.incoming`.
+- **No wait for the disk.** The writes are not synced. As the node opens, it clears `.incoming`,
+  which may hold the temporary file of a write a crash cut short. It writes the status, checkpoint,
+  accounts, governance and bundle files again, and every record file that does not hold its record
+  byte for byte, so a file a power cut left empty is whole again then. A record file that already
+  holds its record is left alone, so a restart does not write every name's two files again. The
+  files of names and keys no longer current are removed. A failed write is logged,
+  `public folder: <file>: <error>`, and the file is written again when it next changes.
+- **Public files.** They are readable by anyone: mode 0644, in folders of 0755. The record files
+  beside the snapshot stay readable by the engine's user only, so the fetcher runs as that user.
+- **The cost.** The checkpoint and the account list are each about 2.9 KB per account, made on the
+  loop at every commit: the snapshot's cost twice more. The public bundle is made again on the loop
+  at each re-gossip tick, idle or not, and compared with the last one queued: on an idle chain it
+  holds the last commit's precommits and its decided proposal, the same tick after tick, and is not
+  written again. That is fine for a community, and a reason to move the work off the loop before a
+  network grows large ([TODO.md](../TODO.md)).
+
+## Bundles
+
+A bundle (`node/bundle.go`) carries signed messages where the network can't: a text file, JSON
+lines, that any carrier can move.
+
+```
+{"bundle":1,"networkId":"village/…","from":"bank-a","heightInProgress":1234}
+{"type":"vote","body":{…}}
+{"type":"proposal","body":{…}}
+```
+
+- **The header** is the first line (`BundleHeader`). `bundle` is the format's version, 1
+  (`BundleVersion`): an import takes no other. `networkId` must be the importing node's, or the
+  import refuses the whole bundle. `from`, the exporting node's name, and `heightInProgress` are
+  for the people who carry it: no rule reads them.
+- **Every other line is one message** (`BundleLine`). `type` is the last segment of its gossip
+  route: `proposal`, `vote`, `payment`, `update`, `name-request`, `parameter-vote` or
+  `reassignment-vote`. `body` is exactly the JSON that route takes, within that route's bound.
+- **The order** (`Node.bundle`). First the consensus part, what re-gossip sends
+  (`Node.consensusMessages`):
+  1. the last commit's precommits and its decided proposal;
+  2. the votes the node holds for the current round;
+  3. the current round's proposal;
+  4. the other votes it holds for the height in progress: the past rounds' first, newest first,
+     then the future rounds', nearest first.
+
+  Within a round the votes go in the order of their slots, so two nodes that hold the same
+  messages write the same lines. Then the pooled certificates: the parameter changes, then the ⅔
+  name actions. Then, in an export only, the pools: name requests, updates and payments, each in
+  pool order. The last commit comes first so that a node one height behind decides that height
+  before the next one's messages reach it.
+- **The bound.** An export is at most 64 MiB (`MaxBundleBytes`), and the public bundle 8 MiB
+  (`MaxPublicBundleBytes`). A bundle that would pass its bound ends at the last whole line that
+  fits, so what is cut is what comes last in that order. A bank stuck for dozens of rounds holds
+  more votes than the public bundle takes: the cut then drops the future rounds' votes, farthest
+  first, then the oldest rounds, which no longer decide anything, and never the current round's
+  votes or proposal. A rogue validator can sign votes for up to 256 rounds ahead
+  (`consensus.MaxRoundLookahead`), about 2.4 MB: coming after the past rounds, they can't push out
+  the recent ones, which hold the prevotes that a proposal's valid round names.
+- **Export** (`Node.ExportBundle`, `GET /hdls/bundle` on the operator port) is an event on the
+  loop, which makes the bundle from what it holds.
+- **Import** (`Node.ImportBundle`, `POST /hdls/bundle` on the operator port) hands each line to the
+  intake of its gossip route: `SubmitProposal`, `SubmitVote`, `AdmitPayment`, `AdmitUpdate`,
+  `AdmitNameRequest`, `AdmitParameterCertificate` or `AdmitReassignmentCertificate`. The checks and
+  signatures are those of gossip, and what the node takes it relays to its peers, as it relays
+  gossip. A line that is no message is counted and skipped. A message the node already holds is
+  dropped, as a second gossip copy is. The answer counts what became of the lines (see
+  [api.md](api.md#bundles-and-carried-checkpoints-operator-port)). A pulled public bundle (below)
+  goes through `Node.importBundle` with a check of each vote and proposal, off the loop, and stops
+  at the first line that fails it, is no message, or is refused.
+- **A carried checkpoint** (`Node.ImportCheckpoint`, `POST /hdls/checkpoint` on the operator port)
+  goes through the catch-up event: the loop verifies it as catch-up does, with the validators of
+  its last committed state as the anchor, and adopts it if it is ahead. Otherwise it gives the
+  reason: not ahead, does not verify, or the node is still starting.
+- **The second path** (`Node.pullPublicBundles`). At each re-gossip tick, the loop checks whether
+  the driver has run the height for 4 re-gossip intervals, the governed step timeouts, since
+  `Node.startHeight` began it (`heightStartedAt`). If so, it fetches the public bundle of every
+  other current validator at its public address, one goroutine each, off the loop, and imports
+  each. Each goroutine checks each vote and proposal before it hands it to the loop
+  (`Node.pulledCheck`). It is of the height in progress, or of the last committed height, and the
+  set of that height (for the last height, the set that signed the last commit) vouches for it: a
+  vote is by a validator of the set, a proposal names the proposer the set schedules for its round
+  (`Node.fromItsProposer`, which `Node.onProposal` shares), and the signature verifies. A vote that
+  verified is remembered, up to 4,096 of them, until the committed height changes, and is not
+  checked again. The import stops at the first line that fails the check, is no message, or is
+  refused. One round of fetches runs at a time: a tick that finds the last round still running
+  skips its own. The fetches refuse to connect to the node's own machine: at a loopback address,
+  at `0.0.0.0` or `::`, or at any of its other addresses (`Node.publicAddressClient`). It logs one
+  line as it starts pulling and one as it stops (see
+  [operating-a-network.md](operating-a-network.md#the-second-path-public-bundles)).

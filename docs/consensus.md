@@ -2,7 +2,8 @@
 
 Area: **node**. Code: `consensus/` (the validator set, votes, commits, proposals, evidence, the vote
 set and the round driver), and the node's use of them in `node/node.go`, `node/proofs.go` and
-`node/sync.go`. This doc explains the commit rule, why it is safe, and what a double-sign does.
+`node/sync.go`. This doc explains the commit rule, why it is safe, the timers and the slow-down
+switch, and what a double-sign does.
 
 ## The problem it avoids
 
@@ -72,6 +73,43 @@ On > ⅓ of the power from a later round, the driver skips to that round, which 
 does not touch the commit rule. The lock must survive a restart too; the sign log does that (see
 [signature.md](signature.md#the-sign-log)).
 
+## The timers, and the slow-down switch
+
+The node arms the driver's timers (`Node.armTimeout`). Each waits a base step timeout times the
+round plus one.
+
+- **The propose timer** starts with each round. A node waits for the round's proposal, 3 s at
+  round 0 by default, then prevotes nil: it votes "no block".
+- **The prevote and precommit timers** start only once that step's votes from more than ⅔ of the
+  power are in. So when no side of a split holds more than ⅔, every node stops at the step where
+  it needs the other side's votes, with no timer running. Votes carried across by hand then let the
+  step complete.
+- **The catch.** The propose timer always runs. A proposal that travels slower than it, carried by
+  hand, comes too late, and rounds pass with no block.
+
+The base is the governed `stepTimeoutMs`, or the node's **slow-down switch**,
+`minimumStepTimeoutMs` in its config, when that is longer (`Node.stepTimeout`):
+max(`stepTimeoutMs`, `minimumStepTimeoutMs`) × (round + 1). The switch is read at start, from 0
+(off) to a day. It changes the round timers, and one wait: a node back without its sign log waits
+2 × max(`stepTimeoutMs`, `minimumStepTimeoutMs`) at each height it may have signed at
+(`Node.ownSignaturesWait`), since in pigeon mode its own earlier votes come back only with the next
+carry. A restart that keeps its sign log never waits. Re-gossip, catch-up, the idle heartbeat and
+the pull of public bundles keep the governed timings.
+
+- **Why it is safe.** No rule reads the clock: `ledger` and `consensus` do not import `time`
+  (`TestNoRuleReadsTheClock`), a block carries no timestamp, and every deadline counts in blocks. A
+  longer timer only makes a node wait longer before it votes "no block": it cannot make it sign
+  twice or take an invalid block. Each node may set its own value, and mixed values are safe.
+- **When it helps.** Once banks holding more than ⅔ of the power have it on, a round waits for a
+  carrier: blocks commit at the carrier's pace, in about three carries a round (the proposal, the
+  prevotes, the precommits). One bank alone gains nothing: the others still vote "no block" after
+  their own timer. `TestPigeonCourierCarriesTheChain` runs four validators with no network link and
+  a courier between them: with the switch on, most heights commit in round 0; with it off, the same
+  carries commit fewer heights.
+
+How the banks use it, with bundles carried by hand and the public bundles as a second path, is in
+[operating-a-network.md](operating-a-network.md#when-the-network-splits).
+
 ## Intake of proposals and votes
 
 A node checks a proposal (`Node.onProposal`) in this order, cheap steps first:
@@ -93,8 +131,14 @@ deterministic, so every relayed copy of an honest vote is the same bytes. It kee
 if the height in progress counts it: the validator is in the set, the type is known, the round is
 not too far ahead, and it verifies. It keeps at most two votes per validator, round and type. While
 a driver runs, the node re-sends the height's votes and the current round's proposal every
-`stepTimeoutMs` in force (a ⅔ change reaches it within a second), so a merged partition
-re-exchanges what each side held.
+`stepTimeoutMs` in force (a ⅔ change reaches it within a second; the slow-down switch never changes
+it), so a merged partition re-exchanges what each side held. Votes and proposals that come in a
+bundle, carried by hand or pulled from a public face, go through this same intake. A pulled public
+bundle's votes and proposals are checked first, off the loop. Each must be of the height in
+progress, or of the last committed height, and that height's set must vouch for it (for the last
+height, the set that signed the last commit): a vote is by one of its validators, a proposal by the
+proposer it schedules for the round, and the signature verifies. The pull stops at the first line
+that fails, is unreadable or is refused (see [architecture.md](architecture.md#bundles)).
 
 ## Signing only while seated
 
@@ -144,8 +188,9 @@ Known behaviour:
   a block: only the nodes that saw both signatures hold it.
 - A late double-sign wakes an idle chain. But a proof the cap holds back does not keep the chain
   moving, and a proof kept while the chain idles lives only in memory until the next commit writes
-  the snapshot. If every node restarts before other work arrives, that proof is lost. It needs
-  frozen names already near a third of the power, the case that calls for a new genesis.
+  the snapshot, at most an idle heartbeat (five minutes) later. If every node restarts before then,
+  that proof is lost. It needs frozen names already near a third of the power, the case that calls
+  for a new genesis.
 
 The freeze handles double-signing by under a third of the power. Its limits are in
 [security.md](security.md#the-freeze-and-its-limits).
@@ -156,10 +201,25 @@ The freeze handles double-signing by under a third of the power. Its limits are 
   to its peers, and again on every re-gossip while it runs a driver. An idle node re-gossips
   nothing, so a node one precommit short of a height the others committed gets the last commit once,
   at commit time, and otherwise by checkpoint catch-up.
+- **The last commit in a bundle.** A bundle carries the last commit's precommits and its decided
+  proposal first, then the current round's votes and proposal, then the height's other votes: the
+  past rounds', newest first, then the future rounds', nearest first. So a node one height behind
+  that imports it decides the last height first, and then takes the next height's messages.
 - **Checkpoint catch-up.** Every 3 s, or every 5 block intervals if that is longer, a
   running node asks its peers' `/hdls/status` and fetches a checkpoint only from a peer that is
-  ahead (`Node.catchUpLoop`, `Node.bestCheckpoint`). Bootstrap peers come first; gossip peers are
-  asked only when no bootstrap peer gives a checkpoint that verifies.
+  ahead (`Node.catchUpLoop`, `Node.catchUpCheckpoint`, `Node.bestCheckpoint`). It asks each peer at
+  the first of its URLs that answers. Bootstrap peers come first; gossip peers are asked only when
+  no bootstrap peer gives a checkpoint that verifies; the other validators' public addresses come
+  last, when neither does. It asks every one of those if no bootstrap or gossip peer answered at
+  all, or while it is stuck on its height, and otherwise one of them a tick, each in turn. So a node
+  that gossip can't reach, or that the others' allow lists no longer let in, still catches up; an
+  idle node, which runs no round and so is never stuck, finds banks ahead of its peers within about
+  as many ticks as there are validators; and on a healthy network each tick costs one small request.
+  A connection gives up after 2 s. A bootstrap peer can be a bank's public address too, which
+  serves the same files.
+- **A carried checkpoint.** `POST /hdls/checkpoint` on the operator port takes a checkpoint someone
+  carried in, and the node checks it as catch-up does (below), with the same event
+  (`Node.ImportCheckpoint`).
 
 ## Onboarding and the checkpoint
 

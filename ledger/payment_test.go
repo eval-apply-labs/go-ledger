@@ -8,7 +8,7 @@ import (
 
 func TestVerifyPaymentRoundTrip(t *testing.T) {
 	payment := signedPayment("alice", "bob", "3", 2)
-	if !VerifyPayment(signing.MLDSA65{}, testNetwork, testSigner("alice").PublicKeyBase64(), payment) {
+	if !VerifyPayment(signing.NetworkScheme(), testNetwork, testSigner("alice").PublicKeyBase64(), payment) {
 		t.Fatal("a validly-signed payment did not verify")
 	}
 }
@@ -16,14 +16,14 @@ func TestVerifyPaymentRoundTrip(t *testing.T) {
 func TestVerifyPaymentTamperedAmountRejected(t *testing.T) {
 	payment := signedPayment("alice", "bob", "3", 2)
 	payment.Amount = rational("300") // tamper after signing
-	if VerifyPayment(signing.MLDSA65{}, testNetwork, testSigner("alice").PublicKeyBase64(), payment) {
+	if VerifyPayment(signing.NetworkScheme(), testNetwork, testSigner("alice").PublicKeyBase64(), payment) {
 		t.Fatal("a tampered amount verified")
 	}
 }
 
 func TestVerifyPaymentWrongNetworkRejected(t *testing.T) {
 	payment := signedPayment("alice", "bob", "3", 2)
-	if VerifyPayment(signing.MLDSA65{}, "mainnet", testSigner("alice").PublicKeyBase64(), payment) {
+	if VerifyPayment(signing.NetworkScheme(), "mainnet", testSigner("alice").PublicKeyBase64(), payment) {
 		t.Fatal("a testnet payment verified on mainnet")
 	}
 }
@@ -37,7 +37,7 @@ func TestPaymentSignatureCoversBothNames(t *testing.T) {
 	relabelled := payment
 	relabelled.From = "carol"
 	for _, changed := range []Payment{retargeted, relabelled} {
-		if VerifyPayment(signing.MLDSA65{}, testNetwork, testSigner("alice").PublicKeyBase64(), changed) {
+		if VerifyPayment(signing.NetworkScheme(), testNetwork, testSigner("alice").PublicKeyBase64(), changed) {
 			t.Fatalf("a payment changed to %s -> %s still verified", changed.From, changed.To)
 		}
 	}

@@ -177,12 +177,12 @@ func TestOpenRefusesSignLogAheadOfSnapshot(t *testing.T) {
 // chain's block and keep it silent in the rounds they cover. Open refuses it, as it refuses a snapshot
 // that does not verify.
 func TestOpenRefusesSignLogThatDoesNotVerify(t *testing.T) {
-	_, privateKey, err := signing.MLDSA65{}.GenerateKey()
+	_, privateKey, err := signing.NetworkScheme().GenerateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
 	signerOn := func(network string) *signing.Signer { // one key, signing for the given network
-		signer, err := signing.NewSigner(signing.MLDSA65{}, network, privateKey)
+		signer, err := signing.NewSigner(signing.NetworkScheme(), network, privateKey)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -428,7 +428,7 @@ func TestSignLogLeftBehindIsEmptied(t *testing.T) {
 	}
 	adopting.started = true
 	if adopting.startFirstHeight(); adopting.heightStarted != 0 {
-		t.Error("a node that adopted a checkpoint started the height at once, without the re-gossip wait")
+		t.Error("a node that adopted a checkpoint started the height at once, without the wait of a node back without its sign log")
 	}
 }
 
@@ -481,7 +481,7 @@ func TestSignLogBelowTheRestartHeightIsEmptied(t *testing.T) {
 	}
 	restarted.started = true
 	if restarted.startFirstHeight(); restarted.heightStarted != 0 {
-		t.Error("a node back with a sign log below its restart height started at once, without the re-gossip wait")
+		t.Error("a node back with a sign log below its restart height started at once, without the wait of a node back without its sign log")
 	}
 }
 

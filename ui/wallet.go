@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -27,8 +28,8 @@ import (
 // Wallet holds the user's key locally and talks to a node over HTTP. It never sends the private
 // key anywhere -- it signs payments locally and submits only the signed payment.
 type Wallet struct {
-	privateKey  []byte // the key's seed; the wallet signs with it for the pinned network id (see signer)
-	publicKey   string // the key the seed derives, in base64
+	privateKey  []byte // the private key; the wallet signs with it for the pinned network id (see signer)
+	publicKey   string // the key the private key derives, in base64
 	networkName string // the -network flag: the network id the wallet pins must start with it and "/"
 	nodeURL     string
 	lookahead   int64 // how many blocks ahead a payment names, so it reaches the proposer in time
@@ -44,6 +45,11 @@ type Wallet struct {
 	heightSeen   int64
 	heightSeenAt time.Time
 
+	// chainHeight is the network's newest committed height as far as the wallet knows, first seen at
+	// chainHeightSince (checkOtherBanks). Kept in memory only. Guarded by mutex.
+	chainHeight      int64
+	chainHeightSince time.Time
+
 	// networkID and pinned are what the wallet believes, kept in pinPath (trust.go): the network id it
 	// signs and verifies for, and the validator set whose signatures count. They are empty until the
 	// first use pins them. networkSigner signs with the wallet's key for networkID, built once (see
@@ -52,6 +58,17 @@ type Wallet struct {
 	networkID     string
 	pinned        *consensus.ValidatorSet
 	networkSigner *signing.Signer
+
+	// newestCheckpoint is the newest state the wallet verified (verifyUnderPin), and newestSource where
+	// it came from: "node", or "file" for a checkpoint the user loaded (LoadCarriedCheckpoint). It
+	// stands in for the node's state when the node serves an older one, and, from a file, when the
+	// node's checkpoint can't be read (newestVerifiedState). Kept in memory only. Guarded by mutex.
+	newestCheckpoint *node.Checkpoint
+	newestSource     string
+
+	// lastSaved is the payment SavePayment saved last, which GET /send shows, so a reload of that page
+	// signs nothing (post, redirect, get). Kept in memory only. Guarded by mutex.
+	lastSaved *savedPayment
 }
 
 // blockSlack bounds how far a payment's block may run past height + lookahead (a burst of payments
@@ -89,7 +106,7 @@ func LoadOrCreateWallet(keyfile, networkName, nodeURL string, lookahead int64) (
 		networkName: networkName,
 		nodeURL:     nodeURL,
 		lookahead:   lookahead,
-		client:      &http.Client{Timeout: 5 * time.Second},
+		client:      node.NewHTTPClient(5 * time.Second), // follows no redirect
 		statePath:   statePath,
 		saved:       readWalletState(statePath, networkName), // resume the counter, the last name and the newest height
 		pinPath:     pinPath,
@@ -165,8 +182,8 @@ func (wallet *Wallet) pinnedNetworkID() string {
 }
 
 // signer signs with the wallet's key for the pinned network id (spec 7.2). The wallet signs only after
-// it has read a verified state, which pins the id on first use. The signer is built from the seed once,
-// since deriving the key costs almost half a signature.
+// it has read a verified state, which pins the id on first use. The signer is built from the private key
+// once, since deriving the key can be costly (almost half a signature with ML-DSA-65).
 func (wallet *Wallet) signer() (*signing.Signer, error) {
 	wallet.mutex.Lock()
 	defer wallet.mutex.Unlock()
@@ -174,7 +191,7 @@ func (wallet *Wallet) signer() (*signing.Signer, error) {
 		if wallet.networkID == "" {
 			return nil, errors.New("no network is pinned yet: the wallet has not read a state its node's validators signed")
 		}
-		signer, err := signing.NewSigner(signing.MLDSA65{}, wallet.networkID, wallet.privateKey)
+		signer, err := signing.NewSigner(signing.NetworkScheme(), wallet.networkID, wallet.privateKey)
 		if err != nil {
 			return nil, err
 		}
@@ -216,18 +233,18 @@ func typedName(typed string) (string, error) {
 	return name, nil
 }
 
-// typedKey is a public key as a person pasted it, trimmed, or an error when it is not an ML-DSA-65 key
-// in its one spelling.
+// typedKey is a public key as a person pasted it, trimmed, or an error, with the scheme's reason, when
+// it is not a key of the network's scheme in its one spelling.
 func typedKey(typed string) (string, error) {
 	key := strings.TrimSpace(typed)
-	if !signing.ValidPublicKeyBase64(key) {
-		return "", errors.New("the new key is not a public key: paste the whole key the other wallet copied")
+	if err := signing.ValidatePublicKeyBase64(signing.NetworkScheme(), key); err != nil {
+		return "", fmt.Errorf("the new key is not a public key (%v): paste the whole key the other wallet copied", err)
 	}
 	return key, nil
 }
 
 // fingerprint is how the pages show a key (spec 7.2): the first 16 hex digits of the SHA-256 of the raw
-// key. A key is 2604 characters, so no page prints another name's key in full.
+// key. A key can be thousands of characters long, so no page prints another name's key in full.
 func fingerprint(publicKey string) string {
 	raw, _ := base64.StdEncoding.DecodeString(publicKey)
 	digest := sha256.Sum256(raw)
@@ -247,18 +264,22 @@ func pendingChange(account ledger.Account) string {
 }
 
 // UpdateAccount submits a signed account update for the wallet's name: a description, the name its
-// balance backs as stake (a validator's name; its own, for a bank), and the address a validator
-// publishes for its peers. A blank field is left unchanged, and ledger.ClearField ("-") clears it. The
-// update lands when the block it names commits. The wallet first checks it against the verified state
-// as a node's intake does (ledger.UpdateFitsState, its size measured as signed), so an update that
-// could not apply uses up no block; the node refuses, with the reason, one that its own state does not
-// take. Like a payment, each update names a block of its own (see nextPaymentBlockID): a block carries
-// one update per account, so of two updates naming one block, one would be lost. It returns the update
-// it signed, whose delegate the page shows as the wallet read it (spec 3.2).
-func (wallet *Wallet) UpdateAccount(description, delegate, address string) (ledger.AccountUpdate, error) {
-	delegate, address = strings.TrimSpace(delegate), strings.TrimSpace(address)
-	if description == "" && delegate == "" && address == "" {
-		return ledger.AccountUpdate{}, errors.New("nothing to update: give a description, a name to delegate to, or an address")
+// balance backs as stake (a validator's name; its own, for a bank), its public address (a bank's public
+// face, or a website), and its IP addresses, separated by spaces (a validator's are where the others
+// gossip to it), which replace the whole list. A blank field is left unchanged, and ledger.ClearField
+// ("-") clears it. The update lands when the block it names commits. The wallet first checks it
+// against the verified state as a node's intake does (ledger.UpdateFitsState, its size measured as
+// signed), so an update that could not apply uses up no block; the node refuses, with the reason, one
+// that its own state does not take. Like a payment, each update names a block of its own (see
+// nextPaymentBlockID): a block carries one update per account, so of two updates naming one block, one
+// would be lost. While a checkpoint from a file stands in for the node's (newestVerifiedState), it
+// refuses, as Send does. It returns the update it signed, whose delegate the page shows as the wallet
+// read it (spec 3.2).
+func (wallet *Wallet) UpdateAccount(description, delegate, publicAddress, ipAddresses string) (ledger.AccountUpdate, error) {
+	delegate, publicAddress = strings.TrimSpace(delegate), strings.TrimSpace(publicAddress)
+	ipAddressList := strings.Fields(ipAddresses) // "-" alone is ledger.ClearField alone, which clears them
+	if description == "" && delegate == "" && publicAddress == "" && len(ipAddressList) == 0 {
+		return ledger.AccountUpdate{}, errors.New("nothing to update: give a description, a name to delegate to, a public address or IP addresses")
 	}
 	if delegate != "" && delegate != ledger.ClearField {
 		var err error
@@ -266,19 +287,22 @@ func (wallet *Wallet) UpdateAccount(description, delegate, address string) (ledg
 			return ledger.AccountUpdate{}, fmt.Errorf("delegate to a validator's name, or %q for none: %w", ledger.ClearField, err)
 		}
 	}
-	checkpoint, err := wallet.verifiedState()
+	checkpoint, keptFrom, err := wallet.newestVerifiedState()
 	if err != nil {
 		return ledger.AccountUpdate{}, err
+	}
+	if keptFrom == "file" {
+		return ledger.AccountUpdate{}, errors.New("your bank's node can't be read, or its state is older than your file's: try the update again later")
 	}
 	name, err := wallet.registeredName(checkpoint)
 	if err != nil {
 		return ledger.AccountUpdate{}, err
 	}
-	update := ledger.AccountUpdate{Name: name, Delegate: delegate, Description: description, Address: address}
+	update := ledger.AccountUpdate{Name: name, Delegate: delegate, Description: description, PublicAddress: publicAddress, IPAddresses: ipAddressList}
 	// The node measures the signed update against the message bound, so check a copy that already has
 	// a signature's length and the widest block number (a few bytes more than the real one).
 	measured := update
-	measured.BlockID, measured.Signature = math.MaxInt64, strings.Repeat("A", signing.SignatureBase64Length)
+	measured.BlockID, measured.Signature = math.MaxInt64, strings.Repeat("A", signing.SignatureBase64Length(signing.NetworkScheme()))
 	if err := ledger.UpdateFitsState(checkpoint.State, measured); err != nil {
 		return ledger.AccountUpdate{}, err // the node's intake check, before the update takes a block
 	}
@@ -338,16 +362,27 @@ func (wallet *Wallet) keepRequestBlock(blockID int64) {
 // maxStatusBytes bounds a read of the node's /hdls/status, whose honest answer is under 200 bytes.
 const maxStatusBytes = 4 << 10
 
-// maxReceiptBytes bounds a read of the node's receipt for a payment, whose honest answer is about 4.6
-// KB (its signature is 4,412 characters).
-const maxReceiptBytes = 16 << 10
+// maxReceiptBytes bounds a read of the node's receipt for a payment, whose honest answer is one
+// signature and a few hundred bytes (about 4.6 KB with ML-DSA-65): 16 KiB, or three signatures' length
+// for a scheme whose signatures are larger.
+var maxReceiptBytes = max(16<<10, 3*int64(signing.SignatureBase64Length(signing.NetworkScheme())))
 
 // status is what the node's /hdls/status answers: the height in progress, one above its committed
-// height, and the network id it serves. Like every answer the wallet reads from its node, which it does
-// not trust, it is refused with a status of 300 or more, and read only up to a bound: here
-// maxStatusBytes.
+// height, and the network id it serves (readStatus).
 func (wallet *Wallet) status() (heightInProgress int64, networkID string, err error) {
-	response, err := wallet.client.Get(wallet.nodeURL + "/hdls/status")
+	return readStatus(context.Background(), wallet.client, wallet.nodeURL+"/hdls/status")
+}
+
+// readStatus is what a node answers at statusURL, its /hdls/status. Like every answer the wallet reads
+// from a node, which it does not trust, it is refused with a status of 300 or more, a redirect
+// included, and read only up to a bound: here maxStatusBytes. The wallet reads its own node's status,
+// and the other banks' nodes' (checkOtherBanks), until requestContext ends.
+func readStatus(requestContext context.Context, client *http.Client, statusURL string) (heightInProgress int64, networkID string, err error) {
+	request, err := http.NewRequestWithContext(requestContext, http.MethodGet, statusURL, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return 0, "", err
 	}
@@ -429,27 +464,20 @@ func (wallet *Wallet) ReviewPayment(checkpoint node.Checkpoint, recipient, amoun
 // that name, and acknowledge THIS payment (its PaymentID matches) — a dishonest non-validator can
 // otherwise self-sign a receipt over an unrelated payment. The receipt is still only a provisional
 // acceptance; final assurance is the block's commit.
+//
+// While a checkpoint from a file stands in for the node's (newestVerifiedState), because the node's
+// checkpoint can't be read or its state is older than the file's, Send refuses before it signs or takes
+// a block of the counter: a payment posted to that node may never reach a bank, yet it would use up a
+// block named from the file's height. The page says to save the payment as text (SavePayment) instead.
 func (wallet *Wallet) Send(recipient, amount string) (ledger.Receipt, bool, error) {
-	checkpoint, err := wallet.verifiedState()
+	checkpoint, keptFrom, err := wallet.newestVerifiedState()
 	if err != nil {
 		return ledger.Receipt{}, false, err
 	}
-	review, err := wallet.ReviewPayment(checkpoint, recipient, amount)
-	if err != nil {
-		return ledger.Receipt{}, false, err
+	if keptFrom == "file" {
+		return ledger.Receipt{}, false, errors.New("your bank's node can't be read, or its state is older than your file's: save the payment as text, and hand it to whoever can reach a bank")
 	}
-	name, _ := wallet.registeredName(checkpoint) // ReviewPayment found it
-	// A near-future block, unique among this wallet's payments, from the verified state's height.
-	blockID, err := wallet.nextPaymentBlockID(checkpoint.State.Height + 1)
-	if err != nil {
-		return ledger.Receipt{}, false, err
-	}
-	signer, err := wallet.signer()
-	if err != nil {
-		return ledger.Receipt{}, false, err
-	}
-	parsedAmount, _ := ledger.ParseAmount(review.Amount)
-	payment, err := ledger.SignPayment(signer, ledger.Payment{From: name, To: review.To, Amount: parsedAmount, BlockID: blockID})
+	payment, err := wallet.signPayment(checkpoint, recipient, amount)
 	if err != nil {
 		return ledger.Receipt{}, false, err
 	}
@@ -469,8 +497,64 @@ func (wallet *Wallet) Send(recipient, amount string) (ledger.Receipt, bool, erro
 	pinnedKey := wallet.pinnedKey(receipt.Node)
 	verified := receipt.Node != "" && receipt.Signature != "" && pinnedKey != "" &&
 		receipt.PaymentID == ledger.PaymentID(payment) &&
-		receipt.Verify(signing.MLDSA65{}, wallet.pinnedNetworkID(), pinnedKey)
+		receipt.Verify(signing.NetworkScheme(), wallet.pinnedNetworkID(), pinnedKey)
 	return receipt, verified, nil
+}
+
+// signPayment checks a payment against checkpoint, a verified state, as ReviewPayment does, and signs it
+// from the wallet's name, for a near-future block unique among this wallet's payments, counted from that
+// state's height in progress (nextPaymentBlockID). Send posts what it signs, and SavePayment saves it as
+// text: both take a block of the one counter.
+func (wallet *Wallet) signPayment(checkpoint node.Checkpoint, recipient, amount string) (ledger.Payment, error) {
+	review, err := wallet.ReviewPayment(checkpoint, recipient, amount)
+	if err != nil {
+		return ledger.Payment{}, err
+	}
+	name, _ := wallet.registeredName(checkpoint) // ReviewPayment found it
+	blockID, err := wallet.nextPaymentBlockID(checkpoint.State.Height + 1)
+	if err != nil {
+		return ledger.Payment{}, err
+	}
+	signer, err := wallet.signer()
+	if err != nil {
+		return ledger.Payment{}, err
+	}
+	parsedAmount, _ := ledger.ParseAmount(review.Amount)
+	return ledger.SignPayment(signer, ledger.Payment{From: name, To: review.To, Amount: parsedAmount, BlockID: blockID})
+}
+
+// savedPayment is a payment the wallet signed and saved as text (SavePayment): to whom, how much, the
+// block it names, and the text to carry.
+type savedPayment struct {
+	To, Amount, Text string
+	BlockID          int64
+}
+
+// SavePayment signs a payment as Send does, after the same checks and from the same counter, and
+// returns it as text instead of sending it (spec §7.8): a bundle of this one payment, which anyone can
+// carry to any bank, and which that bank imports (POST /hdls/bundle on its operator node). Its block
+// counts from checkpoint, the page's verified state: a checkpoint from a file when the node can't be
+// reached (LoadCarriedCheckpoint). A bank must import it before that block passes, or it lapses and
+// takes nothing. The wallet keeps it as the payment saved last (lastSavedPayment).
+func (wallet *Wallet) SavePayment(checkpoint node.Checkpoint, recipient, amount string) (savedPayment, error) {
+	payment, err := wallet.signPayment(checkpoint, recipient, amount)
+	if err != nil {
+		return savedPayment{}, err
+	}
+	header := node.BundleHeader{Bundle: node.BundleVersion, NetworkID: wallet.pinnedNetworkID(), From: payment.From, HeightInProgress: checkpoint.State.Height + 1}
+	bundle := node.EncodeBundle(header, []node.Message{{Type: node.MessagePayment, Payment: &payment}}, node.MaxBundleBytes)
+	saved := savedPayment{To: payment.To, Amount: ledger.FormatAmount(payment.Amount), Text: string(bundle), BlockID: payment.BlockID}
+	wallet.mutex.Lock()
+	defer wallet.mutex.Unlock()
+	wallet.lastSaved = &saved
+	return saved, nil
+}
+
+// lastSavedPayment is the payment SavePayment saved last, or nil when it saved none since the start.
+func (wallet *Wallet) lastSavedPayment() *savedPayment {
+	wallet.mutex.Lock()
+	defer wallet.mutex.Unlock()
+	return wallet.lastSaved
 }
 
 // parseAmount reads an amount a person typed with the network's own parser, so whatever it accepts
@@ -498,18 +582,25 @@ func (wallet *Wallet) pinnedKey(validatorName string) string {
 // the payment counter: it names the block height + lookahead, or the name's pending change's block if
 // that is sooner, since freezes apply before due changes and so the freeze still cancels it. The height
 // is the verified state's height in progress, as for a payment, so a node cannot make the freeze name a
-// block no verified state will reach, which would hide that it did not land. When no state verifies
-// (its banks re-keyed, or its node misbehaves), it freezes the last name a verified state gave this
-// wallet's key, at the height the node reports, the only one left. The wallet keeps the freeze it sent
-// until a verified state shows the name frozen (freezeStatus).
+// block no verified state will reach, which would hide that it did not land. When a state the wallet
+// verified before stands in for the node's (newestVerifiedState), the chain may have gone past it: the
+// height is then the one the node reports, if that is later. When no state verifies (its banks
+// re-keyed, or its node misbehaves), it freezes the last name a verified state gave this wallet's key,
+// at the height the node reports, the only one left. The wallet keeps the freeze it sent until a
+// verified state shows the name frozen (freezeStatus).
 func (wallet *Wallet) Freeze() (ledger.NameRequest, error) {
 	var name string
 	var blockID int64
-	if checkpoint, err := wallet.verifiedState(); err == nil {
+	if checkpoint, keptFrom, err := wallet.newestVerifiedState(); err == nil {
 		if name, err = wallet.registeredName(checkpoint); err != nil {
 			return ledger.NameRequest{}, err
 		}
 		heightInProgress := checkpoint.State.Height + 1
+		if keptFrom != "" {
+			if reported, err := wallet.height(); err == nil {
+				heightInProgress = max(heightInProgress, reported)
+			}
+		}
 		blockID = heightInProgress + wallet.lookahead
 		account, _ := ledger.FindAccount(checkpoint.State.Accounts, name)
 		if account.PendingHeight >= heightInProgress && account.PendingHeight < blockID {
@@ -573,7 +664,8 @@ func (wallet *Wallet) freezeStatus(state *ledger.LedgerState) string {
 	return fmt.Sprintf("Your freeze of %s was sent for block %d. It is not confirmed until a verified state shows %s frozen.", name, blockID, name)
 }
 
-// postJSON posts body to the node, and returns the node's reason when it refuses it.
+// postJSON posts body to the node, and returns the node's reason when it refuses it, or says that the
+// node does not serve path at all, and for a certificate where to submit it.
 func (wallet *Wallet) postJSON(path string, body any) error {
 	data, _ := json.Marshal(body)
 	response, err := wallet.client.Post(wallet.nodeURL+path, "application/json", bytes.NewReader(data))
@@ -581,6 +673,16 @@ func (wallet *Wallet) postJSON(path string, body any) error {
 		return err
 	}
 	defer response.Body.Close()
+	switch {
+	case response.StatusCode == http.StatusNotFound && (path == "/hdls/parameter-vote" || path == "/hdls/reassignment-vote"):
+		// A bank's public face (cmd/fetcher) passes on a customer's payment, account update and name
+		// request, and answers 404 to any other submission: the two certificates are submitted on the
+		// bank's operator node (spec §8). Its answer tells the two kinds of node apart: the wallet
+		// probes no route.
+		return fmt.Errorf("this node does not take %s: votes are submitted on the bank's operator node, not at its public address, which passes on only payments, account updates and name requests", path)
+	case response.StatusCode == http.StatusNotFound:
+		return fmt.Errorf("this node does not take %s: it answered %s", path, response.Status)
+	}
 	if response.StatusCode >= 300 {
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return fmt.Errorf("node rejected the submission: %s", string(message))

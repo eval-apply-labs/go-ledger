@@ -42,7 +42,7 @@ func TestParameterChangeRequiresTwoThirds(t *testing.T) {
 	// All three approve (>= quorum): the change is valid and, applied in a block, amends the params.
 	ratified := &ParameterChange{NewParameters: proposed, PreviousParametersDigest: previousDigest,
 		Votes: []ParameterVote{voteBy("v0"), voteBy("v1"), voteBy("v2")}}
-	if !ratified.Valid(signing.MLDSA65{}, testNetwork, validators, current, 0) {
+	if !ratified.Valid(signing.NetworkScheme(), testNetwork, validators, current, 0) {
 		t.Fatal("a change approved by all validators should be ratified")
 	}
 	previousState := LedgerState{Accounts: []Account{namedAccount("v0", "1"), namedAccount("v1", "1"), namedAccount("v2", "1")}, Parameters: current}
@@ -58,7 +58,7 @@ func TestParameterChangeRequiresTwoThirds(t *testing.T) {
 	// Only one of three approves (< quorum): not ratified, and a block carrying it is rejected.
 	subQuorum := &ParameterChange{NewParameters: proposed, PreviousParametersDigest: previousDigest,
 		Votes: []ParameterVote{voteBy("v0")}}
-	if subQuorum.Valid(signing.MLDSA65{}, testNetwork, validators, current, 0) {
+	if subQuorum.Valid(signing.NetworkScheme(), testNetwork, validators, current, 0) {
 		t.Fatal("a sub-⅔ change must not be ratified")
 	}
 	rejected := block
@@ -73,14 +73,14 @@ func TestParameterChangeRequiresTwoThirds(t *testing.T) {
 	misattributed.Validator = "v2"
 	forged := &ParameterChange{NewParameters: proposed, PreviousParametersDigest: previousDigest,
 		Votes: []ParameterVote{voteBy("v0"), voteBy("v1"), misattributed}}
-	if forged.Valid(signing.MLDSA65{}, testNetwork, validators, current, 0) {
+	if forged.Valid(signing.NetworkScheme(), testNetwork, validators, current, 0) {
 		t.Fatal("a vote naming v2 but signed under v0's key was counted")
 	}
 
 	// All or nothing: a full quorum with one bad vote in front of it is not ratified (spec 4.9).
 	padded := &ParameterChange{NewParameters: proposed, PreviousParametersDigest: previousDigest,
 		Votes: []ParameterVote{misattributed, voteBy("v0"), voteBy("v1"), voteBy("v2")}}
-	if padded.Valid(signing.MLDSA65{}, testNetwork, validators, current, 0) {
+	if padded.Valid(signing.NetworkScheme(), testNetwork, validators, current, 0) {
 		t.Fatal("a change with a full quorum and one bad vote was ratified: one bad vote must make it invalid")
 	}
 
@@ -89,7 +89,7 @@ func TestParameterChangeRequiresTwoThirds(t *testing.T) {
 	if nextState.GovernanceSequence != 1 {
 		t.Fatalf("applying a governance action should bump the sequence to 1, got %d", nextState.GovernanceSequence)
 	}
-	if ratified.Valid(signing.MLDSA65{}, testNetwork, validators, current, nextState.GovernanceSequence) {
+	if ratified.Valid(signing.NetworkScheme(), testNetwork, validators, current, nextState.GovernanceSequence) {
 		t.Fatal("a certificate must not re-apply once the governance sequence has advanced (replay guard)")
 	}
 }
@@ -112,10 +112,10 @@ func TestParameterChangeEnforcesTimingCoupling(t *testing.T) {
 	tooShort, longEnough := DefaultParameters(), DefaultParameters()
 	tooShort.StepTimeoutMs, tooShort.MaxPeers = 300, 2
 	longEnough.StepTimeoutMs, longEnough.MaxPeers = 600, 2
-	if makeChange(tooShort).Valid(signing.MLDSA65{}, testNetwork, validators, current, 0) {
+	if makeChange(tooShort).Valid(signing.NetworkScheme(), testNetwork, validators, current, 0) {
 		t.Fatal("a profile whose step timeout can't cover the fan-out must be rejected even with a full quorum")
 	}
-	if !makeChange(longEnough).Valid(signing.MLDSA65{}, testNetwork, validators, current, 0) {
+	if !makeChange(longEnough).Valid(signing.NetworkScheme(), testNetwork, validators, current, 0) {
 		t.Fatal("the same fan-out with a long-enough step timeout should be accepted")
 	}
 }
@@ -136,7 +136,7 @@ func TestParameterChangeRejectsChainHaltingTimings(t *testing.T) {
 		for _, name := range []string{"v0", "v1", "v2"} {
 			change.Votes = append(change.Votes, parameterVote(name, profile, current.Digest(), 0))
 		}
-		return change.Valid(signing.MLDSA65{}, testNetwork, validators, current, 0)
+		return change.Valid(signing.NetworkScheme(), testNetwork, validators, current, 0)
 	}
 	for _, timing := range [][2]int64{
 		{86_400_000_000, 3000}, {9_000_000_000_000, 3000}, {1000, 9_000_000_000_000}, {1000, math.MaxInt64},
@@ -180,7 +180,7 @@ func TestEveryParameterIsInTheDigest(t *testing.T) {
 		if (LedgerState{Parameters: changed}).Digest() == (LedgerState{Parameters: base}).Digest() {
 			t.Errorf("changing %s does not change the state digest", name)
 		}
-		if VerifyParameterVote(signing.MLDSA65{}, testNetwork, testSigner("v0").PublicKeyBase64(), changed, [32]byte{}, 0, vote) {
+		if VerifyParameterVote(signing.NetworkScheme(), testNetwork, testSigner("v0").PublicKeyBase64(), changed, [32]byte{}, 0, vote) {
 			t.Errorf("a vote for the defaults still verifies with %s changed", name)
 		}
 	}
@@ -205,8 +205,8 @@ func TestAcceptableEnforcesTheFloorsAndCeilings(t *testing.T) {
 		{"max peers over the ceiling", func(parameters *LedgerParameters) { parameters.MaxPeers = MaxPeersLimit + 1 }, false},
 		{"max peers negative", func(parameters *LedgerParameters) { parameters.MaxPeers = -1 }, false},
 		{"an unbounded message size", func(parameters *LedgerParameters) { parameters.MaxMessageBytes = 0 }, true},
-		{"the message floor", func(parameters *LedgerParameters) { parameters.MaxMessageBytes = MinMessageBytes }, true},
-		{"under the message floor", func(parameters *LedgerParameters) { parameters.MaxMessageBytes = MinMessageBytes - 1 }, false},
+		{"the message floor", func(parameters *LedgerParameters) { parameters.MaxMessageBytes = MinMessageBytes() }, true},
+		{"under the message floor", func(parameters *LedgerParameters) { parameters.MaxMessageBytes = MinMessageBytes() - 1 }, false},
 		{"the message ceiling", func(parameters *LedgerParameters) { parameters.MaxMessageBytes = MaxMessageBytesLimit }, true},
 		{"over the message ceiling", func(parameters *LedgerParameters) { parameters.MaxMessageBytes = MaxMessageBytesLimit + 1 }, false},
 		{"the smallest new key fee", func(parameters *LedgerParameters) { parameters.NewKeyFee = rational("0.00000001") }, true},
@@ -303,7 +303,7 @@ func TestReassignmentCannotRaiseABalanceAboveTheCap(t *testing.T) {
 		{reassignmentBy("pauper", "0", "100", 0, "validator"), true},             // from zero up to the cap
 		{reassignmentBy("pauper", "0", "100.00000001", 0, "validator"), false},   // from zero above it
 	} {
-		if valid := testCase.reassignment.Valid(signing.MLDSA65{}, testNetwork, validators, previous); valid != testCase.valid {
+		if valid := testCase.reassignment.Valid(signing.NetworkScheme(), testNetwork, validators, previous); valid != testCase.valid {
 			t.Errorf("%s from %s to %s: valid %v, want %v", testCase.reassignment.Name, FormatAmount(testCase.reassignment.PreviousAmount),
 				FormatAmount(testCase.reassignment.NewAmount), valid, testCase.valid)
 		}

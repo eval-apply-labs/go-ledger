@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -60,23 +61,26 @@ func TestUpdateDelegatesToAName(t *testing.T) {
 	}
 }
 
-// "-" (ClearField) sets a delegate, a description or an address to none, and "" leaves it as it is.
-// Without it a delegation, or an address a validator published, could never be withdrawn.
+// "-" (ClearField) sets a delegate, a description or a public address to none, and "" leaves it as it
+// is; the IP addresses are cleared by a list of "-" alone, and left by an empty list. Without it a
+// delegation, or an address a validator published, could never be withdrawn.
 func TestUpdateClearsAFieldWithADash(t *testing.T) {
 	alice := namedAccount("alice", "100")
-	alice.Delegate, alice.Description, alice.Address = "bob", "hi", "http://10.0.0.2:8080"
+	alice.Delegate, alice.Description, alice.PublicAddress, alice.IPAddresses = "bob", "hi", "https://alice.example", []string{"10.0.0.2", "2001:db8::2"}
 	previousState := buildLedgerState(4, []Account{alice, namedAccount("bob", "100"), seatedAccount()}, rational("0.1"))
 
 	keep := signedUpdate(AccountUpdate{Name: "alice", Description: "hello", BlockID: 5})
 	next, err := ApplyBlock(testChain(), previousState, zeroHash, ProposeBlock(testChain(), previousState, zeroHash, zeroHash, BlockContent{AccountUpdates: []AccountUpdate{keep}}))
-	if after := find(next.Accounts, "alice"); err != nil || after.Delegate != "bob" || after.Description != "hello" || after.Address != "http://10.0.0.2:8080" {
+	if after := find(next.Accounts, "alice"); err != nil || after.Delegate != "bob" || after.Description != "hello" || after.PublicAddress != "https://alice.example" ||
+		!slices.Equal(after.IPAddresses, alice.IPAddresses) {
 		t.Fatalf("an update of the description alone changed other fields (error %v): %+v", err, after)
 	}
 
-	clear := signedUpdate(AccountUpdate{Name: "alice", Delegate: ClearField, Description: ClearField, Address: ClearField, BlockID: 6})
+	clear := signedUpdate(AccountUpdate{Name: "alice", Delegate: ClearField, Description: ClearField, PublicAddress: ClearField, IPAddresses: []string{ClearField}, BlockID: 6})
 	block := ProposeBlock(testChain(), next, zeroHash, zeroHash, BlockContent{AccountUpdates: []AccountUpdate{clear}})
 	cleared, err := ApplyBlock(testChain(), next, zeroHash, block)
-	if after := find(cleared.Accounts, "alice"); err != nil || len(block.Content.AccountUpdates) != 1 || after.Delegate != "" || after.Description != "" || after.Address != "" {
+	if after := find(cleared.Accounts, "alice"); err != nil || len(block.Content.AccountUpdates) != 1 || after.Delegate != "" || after.Description != "" || after.PublicAddress != "" ||
+		after.IPAddresses != nil {
 		t.Fatalf("\"-\" did not clear the fields (error %v): %+v", err, after)
 	}
 	if testChain().ValidatorRule.SetFor(cleared).Contains("bob") {
@@ -111,15 +115,23 @@ func TestDelegationToAnUnknownOrFrozenNameIsRefused(t *testing.T) {
 }
 
 // An update's signature covers each of its fields, in the spec's order: without Delegate a relay could
-// add a delegation to a signed description change, and without BlockID replay it in a later block. A
-// receipt's covers the node's name, the payment id and the block.
+// add a delegation to a signed description change, and without BlockID replay it in a later block. The
+// IP addresses come last, after their count. A receipt's covers the node's name, the payment id and
+// the block.
 func TestUpdateAndReceiptSignaturesCoverEveryField(t *testing.T) {
-	scheme, network := signing.MLDSA65{}, testNetwork
+	scheme, network := signing.NetworkScheme(), testNetwork
 	alice := testSigner("alice")
-	update := signedUpdate(AccountUpdate{Name: "alice", Delegate: "bank-a", Description: "hi", Address: ClearField, BlockID: 5})
-	updateFields := [][]byte{[]byte("alice"), []byte("bank-a"), []byte("hi"), []byte("-"), []byte("5")}
+	update := signedUpdate(AccountUpdate{Name: "alice", Delegate: "bank-a", Description: "hi", PublicAddress: ClearField, IPAddresses: []string{"10.0.0.2", "2001:db8::2"}, BlockID: 5})
+	updateFields := [][]byte{[]byte("alice"), []byte("bank-a"), []byte("hi"), []byte("-"), []byte("5"), []byte("2"), []byte("10.0.0.2"), []byte("2001:db8::2")}
 	if !signing.VerifyBase64(scheme, network, alice.PublicKeyBase64(), signing.DomainAccountUpdate, update.Signature, updateFields...) {
-		t.Error("an update is not signed over its name, delegate, description, address and block")
+		t.Error("an update is not signed over its name, delegate, description, public address, block and IP addresses")
+	}
+	for name, changed := range map[string][]string{"one address fewer": {"10.0.0.2"}, "another order": {"2001:db8::2", "10.0.0.2"}, "none": nil} {
+		moved := update
+		moved.IPAddresses = changed
+		if VerifyAccountUpdate(scheme, network, alice.PublicKeyBase64(), moved) || UpdateID(moved) == UpdateID(update) {
+			t.Errorf("an update with %s IP addresses verifies under the signature, or has the same id", name)
+		}
 	}
 
 	receipt, err := SignReceipt(alice, "alice", signedPayment("alice", "bob", "12.5", 3))

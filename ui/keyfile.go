@@ -1,7 +1,7 @@
 package main
 
-// The wallet key file. The private key is the 32-byte ML-DSA-65 seed the key derives from, and it is
-// stored encrypted like an SSH key: a passphrase (asked at
+// The wallet key file. The private key, in the form the network's scheme stores it, is stored
+// encrypted like an SSH key: a passphrase (asked at
 // startup, terminal echo off) is stretched with PBKDF2-HMAC-SHA256 and the key sealed with
 // AES-256-GCM, so a copied/backed-up/stolen wallet.json is useless without the passphrase — the
 // dominant loss vector for a file that otherwise holds the key in plain base64. An EMPTY passphrase
@@ -36,9 +36,9 @@ const kdfIterations = 600_000
 const passphraseEnvironmentVariable = "GOLEDGER_WALLET_PASSPHRASE"
 
 type keyFile struct {
-	PublicKey  string        `json:"publicKey"`                     // the key the seed derives, for display; checked on load
-	PrivateKey string        `json:"privateKey,omitempty"`          // the seed, plaintext form (empty passphrase)
-	Encrypted  *encryptedKey `json:"encryptedPrivateKey,omitempty"` // the seed, passphrase-sealed form
+	PublicKey  string        `json:"publicKey"`                     // its public key, for display; checked on load
+	PrivateKey string        `json:"privateKey,omitempty"`          // the private key, plaintext (empty passphrase)
+	Encrypted  *encryptedKey `json:"encryptedPrivateKey,omitempty"` // the private key, sealed
 }
 
 type encryptedKey struct {
@@ -46,7 +46,7 @@ type encryptedKey struct {
 	Iterations int    `json:"iterations"`
 	Salt       string `json:"salt"`       // base64
 	Nonce      string `json:"nonce"`      // base64
-	Ciphertext string `json:"ciphertext"` // base64: AES-256-GCM over the 32-byte seed
+	Ciphertext string `json:"ciphertext"` // base64: AES-256-GCM over the private key
 }
 
 // loadOrCreateKey returns the wallet key pair, creating and saving a fresh one if no file exists
@@ -56,7 +56,7 @@ type encryptedKey struct {
 func loadOrCreateKey(path string) (publicKey, privateKey []byte, err error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		if publicKey, privateKey, err = (signing.MLDSA65{}).GenerateKey(); err != nil {
+		if publicKey, privateKey, err = signing.NetworkScheme().GenerateKey(); err != nil {
 			return nil, nil, err
 		}
 		passphrase, err := newPassphrase("set a wallet passphrase (empty = store unencrypted): ")
@@ -88,13 +88,14 @@ func loadOrCreateKey(path string) (publicKey, privateKey []byte, err error) {
 	default:
 		return nil, nil, fmt.Errorf("wallet file %s carries no private key", path)
 	}
-	// The account is the key the seed derives. The publicKey field is outside the seal, so one that
+	// The account is the key the private key derives. The publicKey field is outside the seal, so one that
 	// disagrees (a tampered or corrupted file) is refused rather than shown as this wallet's account.
-	// Any 32 bytes are a seed (signing/fips140v1.go stops the one build where crypto/mldsa refuses
-	// them all), so only a key of another length fails to parse: an earlier network's.
-	parsedKey, err := (signing.MLDSA65{}).ParsePrivateKey(privateKey)
+	// A private key the network's scheme cannot parse comes from an earlier network, on another scheme.
+	scheme := signing.NetworkScheme()
+	parsedKey, err := scheme.ParsePrivateKey(privateKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("wallet file %s holds a %d-byte private key, not a 32-byte ML-DSA-65 seed: it belongs to an earlier network; make a new wallet", path, len(privateKey))
+		return nil, nil, fmt.Errorf("wallet file %s holds a %d-byte private key, not a private key of the network's scheme, %s: it belongs to an earlier network; make a new wallet",
+			path, len(privateKey), scheme.Name())
 	}
 	publicKey = parsedKey.PublicKey()
 	if storedKey.PublicKey != base64.StdEncoding.EncodeToString(publicKey) {

@@ -12,6 +12,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
 	"html/template"
@@ -31,7 +32,7 @@ var templateFiles embed.FS
 var pageTemplates = template.Must(template.New("pages").Funcs(template.FuncMap{"fingerprint": fingerprint}).ParseFS(templateFiles, "templates/*.html"))
 
 func main() {
-	nodeURL := flag.String("node", "http://127.0.0.1:8080", "node base URL")
+	nodeURL := flag.String("node", "http://127.0.0.1:8080", "node base URL: a bank's public address, or, for the bank's operator, its engine's operator port")
 	listen := flag.String("listen", "127.0.0.1:8090", "address to serve the wallet UI on")
 	network := flag.String("network", "village", "network name (the node's network id must start with it and a slash)")
 	keyfile := flag.String("wallet", "wallet.json", "wallet key file (created if absent)")
@@ -59,6 +60,7 @@ func routes(wallet *Wallet, listen string) http.Handler {
 	serveMux.HandleFunc("/send", walletHandler.send)
 	serveMux.HandleFunc("/update", walletHandler.updateAccount)
 	serveMux.HandleFunc("/freeze", walletHandler.freeze)
+	serveMux.HandleFunc("/checkpoint", walletHandler.loadCheckpoint)
 	serveMux.HandleFunc("/requests", walletHandler.requests)
 	serveMux.HandleFunc("/admin", walletHandler.admin)
 	serveMux.HandleFunc("/admin/parameter", walletHandler.proposeParameter)
@@ -140,10 +142,13 @@ type pageData struct {
 	PendingAt     int64  // and the block at whose end it takes effect
 	FreezeStatus  string // what became of the freeze this wallet sent (Wallet.freezeStatus)
 	Balance       string
-	Verified      bool  // a state verified: the page shows it, and only then says "not registered"
-	Height        int64 // the height of the verified state the page shows
+	Verified      bool      // a state verified: the page shows it, and only then says "not registered"
+	Height        int64     // the height of the verified state the page shows
+	KeptFrom      string    // "" when that state is the node's; else "file" or "node", where the newer state that stands in came from (Wallet.newestVerifiedState)
+	Banks         bankCheck // what the other banks' nodes say about that state (checkOtherBanks)
 	Accounts      []accountRow
 	Review        *paymentReview // a payment to confirm before it is signed
+	Saved         *savedPayment  // a payment signed and saved as text, to carry to a bank (Wallet.SavePayment)
 	ConfirmFreeze bool           // the freeze button was pressed: confirm before it signs
 	Message       string
 	Error         string
@@ -162,21 +167,36 @@ func (walletHandler *handler) index(responseWriter http.ResponseWriter, request 
 		http.NotFound(responseWriter, request)
 		return
 	}
-	checkpoint, err := walletHandler.wallet.verifiedState()
-	walletHandler.render(responseWriter, pageData{Message: request.URL.Query().Get("msg"), Error: request.URL.Query().Get("err")}, checkpoint, err)
+	checkpoint, keptFrom, err := walletHandler.wallet.newestVerifiedState()
+	walletHandler.render(responseWriter, request, pageData{KeptFrom: keptFrom, Message: request.URL.Query().Get("msg"), Error: request.URL.Query().Get("err")}, checkpoint, err)
 }
 
 // send reviews a payment (the default step): the page shows the payee's name and bank of record from the
-// verified state, and signs nothing. Its "confirm" step signs the payment and submits it.
+// verified state, and signs nothing. Its "confirm" step signs the payment and submits it. Its "save" step
+// signs the payment, sending nothing (spec §7.8), and redirects to GET /send, which shows the payment
+// saved last as text: post, redirect, get, so a reload of that page signs no second payment.
 func (walletHandler *handler) send(responseWriter http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
-		http.Redirect(responseWriter, request, "/", http.StatusSeeOther)
+		saved := walletHandler.wallet.lastSavedPayment()
+		if saved == nil {
+			http.Redirect(responseWriter, request, "/", http.StatusSeeOther)
+			return
+		}
+		checkpoint, keptFrom, err := walletHandler.wallet.newestVerifiedState()
+		walletHandler.render(responseWriter, request, pageData{Saved: saved, KeptFrom: keptFrom}, checkpoint, err)
 		return
 	}
-	if request.FormValue("step") != "confirm" {
-		checkpoint, err := walletHandler.wallet.verifiedState()
-		data := pageData{}
-		if err == nil {
+	if step := request.FormValue("step"); step != "confirm" {
+		checkpoint, keptFrom, err := walletHandler.wallet.newestVerifiedState()
+		data := pageData{KeptFrom: keptFrom}
+		if err == nil && step == "save" {
+			if _, saveErr := walletHandler.wallet.SavePayment(checkpoint, request.FormValue("to"), request.FormValue("amount")); saveErr != nil {
+				http.Redirect(responseWriter, request, "/?err="+url.QueryEscape(saveErr.Error()), http.StatusSeeOther)
+				return
+			}
+			http.Redirect(responseWriter, request, "/send", http.StatusSeeOther)
+			return
+		} else if err == nil {
 			review, reviewErr := walletHandler.wallet.ReviewPayment(checkpoint, request.FormValue("to"), request.FormValue("amount"))
 			if reviewErr != nil {
 				http.Redirect(responseWriter, request, "/?err="+url.QueryEscape(reviewErr.Error()), http.StatusSeeOther)
@@ -184,7 +204,7 @@ func (walletHandler *handler) send(responseWriter http.ResponseWriter, request *
 			}
 			data.Review = &review
 		}
-		walletHandler.render(responseWriter, data, checkpoint, err)
+		walletHandler.render(responseWriter, request, data, checkpoint, err)
 		return
 	}
 	receipt, verified, err := walletHandler.wallet.Send(request.FormValue("to"), request.FormValue("amount"))
@@ -206,7 +226,8 @@ func (walletHandler *handler) updateAccount(responseWriter http.ResponseWriter, 
 		http.Redirect(responseWriter, request, "/", http.StatusSeeOther)
 		return
 	}
-	update, err := walletHandler.wallet.UpdateAccount(request.FormValue("description"), request.FormValue("delegate"), request.FormValue("address"))
+	update, err := walletHandler.wallet.UpdateAccount(request.FormValue("description"), request.FormValue("delegate"), request.FormValue("publicAddress"),
+		request.FormValue("ipAddresses"))
 	if err != nil {
 		http.Redirect(responseWriter, request, "/?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
@@ -226,8 +247,8 @@ func (walletHandler *handler) freeze(responseWriter http.ResponseWriter, request
 		return
 	}
 	if request.FormValue("step") != "confirm" {
-		checkpoint, err := walletHandler.wallet.verifiedState()
-		walletHandler.render(responseWriter, pageData{ConfirmFreeze: true}, checkpoint, err)
+		checkpoint, keptFrom, err := walletHandler.wallet.newestVerifiedState()
+		walletHandler.render(responseWriter, request, pageData{ConfirmFreeze: true, KeptFrom: keptFrom}, checkpoint, err)
 		return
 	}
 	freeze, err := walletHandler.wallet.Freeze()
@@ -239,9 +260,38 @@ func (walletHandler *handler) freeze(responseWriter http.ResponseWriter, request
 	http.Redirect(responseWriter, request, "/?msg="+url.QueryEscape(message), http.StatusSeeOther)
 }
 
-// render shows the main page from one verified state, or, when none verifies (readErr), what the wallet
+// loadCheckpoint takes a checkpoint file someone carried in, pasted into the main page's form when the
+// node can't be reached (Wallet.LoadCarriedCheckpoint, spec §7.8). The form is url-encoded, so it can be
+// up to three times the size of the file, which may be as large as a node takes (node.MaxCheckpointBytes).
+// Its body is bounded at that, which also lifts the 10 MB that Go's form parser reads of a body it is not
+// given a bound for.
+func (walletHandler *handler) loadCheckpoint(responseWriter http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		http.Redirect(responseWriter, request, "/", http.StatusSeeOther)
+		return
+	}
+	request.Body = http.MaxBytesReader(responseWriter, request.Body, 3*node.MaxCheckpointBytes)
+	if err := request.ParseForm(); err != nil {
+		reason := fmt.Sprintf("the form is unreadable (%v)", err)
+		if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
+			reason = errCheckpointTooLarge.Error()
+		}
+		http.Redirect(responseWriter, request, "/?err="+url.QueryEscape("the checkpoint file is refused: "+reason), http.StatusSeeOther)
+		return
+	}
+	checkpoint, err := walletHandler.wallet.LoadCarriedCheckpoint(request.FormValue("checkpoint"))
+	if err != nil {
+		http.Redirect(responseWriter, request, "/?err="+url.QueryEscape("the checkpoint file is refused: "+err.Error()), http.StatusSeeOther)
+		return
+	}
+	message := fmt.Sprintf("checkpoint loaded: while your bank's node can't be reached, or serves an older state, the page shows the state as of height %d, from a file", checkpoint.State.Height)
+	http.Redirect(responseWriter, request, "/?msg="+url.QueryEscape(message), http.StatusSeeOther)
+}
+
+// render shows the main page from one verified state, with what the other banks say of it
+// (checkOtherBanks, asked within the page's request), or, when none verifies (readErr), what the wallet
 // still knows: its key, its last name, and the freeze button for that name.
-func (walletHandler *handler) render(responseWriter http.ResponseWriter, data pageData, checkpoint node.Checkpoint, readErr error) {
+func (walletHandler *handler) render(responseWriter http.ResponseWriter, request *http.Request, data pageData, checkpoint node.Checkpoint, readErr error) {
 	wallet := walletHandler.wallet
 	data.PublicKey, data.Fingerprint = wallet.PublicKey(), fingerprint(wallet.PublicKey())
 	if readErr != nil {
@@ -254,6 +304,7 @@ func (walletHandler *handler) render(responseWriter http.ResponseWriter, data pa
 	}
 	state := checkpoint.State
 	data.Verified, data.Height, data.FreezeStatus = true, state.Height, wallet.freezeStatus(&state)
+	data.Banks = wallet.checkOtherBanks(request.Context(), checkpoint)
 	for _, account := range state.Accounts {
 		data.Accounts = append(data.Accounts, accountRow{Name: account.Name, Bank: account.Bank, Fingerprint: fingerprint(account.PublicKey),
 			Amount: ledger.FormatAmount(account.Amount), Frozen: account.Frozen})

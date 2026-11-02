@@ -1,9 +1,12 @@
 package node
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/eval-apply-labs/go-ledger/consensus"
 	"github.com/eval-apply-labs/go-ledger/ledger"
+	"github.com/eval-apply-labs/go-ledger/signing"
 )
 
 // A running node that cannot make progress alone (a straggler that missed a commit window) must
@@ -71,6 +75,80 @@ func TestCatchUpFallsBackToGossipPeers(t *testing.T) {
 	defer straggler.Stop()
 	waitFor(t, 10*time.Second, func() bool { return straggler.Snapshot().Height == 6 },
 		"with its bootstrap peer down, the node did not catch up from its gossip peer")
+}
+
+// A checkpoint a carrier brought (spec §7.5) is taken on the operator port's POST /hdls/checkpoint, and
+// verified as catch-up verifies one. One that is ahead and verifies is adopted, and the answer is 202.
+// Each other is refused with 409 and its reason: one that is not ahead, at the node's committed height
+// or below it; one whose state is not the one its commit signs; and another network's, signed by the
+// same banks under the same keys, whose signatures bind the other network's id.
+func TestCarriedCheckpointIsAdoptedOnlyWhenAheadAndVerified(t *testing.T) {
+	names := []string{"founder", "straggler"} // quorum 2: the straggler cannot decide alone
+	scheme := signing.NetworkScheme()
+	signersOn := map[string]map[string]*signing.Signer{testNetworkID: {}, "elsewhere": {}} // by network id, then name
+	var validators []consensus.Validator
+	var accounts []ledger.Account
+	for _, name := range names {
+		_, privateKey, err := scheme.GenerateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for networkID, signers := range signersOn {
+			if signers[name], err = signing.NewSigner(scheme, networkID, privateKey); err != nil {
+				t.Fatal(err)
+			}
+		}
+		publicKey := signersOn[testNetworkID][name].PublicKeyBase64()
+		validators = append(validators, consensus.Validator{Name: name, PublicKey: publicKey, Power: 1})
+		accounts = append(accounts, ledger.Account{Name: name, PublicKey: publicKey, Amount: rational("100")})
+	}
+	genesis := testGenesis(accounts, 30*time.Second, 0)
+	straggler := New(Config{Chain: staticChain(names...), Signer: signersOn[testNetworkID]["straggler"], Name: "straggler", Genesis: genesis},
+		&recordingTransport{})
+	straggler.Start()
+	defer straggler.Stop()
+	handler := NewServer(straggler).Handler()
+	post := func(checkpoint Checkpoint) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(checkpoint)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/hdls/checkpoint", bytes.NewReader(body)))
+		return recorder
+	}
+
+	later := genesis
+	later.Accounts = append([]ledger.Account(nil), genesis.Accounts...)
+	later.Accounts[0].Amount = rational("90")
+	later.Accounts[1].Amount = rational("110")
+	damaged := checkpointOf(t, 9, later, validators, signersOn[testNetworkID])
+	damaged.State.Accounts = append([]ledger.Account(nil), later.Accounts...)
+	damaged.State.Accounts[1].Amount = rational("1000") // another state than the one its commit signs
+	for _, refused := range []struct {
+		checkpoint Checkpoint
+		reason     string
+	}{
+		{checkpointOf(t, 9, later, validators, signersOn["elsewhere"]), "another network"},
+		{damaged, "does not verify"},
+	} {
+		if answer := post(refused.checkpoint); answer.Code != http.StatusConflict || !strings.Contains(answer.Body.String(), refused.reason) {
+			t.Errorf("a checkpoint refused for %q was answered %d %q, want 409 and the reason", refused.reason, answer.Code, answer.Body)
+		}
+	}
+	if height := straggler.Snapshot().Height; height != 1 {
+		t.Fatalf("after the refused checkpoints the node is at height %d, want 1", height)
+	}
+
+	if answer := post(checkpointOf(t, 5, later, validators, signersOn[testNetworkID])); answer.Code != http.StatusAccepted {
+		t.Fatalf("an ahead, verifying checkpoint was answered %d %q, want 202", answer.Code, answer.Body)
+	}
+	if snapshot := straggler.Snapshot(); snapshot.Height != 6 || balance(snapshot.Accounts, "straggler").Cmp(rational("110")) != 0 {
+		t.Fatalf("after adopting the checkpoint of height 5 the node is at height %d, want 6, with its state", snapshot.Height)
+	}
+	for _, height := range []int64{5, 3} {
+		if answer := post(checkpointOf(t, height, later, validators, signersOn[testNetworkID])); answer.Code != http.StatusConflict ||
+			!strings.Contains(answer.Body.String(), "not ahead") {
+			t.Errorf("a checkpoint of height %d, at the node's committed height 5 or below, was answered %d %q, want 409, not ahead", height, answer.Code, answer.Body)
+		}
+	}
 }
 
 // recordingTransport delivers nothing; it records what the node broadcasts.
@@ -220,7 +298,7 @@ func TestDynamicStragglerCatchesUpAfterFounderPayout(t *testing.T) {
 
 	server := httptest.NewServer(NewServer(successorNode).Handler())
 	defer server.Close()
-	checkpoint, found := founderNode.bestCheckpoint([]string{server.URL}) // what its catch-up loop does on every tick
+	checkpoint, found, _ := founderNode.bestCheckpoint(NewHTTPClient(5*time.Second), [][]string{{server.URL}}) // what its catch-up loop does on every tick
 	if !found {
 		t.Fatal("the straggler rejected the network's checkpoint: it trusts only genesis, and the founder no longer signs")
 	}

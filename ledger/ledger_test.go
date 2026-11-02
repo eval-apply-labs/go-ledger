@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"math/big"
+	"slices"
 	"testing"
 )
 
@@ -163,7 +164,7 @@ func TestOverdrawBanSemantics(t *testing.T) {
 			{From: "d", To: "a", Amount: rational("0.9"), Comment: "second"},
 		}, "0"},
 	} {
-		payer := Account{Name: "a", PublicKey: "key-a", Amount: rational("10"), Delegate: "v1", Address: "http://a"}
+		payer := Account{Name: "a", PublicKey: "key-a", Amount: rational("10"), Delegate: "v1", PublicAddress: "http://a", IPAddresses: []string{"10.0.0.1"}}
 		accounts := []Account{payer, {Name: "b", Amount: rational("5")}, {Name: "c", Amount: rational("5")}, {Name: "d", Amount: rational("1")}}
 		after := ProcessPayments(accounts, append(append([]Payment(nil), overdraw...), testCase.credits...), rational("0.1"))
 		if balance(after, "b").Cmp(rational("5")) != 0 {
@@ -173,7 +174,8 @@ func TestOverdrawBanSemantics(t *testing.T) {
 		switch {
 		case payerAfter.Amount.Cmp(rational(testCase.want)) != 0:
 			t.Errorf("%s: a = %s, want %s", testCase.name, payerAfter.Amount.FloatString(2), testCase.want)
-		case payerAfter.Name != "a" || payerAfter.PublicKey != "key-a" || payerAfter.Delegate != "v1" || payerAfter.Address != "http://a":
+		case payerAfter.Name != "a" || payerAfter.PublicKey != "key-a" || payerAfter.Delegate != "v1" || payerAfter.PublicAddress != "http://a" ||
+			!slices.Equal(payerAfter.IPAddresses, []string{"10.0.0.1"}):
 			t.Errorf("%s: a lost its attributes: %+v", testCase.name, payerAfter)
 		}
 	}

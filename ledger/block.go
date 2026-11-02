@@ -125,18 +125,30 @@ func paymentSigned(chain Chain, previousState LedgerState, payment Payment) bool
 
 // UpdateFitsState checks an account update against a state, the pre-block state in a block or the
 // committed state at intake (spec 5.3 rule 20, 4.2): it changes a field, its JSON fits the message
-// bound, its account exists and is not frozen, and a delegate it names exists and is not frozen. It
-// returns an error naming the first rule the update breaks. The block it names and its signature are
-// the caller's to check.
+// bound, a public address it sets is in the one plain form (CanonicalAddress), IP addresses it sets
+// are at most MaxIPAddresses, each in its one plain form (CanonicalIPAddress) and none twice, its
+// account exists and is not frozen, and a delegate it names exists and is not frozen. It returns an
+// error naming the first rule the update breaks. The block it names and its signature are the
+// caller's to check. Intake, blocks (updateError) and the wallet all check an update here, so no
+// address of another form enters the state by an update.
 func UpdateFitsState(state LedgerState, update AccountUpdate) error {
 	account, accountFound := FindAccount(state.Accounts, update.Name)
 	delegate, delegateFound := FindAccount(state.Accounts, update.Delegate)
 	setsDelegate := update.Delegate != "" && update.Delegate != ClearField
+	setsPublicAddress := update.PublicAddress != "" && update.PublicAddress != ClearField
+	var ipAddressesRefusal error
+	if !clearsList(update.IPAddresses) {
+		ipAddressesRefusal = ipAddressesError(update.IPAddresses) // nil for an empty list, which leaves them
+	}
 	switch {
-	case update.Delegate == "" && update.Description == "" && update.Address == "":
-		return errors.New("the update changes nothing: it sets no delegate, description or address")
+	case update.Delegate == "" && update.Description == "" && update.PublicAddress == "" && len(update.IPAddresses) == 0:
+		return errors.New("the update changes nothing: it sets no delegate, description, public address or IP addresses")
 	case !WithinMessageBound(state.Parameters.MaxMessageBytes, update):
 		return errors.New("update too large: its serialized form exceeds the governed message bound")
+	case setsPublicAddress && !CanonicalAddress(update.PublicAddress):
+		return fmt.Errorf("the public address %q is not an address: %s", update.PublicAddress, addressRule)
+	case ipAddressesRefusal != nil:
+		return ipAddressesRefusal
 	case !accountFound:
 		return fmt.Errorf("no account is named %q", update.Name)
 	case account.Frozen:
@@ -199,7 +211,7 @@ type Block struct {
 }
 
 // BlockContent is what a block carries: payments to settle, account updates (re-delegation,
-// description, address), name requests (registrations, key and bank changes, freezes), proofs of
+// description, addresses), name requests (registrations, key and bank changes, freezes), proofs of
 // double-signing, each of which freezes its signer's name, and at most one governance action to
 // ratify. A proposer offers ProposeBlock the content it holds, and ProposeBlock keeps only what is
 // valid for the block.

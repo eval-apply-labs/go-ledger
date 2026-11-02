@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/eval-apply-labs/go-ledger/consensus"
+	"github.com/eval-apply-labs/go-ledger/signing"
 )
 
 // Votes reach a node unchecked (POST /hdls/vote). The node keeps for re-gossip, and relays, only a
@@ -48,7 +49,7 @@ func TestOnlyCountableVotesAreKeptAndRelayed(t *testing.T) {
 	if len(node.heightVotes) != 2 || recorder.sent(MessageVote) != 2 {
 		t.Fatalf("of a validator's ten conflicting prevotes the node kept %d and relayed %d, want the first two", len(node.heightVotes), recorder.sent(MessageVote))
 	}
-	node.reGossipVotes()
+	node.reGossip()
 	if got := recorder.sent(MessageVote) - 2; got != 2 {
 		t.Fatalf("a re-gossip tick sent %d votes, want the two kept", got)
 	}
@@ -73,7 +74,7 @@ func TestOnlyCountableVotesAreKeptAndRelayed(t *testing.T) {
 func TestRelayedVoteCopyCostsNoSignatureCheck(t *testing.T) {
 	network := newHandNet(t, 4)
 	checks := &atomic.Int64{}
-	network.chain.Scheme = countingScheme{checks: checks}
+	network.chain.Scheme = countingScheme{Scheme: signing.NetworkScheme(), checks: checks}
 	self := network.nonProposer(1)
 	peer := (self + 1) % 4
 	node, _ := network.node(self)

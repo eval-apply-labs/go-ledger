@@ -218,9 +218,9 @@ func TestKeyFileRoundTrip(t *testing.T) {
 	}
 }
 
-// The key file holds the private key as the 32-byte ML-DSA-65 seed, in plaintext or sealed, and the
-// publicKey the seed derives, for display. A file whose private key has another length, such as an
-// earlier network's 64-byte Ed25519 key, is refused with an error that says so.
+// The key file holds the private key in the form the network's scheme stores it, in plaintext or
+// sealed, and the publicKey it derives, for display. A file whose private key the scheme cannot parse,
+// such as an earlier network's 64-byte Ed25519 key, is refused with an error that says so.
 func TestKeyFileHoldsTheSeed(t *testing.T) {
 	directory := t.TempDir()
 	for name, passphrase := range map[string]string{"plain.json": "", "sealed.json": "correct horse"} {
@@ -239,13 +239,14 @@ func TestKeyFileHoldsTheSeed(t *testing.T) {
 		if passphrase != "" {
 			stored, err = storedKey.Encrypted.open(passphrase)
 		}
-		if err != nil || len(stored) != 32 || !bytes.Equal(stored, privateKey) {
-			t.Fatalf("%s holds a %d-byte private key (%v), want the 32-byte seed", name, len(stored), err)
+		if err != nil || !bytes.Equal(stored, privateKey) {
+			t.Fatalf("%s holds a %d-byte private key (%v), not the wallet's", name, len(stored), err)
 		}
-		derived, err := (signing.MLDSA65{}).ParsePrivateKey(stored)
-		if err != nil || len(publicKey) != 1952 || !bytes.Equal(derived.PublicKey(), publicKey) ||
+		scheme := signing.NetworkScheme()
+		derived, err := scheme.ParsePrivateKey(stored)
+		if err != nil || scheme.ValidatePublicKey(publicKey) != nil || !bytes.Equal(derived.PublicKey(), publicKey) ||
 			storedKey.PublicKey != base64.StdEncoding.EncodeToString(publicKey) {
-			t.Fatalf("%s: its publicKey is not the 1952-byte key its seed derives (%v)", name, err)
+			t.Fatalf("%s: its publicKey is not the key its private key derives (%v)", name, err)
 		}
 	}
 

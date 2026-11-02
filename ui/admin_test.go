@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"html"
 	"io"
 	"math/big"
@@ -29,11 +30,15 @@ type governanceNode struct {
 	networkID       string // the network id it serves, testNetworkID unless a test changes it
 	height          int64  // the height of the state it serves, 9 unless a test changes it; its height in progress is one more
 	reportedHeight  int64  // when a test sets it, the height in progress its /hdls/status reports instead: a lie
+	checkpointFails int    // when a test sets it, the error status /hdls/checkpoint answers with, and no checkpoint
 	accounts        []ledger.Account
 	validators      []*signing.Signer
 	pending         []node.ReassignmentView
 	posts           []recordedPost
 	checkpointReads int // how many times a wallet read its checkpoint
+
+	// forge, when a test sets it, changes the checkpoint the node serves after it is signed.
+	forge func(checkpoint *node.Checkpoint)
 }
 
 type recordedPost struct {
@@ -55,7 +60,15 @@ func newGovernanceNode(t *testing.T) *governanceNode {
 		testNode.mutex.Lock()
 		defer testNode.mutex.Unlock()
 		testNode.checkpointReads++
-		_ = json.NewEncoder(responseWriter).Encode(signedCheckpointAt(testNode.height, testNode.validators, testNode.accounts))
+		if testNode.checkpointFails != 0 {
+			responseWriter.WriteHeader(testNode.checkpointFails)
+			return
+		}
+		checkpoint := signedCheckpointAt(testNode.height, testNode.validators, testNode.accounts)
+		if testNode.forge != nil {
+			testNode.forge(&checkpoint)
+		}
+		_ = json.NewEncoder(responseWriter).Encode(checkpoint)
 	})
 	serveMux.HandleFunc("/hdls/status", func(responseWriter http.ResponseWriter, request *http.Request) {
 		testNode.mutex.Lock()
@@ -167,6 +180,13 @@ func (testNode *governanceNode) state() ledger.LedgerState {
 	return ledger.LedgerState{Accounts: testNode.accounts, Parameters: governanceParameters, GovernanceSequence: governanceSequence}
 }
 
+// change runs change under the node's mutex, for a test to change what the node serves.
+func (testNode *governanceNode) change(change func()) {
+	testNode.mutex.Lock()
+	defer testNode.mutex.Unlock()
+	change()
+}
+
 func (testNode *governanceNode) posted() []recordedPost {
 	testNode.mutex.Lock()
 	defer testNode.mutex.Unlock()
@@ -233,7 +253,7 @@ func TestReassignmentVotesAreCollectedOffNode(t *testing.T) {
 	}
 	var signed ledger.Reassignment
 	if err := json.Unmarshal([]byte(ownVote), &signed); err != nil || len(signed.Votes) != 1 || signed.Votes[0].Validator != nameOf(walletSigner(t, wallet)) ||
-		!ledger.VerifyReassignmentVote(signing.MLDSA65{}, testNetworkID, wallet.PublicKey(),
+		!ledger.VerifyReassignmentVote(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(),
 			ledger.Reassignment{Name: "target", PreviousAmount: big.NewRat(100, 1), NewAmount: new(big.Rat), Sequence: governanceSequence}, signed.Votes[0]) {
 		t.Fatalf("the signed vote %s is not this wallet's vote, under its name, for the drafted values (%v)", ownVote, err)
 	}
@@ -261,7 +281,7 @@ func TestReassignmentVotesAreCollectedOffNode(t *testing.T) {
 	}
 	var certificate ledger.Reassignment
 	_ = json.Unmarshal(posts[0].body, &certificate)
-	if len(certificate.Votes) != 3 || !certificate.Valid(signing.MLDSA65{}, testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
+	if len(certificate.Votes) != 3 || !certificate.Valid(signing.NetworkScheme(), testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
 		t.Errorf("the submitted certificate (%d votes) is not valid", len(certificate.Votes))
 	}
 }
@@ -307,7 +327,7 @@ func TestParameterVotesAreCollectedOffNode(t *testing.T) {
 	var certificate ledger.ParameterChange
 	_ = json.Unmarshal(posts[0].body, &certificate)
 	if certificate.NewParameters.TransactionCost.Cmp(big.NewRat(1, 5)) != 0 ||
-		!certificate.Valid(signing.MLDSA65{}, testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), governanceParameters, governanceSequence) {
+		!certificate.Valid(signing.NetworkScheme(), testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), governanceParameters, governanceSequence) {
 		t.Errorf("the submitted certificate is not a valid vote for cost 0.2")
 	}
 }
@@ -371,7 +391,7 @@ func TestSoleValidatorVoteIsSubmittedAtOnce(t *testing.T) {
 	}
 	var certificate ledger.Reassignment
 	_ = json.Unmarshal(posts[0].body, &certificate)
-	if !certificate.Valid(signing.MLDSA65{}, testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
+	if !certificate.Valid(signing.NetworkScheme(), testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
 		t.Error("the submitted certificate is not valid")
 	}
 }
@@ -401,7 +421,7 @@ func TestParameterDraftCarriesTheTenParameters(t *testing.T) {
 	}
 	facts := strings.Join(draft.Facts, "\n")
 	for _, fact := range []string{"new key fee: 1 → 3", "change delay: 86400 blocks → 21 blocks", "retention: 604800 blocks → 1001 blocks",
-		"largest payment: 100000 → 600", "largest balance: 10000000 → 9001", "max peers: 0 → 7", "max message bytes: 6400 → 0"} {
+		"largest payment: 100000 → 600", "largest balance: 10000000 → 9001", "max peers: 0 → 7", fmt.Sprintf("max message bytes: %d → 0", ledger.DefaultParameters().MaxMessageBytes)} {
 		if !strings.Contains(facts, fact) {
 			t.Errorf("the review does not show %q:\n%s", fact, facts)
 		}
@@ -532,7 +552,7 @@ func TestNameActionDraftCollectsTheNewKeyProof(t *testing.T) {
 		t.Fatalf("want one certificate sent to /hdls/reassignment-vote, got %d request(s)", len(testNode.posted()))
 	}
 	if certificate.NewKey != newWallet.PublicKey() || !certificate.Unfreeze ||
-		!certificate.Valid(signing.MLDSA65{}, testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
+		!certificate.Valid(signing.NetworkScheme(), testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
 		t.Error("the submitted certificate is not a valid unfreeze of alice with the new key")
 	}
 }
@@ -605,7 +625,7 @@ func TestNameActionVotesOnlyOnAProofThatVerifies(t *testing.T) {
 	if posts := testNode.posted(); len(posts) != 1 || json.Unmarshal(posts[0].body, &certificate) != nil {
 		t.Fatalf("want one certificate sent, got %d request(s)", len(posts))
 	}
-	if len(certificate.Votes) != 3 || !certificate.Valid(signing.MLDSA65{}, testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
+	if len(certificate.Votes) != 3 || !certificate.Valid(signing.NetworkScheme(), testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
 		t.Error("the submitted certificate does not carry the proof that verifies and the three votes")
 	}
 }
@@ -649,7 +669,7 @@ func TestNameActionWithoutAmountsIsSignedAndSubmitted(t *testing.T) {
 		t.Fatalf("want one certificate sent, got %d request(s)", len(posts))
 	}
 	if certificate.PreviousAmount != nil || certificate.NewAmount != nil || !certificate.Freeze || len(certificate.Votes) != 3 ||
-		!certificate.Valid(signing.MLDSA65{}, testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
+		!certificate.Valid(signing.NetworkScheme(), testNetworkID, consensus.NewValidatorSet(signedCheckpoint(testNode.validators, nil).Validators), testNode.state()) {
 		t.Errorf("the submitted certificate is not a valid freeze of thief without amounts")
 	}
 }

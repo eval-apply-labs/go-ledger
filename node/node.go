@@ -1,11 +1,16 @@
 package node
 
 import (
+	"cmp"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"math/big"
+	"net/netip"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +37,27 @@ type Config struct {
 	BackupPath       string // if set, also mirror the committed checkpoint here (e.g. a mounted share), off the loop and best-effort (see saveSnapshot)
 	MaxMempool       int    // cap on each pool of pending payments, updates and name requests (0 = unlimited) — bounds a flood of valid ones
 	MaxCommentLength int    // cap on a payment's Comment length in bytes (0 = unlimited)
+	// GossipAllow is what the gossip port always lets in besides the current validators' IP addresses
+	// (spec §5.1): IP prefixes, a single address as a /32 or a /128 (see gossipAllowList).
+	GossipAllow []netip.Prefix
+	// PublicPath, if set, is the public folder: the files the fetcher serves to the public, written at
+	// Open and after each commit and catch-up (spec §6.1, see publicfolder.go). "" writes none.
+	PublicPath string
+	// MinimumStepTimeout is the slow-down switch (spec §7.6), 0 for off: the round timers wait at least
+	// this long per step, when the governed step timeout is shorter (see stepTimeout). So the node waits
+	// longer for a proposal before it votes "no block", as a carrier needs; no rule reads the clock, so
+	// a longer timer can't make it sign twice or take an invalid block. The wait of a node back without
+	// its sign log follows it too, so that a carrier brings its earlier votes back before it signs again
+	// (see ownSignaturesWait). Nothing else does: re-gossip, the pull of public bundles, catch-up and the
+	// idle heartbeat keep the governed timings.
+	MinimumStepTimeout time.Duration
+	// idleHeartbeat, if set, replaces IdleHeartbeat (see idle.go). Only tests set it, to a shorter one;
+	// it is unexported, so a deployed node keeps the constant that wallets rely on.
+	idleHeartbeat time.Duration
+	// allowLoopbackPublicAddresses, if set, lets the fetches from the validators' public addresses reach
+	// a loopback address (see publicAddressClient). Only tests set it, whose public faces listen on
+	// 127.0.0.1; it is unexported, so a deployed node always refuses one.
+	allowLoopbackPublicAddresses bool
 }
 
 type eventKind uint8
@@ -49,9 +75,11 @@ const (
 	eventReassignmentCertificate
 	eventQuery
 	eventGovernanceQuery
+	eventBundleQuery
 	eventRegossip
 	eventAdopt
 	eventCatchUp
+	eventIdleHeartbeat
 )
 
 type event struct {
@@ -67,15 +95,17 @@ type event struct {
 	reassignment    *ledger.Reassignment
 	step            consensus.Step
 	round           int32
-	height          int64 // for eventTimeout: the height whose driver armed the timer
+	height          int64 // for eventTimeout, eventNextHeight and eventIdleHeartbeat: the height that armed the timer
 	query           chan Snapshot
 	governanceQuery chan GovernanceView
+	bundleQuery     chan []byte // receives the node's bundle (see ExportBundle)
 	checkpoint      *Checkpoint
-	admit           chan admission // receives the loop's verdict on a payment, an update, a name request or a certificate
+	admit           chan admission // receives the loop's verdict on a payment, an update, a name request, a certificate or a carried checkpoint
 }
 
 // admission is the loop's verdict on a payment, an update, a name request or a certificate: whether it
-// was newly pooled, or the reason it was refused. One already pooled is neither.
+// was newly pooled, or the reason it was refused. One already pooled is neither. On a checkpoint a
+// carrier brought (ImportCheckpoint) it is only the reason the node did not adopt it, nil once it did.
 type admission struct {
 	newlyPooled bool
 	err         error
@@ -101,9 +131,12 @@ func (snapshot Snapshot) checkpoint() Checkpoint {
 }
 
 // Node is one node of the network: a validator, or an observer that follows the chain and signs
-// nothing. All mutable state is owned by the run loop, but backupBusy (see saveSnapshot). Other
-// goroutines post events onto the loop's channel (the Submit* and Admit* inputs, Snapshot,
-// GovernanceView), or read the committed view the loop publishes (see committedView).
+// nothing. All mutable state is owned by the run loop, but backupBusy (see saveSnapshot),
+// pullRoundRunning and stuckOnItsHeight (see pullPublicBundles), publicFaceTurn (see
+// catchUpCheckpoint), the votes the pulls verified, which their mutex guards (see verifiedVotes), and
+// the public folder's queue, which its writer guards (see publicFolderWriter). Other goroutines post
+// events onto the loop's channel (the Submit* and Admit* inputs, Snapshot, GovernanceView,
+// ExportBundle), or read the committed view the loop publishes (see committedView).
 type Node struct {
 	config    Config
 	self      string
@@ -127,11 +160,15 @@ type Node struct {
 	lastProposal     ProposalMessage // the proposal lastCommit decided (see sendLastCommit)
 	started          bool
 	idle             bool                      // no driver because the height in progress has no work (see idle.go); only startHeight sets it
+	heartbeatHeight  int64                     // the height whose idle heartbeat has fired: it starts with no work (see onIdleHeartbeat)
 	heightStarted    int64                     // the height startHeight last began, so a stale re-trigger is a no-op
 	relaySeen        map[string]bool           // the messages relayed at this height, by messageKey; only a certificate's mark decides anything (see relay); also the rounds whose proposer equivocation was reported (see reportEquivocation)
 	heightVotes      map[string]consensus.Vote // votes seen at the current height, by validator, round and type (see rememberVote), re-gossiped periodically (see reGossipLoop)
 	heightProposals  map[int32]ProposalMessage // the proposals taken at the current height (see onProposal), by round (first wins, like the driver)
 	invalidProposals map[int32]int             // authentic proposals at the current height whose block did not apply, by round (see onProposal)
+
+	heightStartedAt      time.Time // when startHeight last began the height in progress, by the wall clock: when its driver started, if one runs (see pullPublicBundles)
+	pullingPublicBundles bool      // whether the node pulls public bundles, so it logs when it starts and when it stops (see pullPublicBundles)
 
 	heightValidators     *consensus.ValidatorSet // the set governing the height in progress (nil until the first starts)
 	lastCommitValidators *consensus.ValidatorSet // the set that signed lastCommit (served in checkpoints)
@@ -144,19 +181,27 @@ type Node struct {
 	loggedKeyReplaced           bool                               // whether the node has logged that its name is seated under another key (see seatedSigner)
 	oldestUnitEnd               unitEnd                            // the oldest rolling record unit file as it ended when pruneRecord last read it
 
-	configuredPeers []string // the transport's peers before on-chain resolution replaced them (see resolvePeersFromState)
-	peersResolved   bool     // whether the transport is using resolved peers
+	configuredPeers [][]string // the transport's peers before on-chain resolution replaced them (see resolvePeersFromState)
+	peersResolved   bool       // whether the transport is using resolved peers
 
-	backupBusy atomic.Bool // a BackupPath mirror is in flight (see saveSnapshot); set on the loop, cleared by the mirror
+	backupBusy       atomic.Bool   // a BackupPath mirror is in flight (see saveSnapshot); set on the loop, cleared by the mirror
+	pullRoundRunning atomic.Bool   // a round of public bundle pulls is in flight (see pullPublicBundles); set on the loop, cleared by the round
+	stuckOnItsHeight atomic.Bool   // pullingPublicBundles, for catch-up's goroutine (see catchUpCheckpoint); set on the loop
+	pulledVotes      verifiedVotes // the votes of pulled public bundles that verified at the committed height (see pulledCheck)
+	publicFaceTurn   atomic.Uint64 // which public face catch-up asks when it asks one (see catchUpCheckpoint); catch-up's goroutine alone counts it
+
+	publicFolder    *publicFolderWriter // writes the public folder off the loop; nil without a PublicPath (see openPublicFolder)
+	publishedBundle []byte              // the public bundle publishBundle last queued, so that one unchanged is not written again
 }
 
 // Open builds a node. If a snapshot is configured and present on disk, it is loaded as the starting
 // state, together with the sign log of the height it restarts at (a log of an earlier height is
 // emptied, see loadSignLog); Open fails if the snapshot's folder does not exist, if either file cannot
 // be read or the snapshot does not verify (see loadSnapshot), or if the sign log is ahead of the
-// snapshot (see loadSignLog). Last, if its name is one of two or more validators, it takes its gossip
-// peers from the validators' addresses in the state it opened at, once every validator has one (see
-// resolvePeersFromState). It does not start the loop; call Start.
+// snapshot (see loadSignLog). Then, if its name is one of two or more validators, it takes its gossip
+// peers from the validators' IP addresses in the state it opened at, once every validator has one (see
+// resolvePeersFromState). Last, with a PublicPath, it writes the public folder from that state, and fails
+// if it can't create its folders (see openPublicFolder). It does not start the loop; call Start.
 func Open(config Config, transport Transport) (*Node, error) {
 	if !config.Genesis.NamesAscending() {
 		return nil, errors.New("genesis: the accounts are not in strictly ascending order of name")
@@ -189,6 +234,9 @@ func Open(config Config, transport Transport) (*Node, error) {
 	}
 	node.publishView()
 	node.resolvePeersFromState()
+	if err := node.openPublicFolder(); err != nil {
+		return nil, err
+	}
 	return node, nil
 }
 
@@ -198,8 +246,8 @@ func (node *Node) height() int64 { return node.state.Height + 1 }
 
 // Start launches the run loop. If Bootstrap peers are configured, it first syncs the committed
 // state from them (join/rejoin) and then begins consensus at the synced height; otherwise it
-// begins at the height it opened at. Without a sign log for a height past genesis, it begins two
-// re-gossip intervals later (see startFirstHeight).
+// begins at the height it opened at. Without a sign log for a height past genesis, it begins after the
+// wait of a node back without its sign log (see startFirstHeight, ownSignaturesWait).
 func (node *Node) Start() {
 	node.done = make(chan struct{})
 	go node.run()
@@ -208,8 +256,9 @@ func (node *Node) Start() {
 	} else {
 		node.enqueue(event{kind: eventStart})
 	}
-	// Ongoing catch-up runs regardless, from bootstrap OR gossip peers, so a node that falls a full
-	// height behind self-recovers instead of getting stuck.
+	// Ongoing catch-up runs regardless, from bootstrap peers, gossip peers or the other validators'
+	// public addresses (see catchUpCheckpoint), so a node that falls a full height behind self-recovers
+	// instead of getting stuck.
 	go node.catchUpLoop()
 	// Periodic re-gossip of the current height's votes and current round's proposal: a merged
 	// network re-exchanges held votes so a partition-formed stall can advance once the partition
@@ -217,12 +266,16 @@ func (node *Node) Start() {
 	go node.reGossipLoop()
 }
 
-// Stop halts the run loop and waits until it has finished the event in hand, so nothing the node
-// writes (its snapshot, its sign log) lands after Stop returns.
+// Stop halts the run loop and waits until it has finished the event in hand, then until the public
+// folder's files are written, so nothing the node writes (its snapshot, its sign log, its public folder)
+// lands after Stop returns.
 func (node *Node) Stop() {
 	close(node.quit)
 	if node.done != nil {
 		<-node.done
+	}
+	if node.publicFolder != nil {
+		node.publicFolder.waitUntilIdle()
 	}
 }
 
@@ -243,23 +296,22 @@ func (node *Node) awaitAdmission(verdict chan admission) (bool, error) {
 }
 
 // AdmitParameterCertificate hands a parameter-change certificate to the loop, which pools it only once
-// complete (see addParameterVotes), and returns nil once it is pooled, now or before, or the reason the
-// loop refused it.
-func (node *Node) AdmitParameterCertificate(parameterChange ledger.ParameterChange) error {
+// complete (see addParameterVotes), and returns the loop's verdict: whether it newly pooled the
+// certificate, or one replacing it, and relayed it, or the reason it refused it. A copy of a pooled
+// certificate is neither.
+func (node *Node) AdmitParameterCertificate(parameterChange ledger.ParameterChange) (newlyPooled bool, err error) {
 	verdict := make(chan admission, 1)
 	node.enqueue(event{kind: eventParameterCertificate, parameterChange: &parameterChange, admit: verdict})
-	_, err := node.awaitAdmission(verdict)
-	return err
+	return node.awaitAdmission(verdict)
 }
 
 // AdmitReassignmentCertificate hands a ⅔ name-action certificate to the loop, which pools it only once
-// complete (see addReassignmentVotes), and returns nil once it is pooled, now or before, or the reason
-// the loop refused it.
-func (node *Node) AdmitReassignmentCertificate(reassignment ledger.Reassignment) error {
+// complete (see addReassignmentVotes), and returns the loop's verdict, as AdmitParameterCertificate
+// does.
+func (node *Node) AdmitReassignmentCertificate(reassignment ledger.Reassignment) (newlyPooled bool, err error) {
 	verdict := make(chan admission, 1)
 	node.enqueue(event{kind: eventReassignmentCertificate, reassignment: &reassignment, admit: verdict})
-	_, err := node.awaitAdmission(verdict)
-	return err
+	return node.awaitAdmission(verdict)
 }
 
 // Snapshot returns a race-free view of node state.
@@ -320,10 +372,15 @@ func (node *Node) handle(incoming event) {
 		if incoming.height == node.height() {
 			node.startHeight()
 		}
+	case eventIdleHeartbeat:
+		node.onIdleHeartbeat(incoming.height)
 	case eventAdopt:
 		node.adopt(*incoming.checkpoint)
 	case eventCatchUp:
-		node.catchUp(*incoming.checkpoint)
+		err := node.catchUp(*incoming.checkpoint)
+		if incoming.admit != nil { // a carried checkpoint, whose import waits for the verdict (ImportCheckpoint)
+			incoming.admit <- admission{err: err}
+		}
 	case eventProposal:
 		// Relay only a proposal the node took: AUTHENTIC (from the round's proposer, correctly
 		// signed) and valid. Any other is dropped, not gossiped onward.
@@ -368,6 +425,7 @@ func (node *Node) handle(incoming event) {
 	case eventParameterCertificate:
 		newlyPooled, err := node.addParameterVotes(*incoming.parameterChange)
 		if newlyPooled {
+			node.publishGovernance()
 			node.relay(Message{Type: MessageParameterCertificate, ParameterChange: incoming.parameterChange})
 			node.wakeIfIdle()
 		}
@@ -375,6 +433,7 @@ func (node *Node) handle(incoming event) {
 	case eventReassignmentCertificate:
 		newlyPooled, err := node.addReassignmentVotes(*incoming.reassignment)
 		if newlyPooled {
+			node.publishGovernance()
 			node.relay(Message{Type: MessageReassignmentCertificate, Reassignment: incoming.reassignment})
 			node.wakeIfIdle()
 		}
@@ -383,9 +442,12 @@ func (node *Node) handle(incoming event) {
 		incoming.query <- node.snapshot()
 	case eventGovernanceQuery:
 		incoming.governanceQuery <- node.governanceView()
+	case eventBundleQuery:
+		incoming.bundleQuery <- node.bundle(true, MaxBundleBytes)
 	case eventRegossip:
-		node.reGossipVotes()
-		node.reGossipProposal()
+		node.reGossip()
+		node.publishBundle()
+		node.pullPublicBundles()
 	}
 }
 
@@ -412,21 +474,29 @@ func (node *Node) snapshot() Snapshot {
 }
 
 // committedView is what the node last committed, as the work done off the loop sees it (spec 6.5):
-// the committed state, its digest, and the validator set of the height in progress, derived from it.
-// The HTTP handlers check payments and updates against it, signatures included, /hdls/resolve answers
-// from it, and bestCheckpoint takes the set as its trust anchor. It is immutable once published.
+// the committed state, its digest, the validator set of the height in progress, derived from it, the
+// set that signed the last commit, and the gossip port's allow list, derived from the state and the
+// set. The HTTP handlers check payments and updates against it, signatures included, /hdls/resolve
+// answers from it, bestCheckpoint takes the set as its trust anchor, the pull of public bundles checks
+// their votes and proposals against both sets (see pulledCheck), and the gossip port's listener lets in
+// what the allow list holds. It is immutable once published.
 type committedView struct {
-	state       ledger.LedgerState
-	stateDigest [32]byte // state.Digest(): what a payment's pin names (E38)
-	validators  *consensus.ValidatorSet
+	state                ledger.LedgerState
+	stateDigest          [32]byte // state.Digest(): what a payment's pin names (E38)
+	validators           *consensus.ValidatorSet
+	lastCommitValidators *consensus.ValidatorSet // the set that signed the last commit; nil before the first
+	gossipAllowList      []netip.Prefix          // see gossipAllowList
 }
 
 // publishView publishes the committed state as the committed view, after Open, each commit and each
 // catch-up, before anything else runs on the new state: on the loop, too, the view is the live
 // committed state. The ledger never mutates an account slice or an amount in place, so sharing them
-// with the loop's state is race-free.
+// with the loop's state is race-free. Publishing it is also the one atomic swap that puts the allow
+// list the new state makes in front of the gossip port (spec §5.2).
 func (node *Node) publishView() {
-	node.view.Store(&committedView{state: node.state, stateDigest: node.state.Digest(), validators: node.config.Chain.ValidatorRule.SetFor(node.state)})
+	validators := node.config.Chain.ValidatorRule.SetFor(node.state)
+	node.view.Store(&committedView{state: node.state, stateDigest: node.state.Digest(), validators: validators,
+		lastCommitValidators: node.lastCommitValidators, gossipAllowList: gossipAllowList(node.state.Accounts, validators, node.self, node.config.GossipAllow)})
 }
 
 // reconcilePools brings the pending pools in line with a newly committed state (a commit or a
@@ -478,8 +548,9 @@ func (node *Node) reconcilePools(previousAccounts []ledger.Account) {
 }
 
 // startHeight builds a candidate block from the pools (used if this node is proposer) and starts the
-// Driver for the current height. With no work for the height (hasWork), it sets idle and starts no
-// driver; wakeIfIdle calls it again once work arrives. The driver resumes from what the node already
+// Driver for the current height. With no work for the height (hasWork), it sets idle, starts no driver
+// and arms the idle heartbeat; wakeIfIdle calls it again once work arrives, and onIdleHeartbeat once the
+// heartbeat fires, when the height starts with no work. The driver resumes from what the node already
 // holds for the height: its own votes and proposals (from its sign log after a restart, or re-gossiped
 // back to it), and the proposals onProposal took before the driver existed, in the post-commit window.
 // It is then fed the votes that arrived meanwhile.
@@ -490,6 +561,8 @@ func (node *Node) startHeight() {
 	}
 	node.retireDriver() // after a catch-up, the driver of the height left behind
 	node.heightStarted = node.height()
+	// The node's own clock, which no rule reads: it only times the pull of public bundles.
+	node.heightStartedAt = time.Now()
 	node.heightValidators = node.view.Load().validators // the set governing this height (and signing its commit)
 	var nonce [32]byte
 	rand.Read(nonce[:]) // a fresh nonce for each candidate (spec 5.1); it never fails
@@ -505,7 +578,8 @@ func (node *Node) startHeight() {
 			Reassignment:     node.pendingReassignment(),
 		})
 	if !node.hasWork(candidateBlock) {
-		node.idle = true // no driver until there is work (see wakeIfIdle)
+		node.idle = true // no driver until there is work (see wakeIfIdle) or the heartbeat fires
+		node.armIdleHeartbeat()
 		return
 	}
 	node.idle = false
@@ -583,12 +657,13 @@ func (node *Node) startFirstHeight() {
 }
 
 // waitForOwnSignatures starts the wait of a node back without its sign log at the height in progress,
-// which it may have signed at before it lost the log: for two re-gossip intervals it signs nothing, and
-// holds what arrives as in the post-commit window, so that peers' re-gossip of the height's votes and
-// current proposal, whatever round they are in (see onProposal), brings its own earlier ones back first;
-// then the height starts, and the driver resumes from them (see startHeight). Each peer re-gossips once
-// an interval, but its ticks drift later by the time each one takes, so a wait of one interval can end
-// just before a tick; two hold one, unless a peer stalls for longer. The wait is best effort, by timing.
+// which it may have signed at before it lost the log: for ownSignaturesWait it signs nothing, and holds
+// what arrives as in the post-commit window, so that peers' re-gossip of the height's votes and current
+// proposal, whatever round they are in (see onProposal), brings its own earlier ones back first; then
+// the height starts, and the driver resumes from them (see startHeight). Each peer re-gossips once an
+// interval, but its ticks drift later by the time each one takes, so a wait of one interval can end just
+// before a tick; two hold one, unless a peer stalls for longer. In pigeon mode a carrier brings them
+// back instead, and the wait is longer (see ownSignaturesWait). The wait is best effort, by timing.
 //
 // It waits so at every height the node may have signed at, up to mayHaveSignedUpTo: the height it comes
 // back at (startFirstHeight); each later one a commit takes it to, where the post-commit window becomes
@@ -605,15 +680,25 @@ func (node *Node) startFirstHeight() {
 // wait above it, after a first catch-up, starts the new height at once. mayHaveSignedUpTo rises only with
 // the node's own signatures, which reach no higher than it got before, and a catch-up waits only from a
 // height up to it, so once a catch-up has taken the node past it, the node never chases a network that
-// moves on while it waits. A validator the quorum needs delays the network by two re-gossip intervals at
-// each such height. A validator that never lost its sign log nor its latest snapshot never waits, nor
-// does a new network.
+// moves on while it waits. A validator the quorum needs delays the network by the wait at each such
+// height. A validator that never lost its sign log nor its latest snapshot never waits, nor does a new
+// network.
 func (node *Node) waitForOwnSignatures() {
 	node.retireDriver() // after a catch-up, the driver of the height left behind
 	node.idle = false
 	node.heightValidators = node.view.Load().validators
 	height := node.height()
-	time.AfterFunc(2*node.reGossipInterval(), func() { node.enqueue(event{kind: eventNextHeight, height: height}) })
+	time.AfterFunc(node.ownSignaturesWait(), func() { node.enqueue(event{kind: eventNextHeight, height: height}) })
+}
+
+// ownSignaturesWait is how long a node back without its sign log waits at a height it may have signed at
+// (see waitForOwnSignatures): two re-gossip intervals, or, with the slow-down switch on and longer, two
+// of its step timeouts. In pigeon mode the node's earlier votes and proposal are at the other banks, and
+// come back with the next carry, not at a re-gossip tick; the banks set the switch to at least twice the
+// time a carrier takes (spec §7.6), so a wait of twice the switch outlasts the next carry. A restart that
+// keeps its sign log never waits, so a long switch delays only a node that lost its log.
+func (node *Node) ownSignaturesWait() time.Duration {
+	return 2 * max(node.reGossipInterval(), node.config.MinimumStepTimeout)
 }
 
 // noteOwnSignature raises mayHaveSignedUpTo to height when the node meets a vote or a proposal in its own
@@ -680,7 +765,7 @@ func (node *Node) onProposal(proposalMessage ProposalMessage) bool {
 	}
 	if held, found := node.heightProposals[signedProposal.Round]; found {
 		// Not even a duplicate is relayed: the proposal was flooded on its first sight, and
-		// reGossipProposal periodically re-broadcasts the held copy, so propagation is covered.
+		// re-gossip periodically re-broadcasts the held copy, so propagation is covered.
 		node.reportEquivocation(held.Proposal, signedProposal)
 		return false
 	}
@@ -689,8 +774,7 @@ func (node *Node) onProposal(proposalMessage ProposalMessage) bool {
 		node.invalidProposals[signedProposal.Round] >= maxInvalidProposals {
 		return false
 	}
-	if signedProposal.Proposer != node.heightValidators.ProposerAt(node.height(), signedProposal.Round) ||
-		!signedProposal.Verify(node.config.Chain.Scheme, node.config.Chain.NetworkID, node.heightValidators.PublicKey(signedProposal.Proposer)) {
+	if !node.fromItsProposer(signedProposal, node.heightValidators) {
 		return false // wrong proposer or bad signature — drop, don't relay
 	}
 	if ledger.BlockHash(block) != signedProposal.BlockHash || block.Height != signedProposal.Height {
@@ -708,6 +792,14 @@ func (node *Node) onProposal(proposalMessage ProposalMessage) bool {
 		}))
 	}
 	return true
+}
+
+// fromItsProposer reports whether proposal names the proposer that validators, the set of its height,
+// schedules for its height and round, and its signature verifies under the key the set holds for that
+// name: onProposal's steps 4 and 5, which the pull of a public bundle takes too (see pulledCheck).
+func (node *Node) fromItsProposer(proposal consensus.SignedProposal, validators *consensus.ValidatorSet) bool {
+	return proposal.Proposer == validators.ProposerAt(proposal.Height, proposal.Round) &&
+		proposal.Verify(node.config.Chain.Scheme, node.config.Chain.NetworkID, validators.PublicKey(proposal.Proposer))
 }
 
 // round is the driver's round, or 0, the round the next height's driver starts at, in the
@@ -772,8 +864,8 @@ func (node *Node) countable(vote consensus.Vote) bool {
 // new. It keeps a validator's first vote per round and type and one conflicting vote, so an
 // equivocation is re-gossiped with both halves; a copy of either, in any spelling, or a third vote
 // adds nothing. Peers' votes reach it only for rounds the driver accepts (see countable), so the set
-// holds at most validators x 2 types x 2 votes per round. The set is re-broadcast by reGossipVotes
-// and reset on every height change (commit / fast-forward).
+// holds at most validators x 2 types x 2 votes per round. The set is re-broadcast by reGossip and reset
+// on every height change (commit / fast-forward).
 func (node *Node) rememberVote(vote consensus.Vote) bool {
 	if vote.Height != node.height() {
 		return false // only the current height is worth re-gossiping; other heights are stale or ahead
@@ -802,45 +894,108 @@ func (node *Node) holdsVote(vote consensus.Vote) bool {
 	return firstFound && first == vote || conflictFound && conflict == vote
 }
 
-// reGossipVotes re-broadcasts every vote this node holds for the current height. Votes are otherwise
-// broadcast only once (when first cast or first relayed), so a partition that splits the network can
-// leave each side holding votes the other never received; without re-exchange the merged network can
-// stay frozen below quorum-any, unable to arm the timeout that advances the round (a liveness stall
-// the adversarial harness surfaced — safety was never at risk). Periodic re-gossip re-exchanges those
-// held votes so the merged network reaches quorum-any and advances. The driver dedups on receipt
-// (idempotent Add, equivocation still recorded once), so re-gossip cannot double-count or fork. The
-// last commit goes too (see sendLastCommit).
-func (node *Node) reGossipVotes() {
+// reGossip re-broadcasts what the node holds for the height in progress, and what decided the last
+// one (consensusMessages). Nothing is re-sent while no driver runs.
+//
+// Votes are otherwise broadcast only once (when first cast or first relayed), so a partition that
+// splits the network can leave each side holding votes the other never received; without re-exchange
+// the merged network can stay frozen below quorum-any, unable to arm the timeout that advances the
+// round (a liveness stall the adversarial harness surfaced — safety was never at risk). Periodic
+// re-gossip re-exchanges those held votes so the merged network reaches quorum-any and advances. The
+// driver dedups on receipt (idempotent Add, equivocation still recorded once), so re-gossip cannot
+// double-count or fork.
+//
+// The current round's proposal goes too: a round whose proposal broadcast was simply LOST used to burn
+// the whole round timing out to nil. Only the current round's is worth re-flooding (it is the large
+// message; older rounds are already being skipped past). It is a costly part of a tick, as is the last
+// decided proposal: the whole block goes to every peer, and each receiver reads and decodes it
+// (Server.handleProposal, up to 2 MiB) before onProposal finds the round's proposal held and drops the
+// copy.
+func (node *Node) reGossip() {
 	if node.driver == nil {
 		return
 	}
-	for _, heldVote := range node.heightVotes {
-		vote := heldVote
-		node.transport.Broadcast(node.self, Message{Type: MessageVote, Vote: &vote})
+	for _, message := range node.consensusMessages() {
+		node.transport.Broadcast(node.self, message)
 	}
-	node.sendLastCommit()
 }
 
-// sendLastCommit broadcasts what decided the previous height: its precommits and the proposal they
-// decided. The nodes that decided a height re-send nothing else of it, yet a node still there may lack
-// one: a precommit (a validator that decided on its own precommit, logged before a restart, never sent
-// it), or the proposal, every copy of which can be lost while the others decide without it. Lacking
-// either, that node can only wait for a checkpoint, and with its catch-up sources down it waits for
-// good. So a node sends them as it commits, while that node is at most one height behind (the next
-// commit replaces them), and again on every re-gossip. A node past that height drops them (see
+// consensusMessages is what re-gossip sends, and what a bundle carries first (spec §7.3), in this order:
+//
+//  1. what decided the last height (lastCommitMessages);
+//  2. the votes the node holds for the current round;
+//  3. the current round's proposal, if the node holds one;
+//  4. the other votes it holds for the height in progress: the past rounds' first, newest first, then
+//     the future rounds', nearest first.
+//
+// Within a round the votes go in the order of their slots (voteSlot), so a node that holds the same
+// messages gives the same list. A node one height behind that takes them in this order, as a bundle's
+// import does, decides the last height first, and then takes the votes and the proposal of the next in
+// its post-commit window, where it would otherwise have dropped them as another height's. The public
+// bundle ends at MaxPublicBundleBytes, and a bank stuck for dozens of rounds holds more votes than fit:
+// the cut then drops the future rounds, farthest first, then the oldest rounds, which no longer decide
+// anything, and never the current round's votes or proposal. A rogue validator can send votes for up to
+// consensus.MaxRoundLookahead rounds ahead, about 2.4 MB of them: coming before the past rounds, they
+// would push past the cut the recent ones, which hold the prevotes a proposal's ValidRound names (review
+// R2-3).
+func (node *Node) consensusMessages() []Message {
+	messages := node.lastCommitMessages()
+	currentRound := node.round()
+	// rank is where a round's votes go: the current round's first, at 0, then the past rounds', newest
+	// first, then the future rounds', nearest first, after every past round, whose rank is below 2³¹.
+	rank := func(round int32) int64 {
+		if round > currentRound {
+			return 1<<32 + int64(round-currentRound)
+		}
+		return int64(currentRound - round)
+	}
+	slots := slices.SortedFunc(maps.Keys(node.heightVotes), func(first, second string) int {
+		return cmp.Or(cmp.Compare(rank(node.heightVotes[first].Round), rank(node.heightVotes[second].Round)), strings.Compare(first, second))
+	}) // by rank, and within a round by slot
+	appendVotes := func(ofTheCurrentRound bool) {
+		for _, slot := range slots {
+			if vote := node.heightVotes[slot]; (vote.Round == currentRound) == ofTheCurrentRound {
+				messages = append(messages, Message{Type: MessageVote, Vote: &vote})
+			}
+		}
+	}
+	appendVotes(true)
+	if proposal, found := node.heightProposals[currentRound]; found {
+		messages = append(messages, Message{Type: MessageProposal, Proposal: &proposal})
+	}
+	appendVotes(false)
+	return messages
+}
+
+// lastCommitMessages is what decided the previous height: its precommits and the proposal they decided.
+// The nodes that decided a height re-send nothing else of it, yet a node still there may lack one: a
+// precommit (a validator that decided on its own precommit, logged before a restart, never sent it), or
+// the proposal, every copy of which can be lost while the others decide without it. Lacking either,
+// that node can only wait for a checkpoint, and with its catch-up sources down it waits for good. So a
+// node sends them as it commits (sendLastCommit), while that node is at most one height behind (the
+// next commit replaces them), and again on every re-gossip. A node past that height drops them (see
 // recordLateDoubleSign and onProposal).
-func (node *Node) sendLastCommit() {
+func (node *Node) lastCommitMessages() []Message {
+	var messages []Message
 	for _, committedVote := range node.lastCommit.Votes {
 		vote := committedVote
-		node.transport.Broadcast(node.self, Message{Type: MessageVote, Vote: &vote})
+		messages = append(messages, Message{Type: MessageVote, Vote: &vote})
 	}
 	if proposal := node.lastProposal; proposal.Proposal.Height > 0 && proposal.Proposal.Height == node.lastCommit.Height {
-		node.transport.Broadcast(node.self, Message{Type: MessageProposal, Proposal: &proposal})
+		messages = append(messages, Message{Type: MessageProposal, Proposal: &proposal})
+	}
+	return messages
+}
+
+// sendLastCommit broadcasts what decided the previous height (lastCommitMessages), as the node commits.
+func (node *Node) sendLastCommit() {
+	for _, message := range node.lastCommitMessages() {
+		node.transport.Broadcast(node.self, message)
 	}
 }
 
-// rememberProposal keeps an authentic proposal for the current height so reGossipProposal can
-// re-send it. First per round wins, mirroring the driver, so an equivocating proposer cannot make
+// rememberProposal keeps an authentic proposal for the current height so re-gossip can re-send it
+// (see reGossip). First per round wins, mirroring the driver, so an equivocating proposer cannot make
 // nodes re-gossip conflicting blocks for one round.
 func (node *Node) rememberProposal(proposal ProposalMessage) {
 	if _, found := node.heightProposals[proposal.Proposal.Round]; !found {
@@ -848,26 +1003,10 @@ func (node *Node) rememberProposal(proposal ProposalMessage) {
 	}
 }
 
-// reGossipProposal re-broadcasts the proposal for the driver's CURRENT round, if this node holds it.
-// The vote counterpart above unfreezes a merged partition, but a round whose proposal broadcast was
-// simply LOST used to burn the whole round timing out to nil — only the current round's proposal is
-// worth re-flooding (it is the large message; older rounds are already being skipped past). It is a
-// costly part of a tick, as is the last decided proposal that sendLastCommit sends: the whole block goes
-// to every peer, and each receiver reads and decodes it (Server.handleProposal, up to 2 MiB) before
-// onProposal finds the round's proposal held and drops the copy. Nothing is re-sent while no driver runs.
-func (node *Node) reGossipProposal() {
-	if node.driver == nil {
-		return
-	}
-	if proposal, found := node.heightProposals[node.driver.Round()]; found {
-		node.transport.Broadcast(node.self, Message{Type: MessageProposal, Proposal: &proposal})
-	}
-}
-
 // armTimeout schedules a timeout that grows with the round, so that if the network is slow the rounds
 // eventually stretch past message latency and consensus makes progress (eventual synchrony). The base
-// per-step timeout is the GOVERNED value from committed parameters (see stepTimeout). The timer
-// carries the current height, and fires into no other.
+// per-step timeout is the GOVERNED value from committed parameters, or the slow-down switch when that
+// is longer (see stepTimeout). The timer carries the current height, and fires into no other.
 func (node *Node) armTimeout(step consensus.Step, round int32) {
 	delay := node.stepTimeout() * time.Duration(round+1)
 	height := node.height()
@@ -876,14 +1015,15 @@ func (node *Node) armTimeout(step consensus.Step, round int32) {
 	})
 }
 
-// stepTimeout is the current governed per-step consensus timeout, taken from committed parameters
-// (with a floor so a mis-seeded genesis can't wedge the loop).
+// stepTimeout is the base of the round timers (armTimeout): the current governed per-step consensus
+// timeout, taken from committed parameters (with a floor so a mis-seeded genesis can't wedge the loop),
+// or the node's MinimumStepTimeout, the slow-down switch, when that is longer.
 func (node *Node) stepTimeout() time.Duration {
 	milliseconds := node.state.Parameters.StepTimeoutMs
 	if milliseconds <= 0 {
 		milliseconds = 1000
 	}
-	return time.Duration(milliseconds) * time.Millisecond
+	return max(time.Duration(milliseconds)*time.Millisecond, node.config.MinimumStepTimeout)
 }
 
 // blockInterval is the current governed exchange-window cadence, taken from committed parameters.
@@ -894,8 +1034,10 @@ func (node *Node) blockInterval() time.Duration {
 
 // commit applies the block the driver decided and makes the result the committed state; then it saves
 // the snapshot, empties the sign log, writes the record, publishes the view, reconciles the pools,
-// re-resolves the peers, sends the last commit, and starts the next height after the block interval; at
-// a height it waits at (see waitForOwnSignatures), after two re-gossip intervals if that is longer.
+// re-resolves the peers, sends the last commit, writes the public folder, and starts the next height
+// after the block interval; at a height it waits at (see waitForOwnSignatures), after the wait
+// (ownSignaturesWait) if that is longer. The public folder comes after the record: its status must not pass a
+// height before the record holds it (see publishCommittedState).
 func (node *Node) commit(decision consensus.ActionDecided) {
 	block, found := node.blocks[decision.Commit.BlockHash]
 	if !found || block.Height != node.height() {
@@ -942,9 +1084,10 @@ func (node *Node) commit(decision consensus.ActionDecided) {
 	node.blocks = map[[32]byte]ledger.Block{}
 	node.resolvePeersFromState() // re-resolve gossip peers from any address changes this block (peer DNS)
 	node.sendLastCommit()
+	node.writePublicFolder(previousState.Accounts)
 	interval := node.blockInterval()
 	if waits {
-		interval = max(interval, 2*node.reGossipInterval())
+		interval = max(interval, node.ownSignaturesWait())
 	}
 	if interval <= 0 {
 		// Never re-enter startHeight synchronously: a single-validator network decides the next

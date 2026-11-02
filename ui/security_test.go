@@ -94,7 +94,7 @@ func TestOwnHost(t *testing.T) {
 // through, the nil dereference would fail the test loudly.
 func TestMutatingHandlersAreGuarded(t *testing.T) {
 	walletUI := routes(nil, "127.0.0.1:8090")
-	for _, path := range []string{"/send", "/update", "/freeze", "/requests", "/admin/parameter", "/admin/reassignment"} {
+	for _, path := range []string{"/send", "/update", "/freeze", "/checkpoint", "/requests", "/admin/parameter", "/admin/reassignment"} {
 		request := httptest.NewRequest("POST", "http://127.0.0.1:8090"+path, strings.NewReader("a=b"))
 		request.Header.Set("Sec-Fetch-Site", "cross-site")
 		recorder := httptest.NewRecorder()
@@ -221,7 +221,7 @@ var testNetworkID = ledger.NetworkID("testnet", [32]byte{1})
 // walletSigner signs with the wallet's key for the test network, as a validator of a fake node.
 func walletSigner(t *testing.T, wallet *Wallet) *signing.Signer {
 	t.Helper()
-	signer, err := signing.NewSigner(signing.MLDSA65{}, testNetworkID, wallet.privateKey)
+	signer, err := signing.NewSigner(signing.NetworkScheme(), testNetworkID, wallet.privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func walletSigner(t *testing.T, wallet *Wallet) *signing.Signer {
 
 func testNodeSigner(t *testing.T) *signing.Signer {
 	t.Helper()
-	signer, err := signing.Generate(signing.MLDSA65{}, testNetworkID)
+	signer, err := signing.Generate(signing.NetworkScheme(), testNetworkID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestReceiptWithBadSignatureNotVerified(t *testing.T) {
 // validator's real one padded with an unknown field, gets no ✓; the same receipt unpadded does.
 func TestReceiptIsReadUpToItsBound(t *testing.T) {
 	node := testNodeSigner(t)
-	for padding, wantVerified := range map[int]bool{0: true, maxReceiptBytes: false} {
+	for padding, wantVerified := range map[int]bool{0: true, int(maxReceiptBytes): false} {
 		verified := payThroughFakeNode(t, []*signing.Signer{node}, func(payment ledger.Payment) any {
 			receipt, err := ledger.SignReceipt(node, nameOf(node), payment)
 			if err != nil {

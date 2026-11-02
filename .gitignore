@@ -15,3 +15,6 @@ bin/
 /keygen
 /ui/ui
 /ui/wallet
+
+# the quickstart network's keys, genesis and configs (make quickstart)
+/deploy/quickstart/

@@ -170,7 +170,7 @@ func TestAmountJSONRoundTrips(t *testing.T) {
 	payment := signedPayment("payer", "b", "9.9", 5)
 	values := []any{
 		&payment,
-		&Account{Name: "n", PublicKey: "k", Amount: rational("0.1"), Bank: "b", Delegate: "v", Description: "d", Address: "a", Frozen: true, PendingKey: "p", PendingHeight: 9},
+		&Account{Name: "n", PublicKey: "k", Amount: rational("0.1"), Bank: "b", Delegate: "v", Description: "d", PublicAddress: "a", IPAddresses: []string{"i"}, Frozen: true, PendingKey: "p", PendingHeight: 9},
 		&Reassignment{Name: "n", PreviousAmount: rational("10"), NewAmount: rational("0"), Sequence: 3, Votes: []ReassignmentVote{{Validator: "v", Signature: "s"}}},
 		&ParameterChange{NewParameters: parametersCosting(rational("0.25")), Sequence: 1},
 	}
@@ -186,7 +186,7 @@ func TestAmountJSONRoundTrips(t *testing.T) {
 	}
 	var decoded Payment
 	encoded, _ := json.Marshal(payment)
-	if err := json.Unmarshal(encoded, &decoded); err != nil || !VerifyPayment(signing.MLDSA65{}, testNetwork, testSigner("payer").PublicKeyBase64(), decoded) {
+	if err := json.Unmarshal(encoded, &decoded); err != nil || !VerifyPayment(signing.NetworkScheme(), testNetwork, testSigner("payer").PublicKeyBase64(), decoded) {
 		t.Fatalf("a signed payment must still verify after a JSON round trip (err %v)", err)
 	}
 }
@@ -197,7 +197,7 @@ func TestAmountJSONRoundTrips(t *testing.T) {
 // action's vote, the name, the two amounts, the new key, the bank, the freeze and unfreeze marks as 1
 // or 0, and the sequence (spec 4.8).
 func TestSignedFieldsCarryPlainDecimals(t *testing.T) {
-	scheme, network := signing.MLDSA65{}, testNetwork
+	scheme, network := signing.NetworkScheme(), testNetwork
 	key := testSigner("alice").PublicKeyBase64()
 
 	payment := signedPayment("alice", "bob", "12.5", 3)

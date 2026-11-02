@@ -620,3 +620,82 @@ Go has no `implements` keyword. At their request the tie is now written down in 
   fmt look for at run time. The check list passed (520 s).
 - `25b78e1`: each interface names its implementations, the test doubles included. The compiler
   does not check this direction. Comments only: gofmt, vet and build pass.
+
+## The scheme as a drop-in replacement (2026-11-01)
+
+The owner, on offering Ed25519 as a second scheme: rather than a choice per network, the
+interface should carry the checks as well as the verbs, so that the cryptography is a single-file
+drop-in. Outside the scheme's file, 24 production sites named ML-DSA.
+- `d351f79`: `Scheme` gains `Name`, `PublicKeySize` and `SignatureSize`. The base64 checks
+  (`ValidPublicKeyBase64`, `PublicKeyBase64Length`, `SignatureBase64Length`) are built from those
+  sizes once, in `scheme.go`. `NetworkScheme()` in `mldsa65.go` is the one place that chooses the
+  scheme. The type is unexported (`mldsa65`), so no other package can name it. The build guard is
+  renamed `mldsa65_fips140v1.go`. The signing tests that hold for any scheme test the contract of
+  the one built in; ML-DSA-65's own facts are in `mldsa65_test.go`.
+- `1f679d8`: swapping in Ed25519 and ML-DSA-87 in a scratch copy found two numbers sized for
+  ML-DSA-65: the message-size floor (5000) and default (6400). With ML-DSA-87 the floor no longer
+  fit the largest payment. Both are now the largest payment's 549 bytes beside its signature (and
+  1400 more for an escaped comment) plus the scheme's signature, rounded up to a hundred: 5000 and
+  6400 with ML-DSA-65, as before. The tests that assumed ML-DSA-sized keys hold for any scheme.
+- The docs and the evidence (`review/_evidence_phase2/scheme-drop-in/`): with Ed25519 or ML-DSA-87
+  in place of the three `mldsa65*.go` files, and nothing else changed, every package of both modules
+  passes.
+Nothing signed, hashed or sent changes on an ML-DSA-65 network.
+- An independent check of the three commits found nothing unsafe and the behaviour on ML-DSA-65
+  unchanged, with two major problems: no test pinned 5000 and 6400 any more, and the wallet's
+  16 KiB bound on a receipt was sized for ML-DSA-65 (a scheme with 20000-byte signatures got no
+  receipt read). `40e29c0` fixes both and the minor ones: Scheme's comment states the rest of the
+  contract (safe for concurrent use, one byte encoding per key, ParsePrivateKey never panics, the
+  byte bounds elsewhere), with tests for the two that hold for any scheme; the seed 0..31 known
+  answer moved to `mldsa65_test.go`; the certificate test's premise holds for any scheme again.
+  The evidence gained ML-DSA-87's build guard and a stand-in with 20000-byte signatures. The
+  recheck confirmed each fix with the mutants that had slipped through, and found four cosmetic
+  slips, fixed in `291e739` (comments, docs and evidence only).
+- The check list passed on `3001b26` (527 s) and on `40e29c0` (522 s), the last commit to change
+  code. Ed25519, ML-DSA-87 and the 20000-byte stand-in each pass every package of both modules.
+
+## The owner's decisions on spec §12 (2026-11-01)
+
+The owner answered every open question of §12 (the record is there) and asked for the key check
+to be the scheme's: `ValidatePublicKey`, not a size check. Three builders worked in parallel, each
+on its own branch from `main`, and the branches were merged in turn:
+- The idle heartbeat (Q5, option C): a node with no work starts the height `node.IdleHeartbeat`,
+  5 minutes, later; an idle chain commits an empty block every 5 minutes. About 45 lines in
+  `node/idle.go` and `node/node.go`; six mutants of the guards each fail a test.
+- `Scheme.ValidatePublicKey` (the owner's design): every key that enters goes through it, and a
+  new key in a second spelling of the same length no longer passes a request's shape check. The
+  Ed25519 evidence refuses its 14 weak and non-canonical encodings, each shown to be forgeable under
+  crypto/ed25519. Building it found that ML-DSA-65 has weak keys too: a key whose t1 has every
+  coefficient 0 or 1023 lets anyone sign any message, and crypto/mldsa, like FIPS 204, accepts it.
+  A scratch forgery confirmed it before the check was written; `mldsa65.ValidatePublicKey` and
+  `Verify` refuse such keys, and a test forges a signature under each kind.
+- The wallet (Q17 and Q25): the pin follows the chain under the ⅔ rule, and says how to take a new
+  list or switch banks when it falls too far behind; the wallet asks the banks of its verified
+  state how far the chain has gone, and says whether its node is behind, how much power it could
+  check, whether the banks are aligned, and whether the chain has stalled (2 × the heartbeat). The
+  demo's founder publishes its address, so the demo wallet can check it.
+
+## The independent review of the decisions (2026-11-01)
+
+An independent review of the merged decisions found one blocker, one major and three minor
+problems. Each is fixed on `decisions-2026-11-01`, with a test that fails in a scratch copy with
+its fix reverted:
+- Blocker: the wallet asked whatever a validator published as its address, and followed
+  redirects. `http://<wallet>/?` made one page view ask the wallet's own page, which asked again
+  (about 750 requests in 6 s), and a path, a query or a redirect reached any URL on the LAN. Now
+  the ledger takes an address only as `http(s)://host[:port]`, nothing more, in its one spelling
+  (`ledger.CanonicalAddress`, in the genesis and in `UpdateFitsState`, so intake, blocks and the
+  wallet's form); every HTTP client of a node or a wallet follows no redirect
+  (`node.NewHTTPClient`); the wallet builds the status URL from the address's scheme and host
+  (`statusURLAt`) and asks within the page's request. The main page already answered `/` alone.
+  `823452b`, `d2ba739`, `5dafc3e`.
+- Major: the ML-DSA weak-key check refuses only the most degenerate keys (every t1 coefficient 0
+  or 1023); keys with other small coefficients let anyone sign many or all messages, and pass. The
+  check stays a sanity check; the comments, the spec, the docs and the ML-DSA-87 evidence now say
+  exactly that and why, and the test records the limit. `e29ea8f`.
+- Minor: the wallet's stall threshold is 2 × (the heartbeat + the state's `BlockIntervalMs`), and
+  the docs say "about every 5 minutes" (`42feb3d`); the Q12 row says "Kept" (`4763c44`); the
+  "banks changed" message and the manual say to take a new list only at a bank (`efcf0a5`).
+- The check list passed on `042fd98`: gofmt, vet and build of both modules, both race suites with
+  `GOLEDGER_CHAOS_SLACK=4`, and the three scheme swaps (the logs in
+  `review/_evidence_phase2/scheme-drop-in/`).

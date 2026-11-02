@@ -35,8 +35,8 @@ type Payment struct { // implements json.Marshaler and json.Unmarshaler, in amou
 
 // PaymentID is a malleability-proof identity for a payment: a hash of its canonical signed CONTENT
 // (the same fields the payer signs) and NOT its signature. One payment can carry many valid
-// signatures: ML-DSA-65's standard signing mixes in fresh randomness (only this code's own signer is
-// deterministic), and a third party might mangle a valid signature into another valid-looking one.
+// signatures: a signer outside this code need not sign deterministically (the Scheme requires it only
+// of this code's own keys), and a third party might mangle a valid signature into another valid one.
 // Keying dedup and replay on the content instead of the signature bytes makes both irrelevant — no
 // dependence on how the payer signed, or on the crypto library rejecting non-canonical signatures.
 // Fields are length-prefixed so their boundaries are unambiguous.

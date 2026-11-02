@@ -1,6 +1,6 @@
-// Command keygen prints a fresh ML-DSA-65 key pair (base64) for a node's config, or as a name's key in
-// a genesis file, a registration or a key change: the public key (2604 characters) and the private
-// key, which is the 32-byte seed the key derives from (44 characters). Keys are generated locally and
+// Command keygen prints a fresh key pair of the network's signature scheme (signing.NetworkScheme), in
+// base64, for a node's config, or as a name's key in a genesis file, a registration or a key change:
+// the public key, and the private key in the form the scheme stores it. Keys are generated locally and
 // never transmitted -- the private key is yours to keep (the audit flagged generating keys
 // server-side and returning the private key over HTTP; don't do that).
 //
@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	publicKey, privateKey, err := signing.MLDSA65{}.GenerateKey()
+	publicKey, privateKey, err := signing.NetworkScheme().GenerateKey()
 	if err != nil {
 		panic(err)
 	}

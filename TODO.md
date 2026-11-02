@@ -3,8 +3,9 @@
 The port is complete (names, pay-by-name, the self-describing peer DNS, ⅔ governance), and Phase 2
 of the post-eMudhra review is built: ML-DSA-65, names as the identity, registration at a bank, key
 and bank changes, the freeze, the ⅔ name action, the signature record and the idle chain (see
-[`findings_20261027.md`](findings_20261027.md)). The owner's open questions are in
-`review/phase2_spec.md` §12. None of the below blocks a testnet; it is the honest remaining work,
+[`findings_20261027.md`](findings_20261027.md)). Phase 3, the network split and pigeon mode, is
+built too, but for the signer. The owner's decisions are in `review/phase2_spec.md` §12 and
+`review/phase3_spec.md` §13. None of the below blocks a testnet; it is the honest remaining work,
 roughly by priority.
 
 ## Build
@@ -25,14 +26,29 @@ roughly by priority.
 
       It found a liveness gap, never a safety one: with no vote re-gossip, a partition that left
       no side above ⅔ froze for good. Vote re-gossip fixed it (below).
-- [ ] **Phase 3: the deployment split.** The single Go program stays the testing setup. Deployment
-      is planned as containers that can live on separate machines, one per area of the docs
-      ([`docs/README.md`](docs/README.md)): the **signer**, which holds the key, refuses a second,
-      different signature for the same height, round and type, and writes that to disk before it
-      signs; the **engine**; the **fetcher**, an edge proxy facing the network, which can serve the
-      record's complete unit files as static files; and the **wallet**. Gossip routes should be
-      reachable only from other validators. A bank's desk co-signs through the signer, which serves
-      it only `registration`, `name-request-bank` and `freeze`. Not built.
+- [x] **Phase 3: the network split and pigeon mode.** Built on 2026-11-01, as a new genesis
+      ([`review/phase3_spec.md`](review/phase3_spec.md)). The single Go program stays the testing
+      setup, and deployment is containers that can live on separate machines, one per area of the
+      docs ([`docs/README.md`](docs/README.md)):
+      - the **engine** (`cmd/server`) serves a gossip port and an operator port. The gossip port
+        lets in only the current validators' IP addresses, read from the chain, but for its own
+        and loopback ones, and the config's `allow` entries, in the engine's own process. The
+        operator port is never published;
+      - every name may publish a public address and up to 4 IP addresses, and the genesis fixes one
+        gossip port for the network;
+      - the engine writes a public folder, and the **fetcher** (`cmd/fetcher`) serves it and the
+        record files behind a CDN (a complete record unit as a file the CDN keeps for good), and
+        passes payments, updates and name requests on, under a global cap;
+      - pigeon mode: bundles exported and imported on the operator port, carried checkpoints, the
+        slow-down switch (`minimumStepTimeoutMs`), the public bundle as a second path, and the
+        wallet's payment saved as text and checkpoint from a file;
+      - the images and the compose file (`deploy/`), and the quickstart (below).
+
+      See [`docs/operating-a-network.md`](docs/operating-a-network.md).
+- [ ] **The signer.** The fourth container: it holds the key, refuses a second, different signature
+      for the same height, round and type, and writes that to disk before it signs. A bank's desk
+      co-signs through the signer, which serves it only `registration`, `name-request-bank` and
+      `freeze`. Not built: the engine still holds the key.
 
       A cheaper tier inside one process: keep the key encrypted in memory and decrypt it only into
       a locked buffer at signing time, zeroed after. Go's garbage collector does not move objects,
@@ -59,6 +75,16 @@ roughly by priority.
       block and which certificates were voted; the archive adds the payments.
     - The tension: an archive rebuilds the permanent record of payments the design avoids. So it
       stays opt-in and off to the side.
+- [ ] **The rest of the name service.** Names publish a public address and IP addresses, which
+      their own keys sign ([`docs/governance.md`](docs/governance.md#names-as-a-name-service)). Two
+      pieces are for later (`review/phase3_spec.md`, R7 and the notes for later in §13):
+    - A DNS gateway: a small program that answers DNS queries for a zone from the chain's name
+      records. Then ordinary resolvers, and the DNS operators who adopt it, can use them.
+    - TLS key records: a name publishes a TLS key, or its hash, signed by the name's key, as DANE's
+      TLSA records do in DNS. TLS then works with no certificate authority wherever the client
+      reads the chain: between banks, and in wallets. The payment key stays off the web server, and
+      the chain's own scheme does not limit the TLS key's algorithm. Browsers accept neither DANE
+      nor such certificates for websites today, so this serves custom clients first.
 
 ## Follow-ups from the external review (2026-08-02, see `review/` and `findings.md`)
 
@@ -69,7 +95,9 @@ roughly by priority.
       static power above the cap instead of cutting it down
       (`TestGenesisRefusesWhatNoLedgerCouldHold`).
 - [x] **C7: HTTP server timeouts.** `cmd/server/main.go` sets read, write and idle timeouts. Rate
-      limiting and authentication stay open (#10).
+      limiting and authentication (#10) are the deployment's since Phase 3: the gossip routes are
+      behind the allow list, the public face behind a CDN, which limits each client, and the
+      fetcher's global cap; the operator port has neither, and is never published.
 - [x] **G6, G7, G8: untested consensus paths.** `TestDriverPOLUnlockReleasesLock`,
       `TestDriverBrokenSignerDropsVoteQuietly` (a test scheme whose keys cannot sign) and
       `TestDriverRejectsFarFutureAndNegativeRounds`.
@@ -81,8 +109,9 @@ roughly by priority.
       deadlines (`testTimeSlack` in `node/sync_test.go`); CI sets it to 4.
 
 Earlier deferrals (tracked in `findings.md`): the height in `LedgerState` (#7) and `ApplyBlock`
-returning a reason instead of a bool (#26) are done in Phase 2. Rate limiting and authenticated
-transport on the open endpoints (#10) remain.
+returning a reason instead of a bool (#26) are done in Phase 2. Rate limiting and authentication on
+the open endpoints (#10) are answered by the deployment in Phase 3, as above. The gossip port has
+no TLS: every message on it is signed, and nothing on it is secret.
 
 ## External (not code)
 
@@ -92,7 +121,9 @@ transport on the open endpoints (#10) remain.
 ## Housekeeping
 
 - [x] **Origins URL.** `README.md` (Origins) points at the upstream Java project.
-- [ ] **Deployment** (optional): a systemd unit, a Dockerfile or a compose file. Phase 3 shapes it.
+- [x] **Deployment.** `deploy/Dockerfile` builds the engine, the fetcher and `keygen` into one
+      image, `deploy/ui.Dockerfile` the wallet into another, and `deploy/compose.yaml` runs the
+      quickstart (Phase 3). No systemd unit is written.
 - [x] **Screenshots.** `docs/wallet.png` and `docs/admin.png` were retaken from `make demo` on
       2026-10-31, and `README.md` shows them again.
 - [ ] **Test messages.** A few test failure messages open with an upper-case scenario label
@@ -106,16 +137,18 @@ transport on the open endpoints (#10) remain.
 - [x] **The lost-sign-log wait at every height.** A validator back without its sign log waited one
       re-gossip interval only at the height it started at, so from a snapshot below the last height
       it voted in it could catch up or commit into that height and double-sign. Now it waits, two
-      re-gossip intervals, at every height it may have signed at (`Node.waitForOwnSignatures`): the
-      one it starts at; each later one it commits into, up to the highest at which a vote or
-      proposal of its own, verified under its key, comes back to it (`Node.noteOwnSignature`); and
-      the network's height, which a catch-up from those takes it to. It keeps no vote of its own for
-      a later height: the wait there brings it back. While it waits its sign log stays below the
-      height, so a restart then waits too, and it takes back its own proposal of any round up to
-      256; its first new sign log at a height holds what it took back, and once it has a log, the
-      log keeps the bound, so later restarts keep both; a start timer starts only the height it was
-      armed for. The wait is best effort, by timing. Found by the hardening check of 2026-10-31;
-      the independent check and its recheck added the rest. Tests, in `node/restart_test.go`:
+      re-gossip intervals, or twice the slow-down switch when that is longer
+      (`Node.ownSignaturesWait`, since the Phase 3 review's B2), at every height it may have signed
+      at (`Node.waitForOwnSignatures`): the one it starts at; each later one it commits into, up to
+      the highest at which a vote or proposal of its own, verified under its key, comes back to it
+      (`Node.noteOwnSignature`); and the network's height, which a catch-up from those takes it to.
+      It keeps no vote of its own for a later height: the wait there brings it back. While it waits
+      its sign log stays below the height, so a restart then waits too, and it takes back its own
+      proposal of any round up to 256; its first new sign log at a height holds what it took back,
+      and once it has a log, the log keeps the bound, so later restarts keep both; a start timer
+      starts only the height it was armed for. The wait is best effort, by timing. Found by the
+      hardening check of 2026-10-31; the independent check and its recheck added the rest. Tests,
+      in `node/restart_test.go`:
       `TestValidatorBackWithoutItsSignLogWaitsAtTheHeightItCatchesUpTo`,
       `TestValidatorBackWithoutItsSignLogResumesItsProposalAfterACatchUp`,
       `TestValidatorBackWithoutItsSignLogWaitsAtTheHeightItCommitsInto`,
@@ -128,11 +161,13 @@ transport on the open endpoints (#10) remain.
       `TestValidatorBackWithoutItsSignLogKeepsItsBoundThroughRestartsDuringAWait`,
       `TestValidatorBackWithoutItsSignLogWaitsTwoReGossipIntervals`,
       `TestValidatorBackWithoutItsSignLogTakesBackOnlyItsOwnProposalsOfLaterRounds`, and
-      `TestSignLogOfANodeThatNeverLostItHoldsNoBound`.
-- [ ] **A four-validator quickstart.** A script (or a `make` target) that makes the keys, a genesis
-      file and four node configs on one machine, so trying a real network takes one command. Today
-      the runbook ([`docs/operating-a-network.md`](docs/operating-a-network.md)) gives the steps by
-      hand.
+      `TestSignLogOfANodeThatNeverLostItHoldsNoBound`; in `node/pigeon_test.go`, with the switch on,
+      `TestPigeonValidatorWithoutItsSignLogWaitsForTheNextCarry`.
+- [x] **A four-validator quickstart.** `make quickstart` makes the keys, a genesis file and four
+      node configs with `cmd/quickstart`, a small Go program, and runs four banks on one machine,
+      each an engine and a fetcher, with Docker Compose or Podman (`deploy/compose.yaml`).
+      `make quickstart-clean` removes them. See
+      [`docs/operating-a-network.md`](docs/operating-a-network.md#four-banks-on-one-machine-the-quickstart).
 - [x] **Vote re-gossip.** While a node runs a height, it re-sends the height's votes and the current
       round's proposal every `stepTimeoutMs` in force (`Node.reGossipLoop`), so a merged partition
       re-exchanges what each side held. Tests: `TestChaos2x2PartitionFreezesThenRecovers`,
@@ -145,8 +180,10 @@ transport on the open endpoints (#10) remain.
 - [ ] Targeted "whisper" relay: gossip floods every peer. A point-to-point relay would use less
       bandwidth, if that ever matters.
 - [ ] The snapshot write: on a node with `snapshotPath`, every commit and catch-up marshals the
-      whole checkpoint (about 2.9 KB per account) and writes and fsyncs it on the event loop. Move
-      it off the loop, or make it incremental, before a network grows large (the checkpoint's
-      size: `review/phase2_spec.md` §9.2 and §12 Q18).
+      whole checkpoint (about 2.9 KB per account) and writes and fsyncs it on the event loop. With a
+      `publicPath`, the loop also makes the public folder's checkpoint and account list, each about
+      as large, at every commit; their writes already run off the loop. Move the work off the loop,
+      or make it incremental, before a network grows large (the checkpoint's size:
+      `review/phase2_spec.md` §9.2 and §12 Q18; the public folder's: `review/phase3_spec.md` §6.1).
 - [ ] More governable values: ten parameters are governed. The steps to govern another are in
       [`docs/governance.md`](docs/governance.md#extending-it); it needs a new genesis.

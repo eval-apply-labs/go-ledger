@@ -119,11 +119,13 @@ func VerifyNameRequest(scheme signing.Scheme, networkID, requestorKey, bankKey s
 
 // NameRequestShapeError is the shape check of spec 4.3, which runs before anything else: a known kind;
 // canonical names; a requestor that is the name itself, except in a registration; each field the kind
-// uses set and each other one empty; a new key and signatures of the exact length; a block id above 0.
+// uses set and each other one empty; a new key the network's scheme accepts, in its one spelling
+// (signing.ValidatePublicKeyBase64); signatures of the exact length; a block id above 0.
 func NameRequestShapeError(request NameRequest) error {
 	if _, known := requestorDomains[request.Kind]; !known {
 		return fmt.Errorf("unknown kind %q", request.Kind)
 	}
+	scheme := signing.NetworkScheme()
 	switch {
 	case !CanonicalName(request.Name) || !CanonicalName(request.Requestor) || (request.Bank != "" && !CanonicalName(request.Bank)):
 		return errors.New("a name it carries is not a canonical name")
@@ -133,13 +135,13 @@ func NameRequestShapeError(request NameRequest) error {
 		request.usesNewKey() != (request.NewKey != "") || request.usesNewKey() != (request.NewKeySignature != ""),
 		request.usesBank() != (request.Bank != "") || request.usesBank() != (request.BankSignature != "") || request.usesBank() != (request.Fee != nil):
 		return fmt.Errorf("its fields do not fit a %s: it sets one its kind leaves empty, or leaves one empty that its kind sets", request.Kind)
-	case request.NewKey != "" && len(request.NewKey) != signing.PublicKeyBase64Length:
-		return errors.New("its new key is not of the exact length")
+	case request.NewKey != "" && signing.ValidatePublicKeyBase64(scheme, request.NewKey) != nil:
+		return errors.New("its new key is not a public key of the network's scheme in its one spelling")
 	case request.BlockID <= 0:
 		return errors.New("its block id is not above 0")
 	}
 	for _, signature := range []string{request.RequestorSignature, request.BankSignature, request.NewKeySignature} {
-		if signature != "" && len(signature) != signing.SignatureBase64Length {
+		if signature != "" && len(signature) != signing.SignatureBase64Length(scheme) {
 			return errors.New("a signature is not of the exact length")
 		}
 	}

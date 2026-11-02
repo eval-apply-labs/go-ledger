@@ -371,7 +371,8 @@ func (transport *dropFirstProposalSend) Broadcast(from string, message Message) 
 // A proposal whose broadcast is lost used to burn its whole round (honest nodes time out to nil);
 // the proposer now re-sends the held proposal on the re-gossip cadence, so the SAME round still
 // decides. With every proposal's first transmission dropped, any commit at all proves the recovery
-// path — remove reGossipProposal and this test stalls at height 1 forever.
+// path — take the current round's proposal out of consensusMessages and this test stalls at height 1
+// forever.
 func TestChaosLostProposalRecoversViaReGossip(t *testing.T) {
 	if testing.Short() {
 		t.Skip("chaos scenarios skipped in -short")

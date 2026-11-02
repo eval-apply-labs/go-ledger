@@ -10,7 +10,7 @@ import (
 
 const network = "mainnet"
 
-var scheme = signing.MLDSA65{}
+var scheme = signing.NetworkScheme()
 
 // nameOf is a test validator's name, derived from its key so that a test can pass signers around and
 // still name them: "v-" and the first 12 hex digits of the key's SHA-256.

@@ -87,7 +87,7 @@ func admitPaymentNow(node *Node, payment ledger.Payment) error {
 // request whose fee payer has a payment pooled for its block, rather than give a receipt for a payment
 // that would lapse. Other blocks are not affected, and a freeze, which pays no fee, is never held back.
 func TestIntakeRefusesAPaymentAndARequestOfOnePayerForOneBlock(t *testing.T) {
-	node := requestNode(signing.MLDSA65{})
+	node := requestNode(signing.NetworkScheme())
 	if err := admitRequest(node, nameRequestOf(ledger.RegistrationKind, "dave", "alice", "bank-a", "dave-key", 3)); err != nil {
 		t.Fatalf("premise: alice's registration is pooled: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestIntakeRefusesAPaymentAndARequestOfOnePayerForOneBlock(t *testing.T) {
 // and block is refused; the same name for another block is taken. The pool's add enforces it itself,
 // as the update pool's does.
 func TestRequestPoolHoldsOneRequestPerNameAndBlock(t *testing.T) {
-	node := requestNode(signing.MLDSA65{})
+	node := requestNode(signing.NetworkScheme())
 	byAlice := nameRequestOf(ledger.RegistrationKind, "dave", "alice", "bank-a", "dave-key", 3)
 	pool := newRequestPool(0)
 	if !pool.add(byAlice) || pool.add(nameRequestOf(ledger.RegistrationKind, "dave", "bob", "bank-a", "dave-key", 3)) || len(pool.pending) != 1 {
@@ -144,7 +144,7 @@ func TestRequestPoolHoldsOneRequestPerNameAndBlock(t *testing.T) {
 // the payer's balance whichever comes first. After a commit the pools keep, payments first and then
 // fees, only what the new balance still covers.
 func TestPoolCountsPendingFees(t *testing.T) {
-	node := requestNode(signing.MLDSA65{})
+	node := requestNode(signing.NetworkScheme())
 	setBalance := func(name, amount string) {
 		previousAccounts := node.state.Accounts
 		node.state.Accounts = append([]ledger.Account(nil), previousAccounts...)
@@ -182,7 +182,7 @@ func TestPoolCountsPendingFees(t *testing.T) {
 // flood of them, from an unfunded requestor included, costs the node nothing but the cheap checks.
 func TestRequestIntakeRunsCheapChecksBeforeSignatures(t *testing.T) {
 	checks := &atomic.Int64{}
-	node := requestNode(countingScheme{checks: checks})
+	node := requestNode(countingScheme{Scheme: signing.NetworkScheme(), checks: checks})
 	wrongFee := nameRequestOf(ledger.RegistrationKind, "dave", "alice", "bank-a", "dave-key", 3)
 	wrongFee.Fee = rational("2")
 	unknownKind := nameRequestOf(ledger.RegistrationKind, "dave", "alice", "bank-a", "dave-key", 3)
@@ -212,7 +212,7 @@ func TestRequestIntakeRunsCheapChecksBeforeSignatures(t *testing.T) {
 // A freeze, which pays no fee, gets the payments' 64 blocks, so one name cannot fill the pool with
 // free freezes for many blocks. Through POST /hdls/name-request it answers 202, or 409 with the reason.
 func TestRequestWindowIsMaxRequestLookahead(t *testing.T) {
-	node := requestNode(signing.MLDSA65{})
+	node := requestNode(signing.NetworkScheme())
 	node.Start()
 	defer node.Stop()
 	server := httptest.NewServer(NewServer(node).Handler())
@@ -283,7 +283,7 @@ func TestRegistrationEndToEnd(t *testing.T) {
 	}
 
 	registration := nameRequestOf(ledger.RegistrationKind, "dave", "alice", names[0], "dave-key", nodes[0].Snapshot().Height+3)
-	if err := nodes[0].AdmitNameRequest(registration); err != nil {
+	if _, err := nodes[0].AdmitNameRequest(registration); err != nil {
 		t.Fatalf("the registration was refused: %v", err)
 	}
 	waitFor(t, 10*time.Second, everyNode(func(snapshot Snapshot) bool {
@@ -308,7 +308,7 @@ func TestRegistrationEndToEnd(t *testing.T) {
 // No block leaves the validator set empty (R9), and intake refuses what alone would: the last seated
 // bank's own freeze, and a ⅔ action that freezes it. Another name's freeze is taken.
 func TestNoBlockLeavesTheSetEmpty(t *testing.T) {
-	node := requestNode(signing.MLDSA65{})
+	node := requestNode(signing.NetworkScheme())
 	if err := admitRequest(node, nameRequestOf(ledger.FreezeKind, "bank-a", "bank-a", "", "", 1)); err == nil || !strings.Contains(err.Error(), "R9") {
 		t.Errorf("the last seated bank's freeze: got %v, want a refusal under R9", err)
 	}
@@ -335,7 +335,7 @@ func TestNoBlockLeavesTheSetEmpty(t *testing.T) {
 // commit that changes a key, the pools drop what was signed under the old one. /hdls/resolve shows the
 // change while it waits.
 func TestLoopRefusesWhatWasCheckedUnderAReplacedKey(t *testing.T) {
-	node := requestNode(signing.MLDSA65{})
+	node := requestNode(signing.NetworkScheme())
 	server := httptest.NewServer(NewServer(node).Handler())
 	defer server.Close()
 	resolve := func() ResolveRecord {
@@ -406,7 +406,7 @@ func TestLoopRefusesWhatWasCheckedUnderAReplacedKey(t *testing.T) {
 // are two actions: the pool keys every field the votes sign, so they never share a slot, and the
 // governance view shows those fields.
 func TestNameActionPoolKeysEveryField(t *testing.T) {
-	node := requestNode(signing.MLDSA65{})
+	node := requestNode(signing.NetworkScheme())
 	voted := func(action ledger.Reassignment) ledger.Reassignment {
 		vote, _ := ledger.SignReassignmentVote(testSigner("bank-a"), "bank-a", action)
 		action.Votes = []ledger.ReassignmentVote{vote}
@@ -429,20 +429,24 @@ func TestNameActionPoolKeysEveryField(t *testing.T) {
 }
 
 // A relayed copy of a pooled certificate, with the same votes, is dropped before any signature check:
-// every validator relays it, so each copy would otherwise cost the whole certificate's checks. A ⅔
-// action with a new key is larger than MaxMessageBytes, which no longer applies to certificates.
+// every validator relays it, so each copy would otherwise cost the whole certificate's checks. The
+// certificate is larger than MaxMessageBytes, which does not apply to certificates: with a scheme of
+// small keys and signatures, the test lowers the node's bound below it.
 func TestRelayedCertificateCopyCostsNoSignatureCheck(t *testing.T) {
 	checks := &atomic.Int64{}
-	node := requestNode(countingScheme{checks: checks})
+	node := requestNode(countingScheme{Scheme: signing.NetworkScheme(), checks: checks})
 	action := ledger.Reassignment{Name: "alice", NewKey: testSigner("alice-new").PublicKeyBase64()}
 	action, _ = ledger.SignReassignmentNewKey(testSigner("alice-new"), action)
 	vote, _ := ledger.SignReassignmentVote(testSigner("bank-a"), "bank-a", action)
 	action.Votes = []ledger.ReassignmentVote{vote}
-	if encoded, _ := json.Marshal(action); int64(len(encoded)) <= node.state.Parameters.MaxMessageBytes {
+	encoded, _ := json.Marshal(action)
+	node.state.Parameters.MaxMessageBytes = min(node.state.Parameters.MaxMessageBytes, int64(len(encoded))-1)
+	if int64(len(encoded)) <= node.state.Parameters.MaxMessageBytes {
 		t.Fatalf("premise: the certificate (%d bytes) is larger than MaxMessageBytes", len(encoded))
 	}
 	parameters := node.state.Parameters
 	parameters.TransactionCost = rational("0.2")
+	parameters.MaxMessageBytes = max(parameters.MaxMessageBytes, ledger.MinMessageBytes()) // one a vote may set
 	change := ledger.ParameterChange{NewParameters: parameters, PreviousParametersDigest: node.state.Parameters.Digest()}
 	parameterVote, _ := ledger.SignParameterVote(testSigner("bank-a"), "bank-a", parameters, change.PreviousParametersDigest, 0)
 	change.Votes = []ledger.ParameterVote{parameterVote}

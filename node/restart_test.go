@@ -692,10 +692,10 @@ func TestValidatorBackWithoutItsSignLogWaitsAtTheHeightItCatchesUpTo(t *testing.
 // catchUpCheckpoint).
 type peeredRecorder struct { // implements Transport, with recordingTransport's Broadcast
 	recordingTransport
-	peers []string
+	peers [][]string
 }
 
-func (recorder *peeredRecorder) Peers() []string { return recorder.peers }
+func (recorder *peeredRecorder) Peers() [][]string { return recorder.peers }
 
 // The same, end to end. A validator back without its sign log from a snapshot below the network, with
 // gossip peers and no bootstrap peer, starts the height it came back at after its first wait; its running
@@ -715,7 +715,7 @@ func TestValidatorBackWithoutItsSignLogResumesItsProposalAfterACatchUp(t *testin
 	defer peer.Close()
 	earlier := network.sign(self, networkHeight, 0, ledger.ProposeBlock(network.chain, checkpoint.State, checkpoint.Commit.BlockHash, [32]byte{9}, ledger.BlockContent{}))
 
-	recorder := &peeredRecorder{peers: []string{peer.URL}}
+	recorder := &peeredRecorder{peers: [][]string{{peer.URL}}}
 	node, _ := olderSnapshotNode(t, network, self, genesis, recorder)
 	if err := admit(node, signedPayment(network.name(0), "shop", "1", networkHeight)); err != nil {
 		t.Fatal(err) // work the network carries for its height

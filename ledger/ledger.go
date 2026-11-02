@@ -23,11 +23,12 @@ type Account struct { // implements json.Marshaler and json.Unmarshaler, in amou
 	Bank          string   // the bank of record, a name; "" for none
 	Delegate      string   // the name this balance backs as stake; "" for none
 	Description   string
-	Address       string // a validator's gossip address (e.g. "http://10.0.0.2:8080") — the on-chain peer DNS
-	Frozen        bool   // a frozen name neither pays nor is paid, and is never seated
-	PendingKey    string // a key change waiting for PendingHeight; "" for none
-	PendingBank   string // a bank change waiting for PendingHeight; "" for none
-	PendingHeight int64  // the height at whose end the pending change takes effect; 0 for none
+	PublicAddress string   // the name's public face, "" or CanonicalAddress (e.g. "https://bank-a.example"): a bank's, which wallets read from, or a website
+	IPAddresses   []string // at most MaxIPAddresses, each CanonicalIPAddress: what DNS A and AAAA records hold, and a validator's gossip addresses (the on-chain peer DNS)
+	Frozen        bool     // a frozen name neither pays nor is paid, and is never seated
+	PendingKey    string   // a key change waiting for PendingHeight; "" for none
+	PendingBank   string   // a bank change waiting for PendingHeight; "" for none
+	PendingHeight int64    // the height at whose end the pending change takes effect; 0 for none
 }
 
 // FindAccount returns the account with the given name, and whether there is one.

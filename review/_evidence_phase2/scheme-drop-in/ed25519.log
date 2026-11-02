@@ -1,0 +1,10 @@
+== files changed: removed signing/mldsa65*.go (3), added signing/ed25519.go signing/ed25519_test.go 
+== ML-DSA-65 named in Go code outside comments: 
+== vet and build: ok
+ok  	github.com/eval-apply-labs/go-ledger/cmd/demo	0.009s
+ok  	github.com/eval-apply-labs/go-ledger/cmd/server	0.429s
+ok  	github.com/eval-apply-labs/go-ledger/consensus	3.124s
+ok  	github.com/eval-apply-labs/go-ledger/ledger	1.112s
+ok  	github.com/eval-apply-labs/go-ledger/node	64.776s
+ok  	github.com/eval-apply-labs/go-ledger/signing	0.758s
+ok  	github.com/eval-apply-labs/go-ledger/ui	8.401s

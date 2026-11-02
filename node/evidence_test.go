@@ -1,9 +1,7 @@
 package node
 
 import (
-	"bytes"
 	"encoding/json"
-	"log"
 	"maps"
 	"os"
 	"path/filepath"
@@ -274,8 +272,7 @@ func TestPendingProofSurvivesARestart(t *testing.T) {
 
 	state := genesis // the shop's name is frozen in the snapshot of this restart
 	state.Accounts = append([]ledger.Account(nil), genesis.Accounts...)
-	shop, _ := ledger.FindAccount(state.Accounts, "shop")
-	if state.Accounts[0] != shop {
+	if state.Accounts[0].Name != "shop" {
 		t.Fatal("premise: the shop's account comes first in name order")
 	}
 	state.Accounts[0].Frozen = true
@@ -312,9 +309,7 @@ func TestNodeWithAReplacedKeyStopsSigning(t *testing.T) {
 		t.Fatal("premise: with four equal validators heights 1 and 2 have different proposers")
 	}
 	genesis := testGenesis(network.genesis, network.timeout, time.Hour)
-	var logged bytes.Buffer
-	defer log.SetOutput(log.Writer())
-	log.SetOutput(&logged)
+	logged := captureLog(t)
 
 	replaced := testConfig(network.chain, network.name(self), genesis)
 	replaced.Signer = testSigner("a replaced key")

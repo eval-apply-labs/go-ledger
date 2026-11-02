@@ -2,13 +2,16 @@ package node
 
 import (
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,6 +152,184 @@ func TestFetchCheckpointRefusesOversizedAndFailedAnswers(t *testing.T) {
 	}
 }
 
+// Catch-up asks each peer at the first of its URLs that answers its status, and at no other (review N8):
+// a peer's URLs reach one node, so a peer ahead sends its checkpoint once, not once for each URL. Here a
+// gossip peer has three URLs: the first refuses connections, the second answers, and the third is never
+// asked.
+func TestCatchUpAsksEachPeerAtTheFirstURLThatAnswers(t *testing.T) {
+	names := []string{"founder", "straggler"}
+	genesis := testGenesis([]ledger.Account{testAccount("founder", "1000"), testAccount("straggler", "0")}, 30*time.Second, 0)
+	checkpoint := checkpointOf(t, 5, testGenesis([]ledger.Account{testAccount("founder", "900"), testAccount("straggler", "50")}, 30*time.Second, 0), validatorsOf(names), nil)
+	var answeringAsked, laterAsked atomic.Int32
+	serve := func(asked *atomic.Int32) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			asked.Add(1)
+			servePeer(responseWriter, request, checkpoint)
+		}))
+	}
+	answering, later := serve(&answeringAsked), serve(&laterAsked)
+	defer answering.Close()
+	defer later.Close()
+	refusing := httptest.NewServer(http.NotFoundHandler())
+	refusing.Close() // its address now refuses connections
+
+	recorder := &peeredRecorder{peers: [][]string{{refusing.URL, answering.URL, later.URL}}}
+	straggler := New(testConfig(staticChain(names...), "straggler", genesis), recorder)
+	if _, found := straggler.catchUpCheckpoint(); !found || answeringAsked.Load() != 2 || laterAsked.Load() != 0 {
+		t.Errorf("found %v; the URL that answered was asked %d times, want 2, its status and its checkpoint; the URL after it %d times, want none",
+			found, answeringAsked.Load(), laterAsked.Load())
+	}
+}
+
+// The fetches from the other validators' public addresses, catch-up's last source and the pull of public
+// bundles, refuse a loopback destination (review N7): a validator could publish http://127.0.0.1:8080,
+// and every bank stuck at a height would fetch its own operator port's routes. A private address is
+// reached as any other. Here a validator's public face listens on 127.0.0.1, and serves a checkpoint
+// ahead and a public bundle: neither a catch-up nor a stuck node's pull asks it, until the test lets
+// loopback through.
+func TestPublicAddressFetchesRefuseLoopback(t *testing.T) {
+	for address, refused := range map[string]bool{"127.0.0.1:8080": true, "127.1.2.3:8080": true, "[::1]:8080": true,
+		"[::ffff:127.0.0.1]:8080": true, "0.0.0.0:8080": true, "[::]:8080": true,
+		"172.28.70.11:8080": false, "192.168.1.10:443": false, "[2001:db8::1]:443": false} {
+		if err := refuseLoopback("tcp", address, nil); (err != nil) != refused {
+			t.Errorf("a connection to %s: refused %v, want %v", address, err != nil, refused)
+		}
+	}
+
+	network := newHandNet(t, 4)
+	self := network.nonProposer(1)
+	checkpoint := checkpointOf(t, 5, testGenesis(network.genesis, network.timeout, time.Hour), network.validatorSet.Validators(), nil)
+	headerOnly := EncodeBundle(BundleHeader{Bundle: BundleVersion, NetworkID: testNetworkID}, nil, MaxPublicBundleBytes)
+	var asked atomic.Int32
+	publicFace := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		asked.Add(1)
+		if request.URL.Path == "/hdls/bundle" {
+			responseWriter.Write(headerOnly) // imports nothing
+			return
+		}
+		servePeer(responseWriter, request, checkpoint)
+	}))
+	defer publicFace.Close()
+	network.genesis[(self+1)%len(network.names)].PublicAddress = publicFace.URL
+	node, _ := network.node(self) // without the run loop, its driver runs height 1 from now
+	for _, allowLoopback := range []bool{false, true} {
+		node.config.allowLoopbackPublicAddresses = allowLoopback
+		asked.Store(0)
+		_, found := node.catchUpCheckpoint()
+		node.heightStartedAt = time.Now().Add(-4 * network.timeout) // stuck: the next re-gossip tick pulls
+		node.handle(event{kind: eventRegossip})
+		waitFor(t, 5*time.Second, func() bool { return !node.pullRoundRunning.Load() }, "a round of pulls never ended")
+		if found != allowLoopback || asked.Load() > 0 != allowLoopback {
+			t.Errorf("loopback allowed %v: catch-up found the checkpoint %v, and the public face on 127.0.0.1 was asked %d times",
+				allowLoopback, found, asked.Load())
+		}
+	}
+}
+
+// The fetches from the other validators' public addresses refuse the node's own machine at an address
+// that is not loopback too (review N7): in a container the operator port listens on every interface
+// (listen :8080), and some addresses are every bank's own, such as rootless Podman's 10.0.2.100. Here an
+// operator port listens on every interface, and serves a public bundle. A plain client reaches it at this
+// machine's first IPv4 address that is not loopback; the public-address client is refused there before
+// it sends a request.
+func TestPublicAddressFetchesRefuseTheNodesOwnMachineAtAnyAddress(t *testing.T) {
+	var ownAddress netip.Addr
+	interfaceAddresses, _ := net.InterfaceAddrs()
+	for _, interfaceAddress := range interfaceAddresses {
+		if prefix, err := netip.ParsePrefix(interfaceAddress.String()); err == nil && prefix.Addr().Is4() && !prefix.Addr().IsLoopback() {
+			ownAddress = prefix.Addr()
+			break
+		}
+	}
+	if !ownAddress.IsValid() {
+		t.Skip("this machine has no IPv4 address but loopback ones")
+	}
+	operatorPort, err := net.Listen("tcp", ":0") // every interface
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked atomic.Int32
+	headerOnly := EncodeBundle(BundleHeader{Bundle: BundleVersion, NetworkID: testNetworkID}, nil, MaxPublicBundleBytes)
+	server := &http.Server{Handler: http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		asked.Add(1)
+		responseWriter.Write(headerOnly)
+	})}
+	go server.Serve(operatorPort)
+	defer server.Close()
+	ownURL := "http://" + netip.AddrPortFrom(ownAddress, uint16(operatorPort.Addr().(*net.TCPAddr).Port)).String()
+	if fetchPublicBundle(NewHTTPClient(5*time.Second), ownURL) == nil || asked.Load() != 1 {
+		t.Fatalf("premise: a plain client reaches the operator port at %s", ownURL)
+	}
+
+	node := New(testConfig(staticChain("founder"), "founder", testGenesis(nil, time.Second, 0)), NewHTTPTransport(nil))
+	if bundle := fetchPublicBundle(node.publicAddressClient(), ownURL); bundle != nil || asked.Load() != 1 {
+		t.Errorf("the public-address client reached the node's own operator port at %s, this machine's own address", ownURL)
+	}
+}
+
+// Catch-up asks every other validator's public face when no bootstrap or gossip peer answered at all,
+// or while the node is stuck on its height. Otherwise, on a healthy network, where its gossip peers
+// answer at its own height, it asks one public face a call, each in turn (review R2-2): one small request
+// a tick, not one for each bank, which still finds within a few ticks that the node lags behind banks its
+// gossip peers are not among, though an idle node is never stuck. Here a gossip peer answers at the
+// node's height, and two validators' public faces each hold a checkpoint ahead. Each situation has two
+// calls, and each finds the checkpoint.
+func TestCatchUpAsksOnePublicFaceInTurnWhileAPeerAnswers(t *testing.T) {
+	names := []string{"auditor", "founder", "straggler"} // in name order, as a checkpoint carries them
+	ahead := checkpointOf(t, 5, testGenesis([]ledger.Account{testAccount("auditor", "0"), testAccount("founder", "900"), testAccount("straggler", "50")}, 30*time.Second, 0),
+		validatorsOf(names), nil)
+	var statusAsked [2]atomic.Int32 // the status requests each public face answered
+	founder, auditor := testAccount("founder", "1000"), testAccount("auditor", "0")
+	for i, account := range []*ledger.Account{&founder, &auditor} {
+		publicFace := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			if request.URL.Path == "/hdls/status" {
+				statusAsked[i].Add(1)
+			}
+			servePeer(responseWriter, request, ahead)
+		}))
+		defer publicFace.Close()
+		account.PublicAddress = publicFace.URL
+	}
+	gossipPeerAtTheNodesHeight := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		writeJSON(responseWriter, map[string]int64{"heightInProgress": 1}) // the node's own height in progress
+	}))
+	defer gossipPeerAtTheNodesHeight.Close()
+	silentGossipPeer := httptest.NewServer(http.NotFoundHandler())
+	silentGossipPeer.Close() // its address now refuses connections
+
+	genesis := testGenesis([]ledger.Account{founder, auditor, testAccount("straggler", "0")}, 30*time.Second, 0)
+	for _, situation := range []struct {
+		name                string
+		gossipPeer          string
+		stuck               bool
+		publicFacesEachCall int32
+	}{
+		{"a gossip peer answers at the node's height", gossipPeerAtTheNodesHeight.URL, false, 1},
+		{"no gossip peer answers", silentGossipPeer.URL, false, 2},
+		{"a gossip peer answers, and the node is stuck", gossipPeerAtTheNodesHeight.URL, true, 2},
+	} {
+		config := testConfig(staticChain(names...), "straggler", genesis)
+		config.allowLoopbackPublicAddresses = true // the public faces listen on 127.0.0.1
+		straggler := New(config, &peeredRecorder{peers: [][]string{{situation.gossipPeer}}})
+		straggler.stuckOnItsHeight.Store(situation.stuck)
+		var askedInACall [2]int32 // the calls in which each public face was asked
+		for call := range 2 {
+			statusAsked[0].Store(0)
+			statusAsked[1].Store(0)
+			_, found := straggler.catchUpCheckpoint()
+			if asked := statusAsked[0].Load() + statusAsked[1].Load(); !found || asked != situation.publicFacesEachCall {
+				t.Errorf("%s, call %d: %d public faces were asked, want %d, and the checkpoint found %v", situation.name, call+1, asked, situation.publicFacesEachCall, found)
+			}
+			for i := range askedInACall {
+				askedInACall[i] += statusAsked[i].Load()
+			}
+		}
+		if askedInACall[0] == 0 || askedInACall[1] == 0 {
+			t.Errorf("%s: in two calls, the public faces were asked in %v calls: one was never asked", situation.name, askedInACall)
+		}
+	}
+}
+
 // Catch-up asks a peer's /hdls/status first, and fetches /hdls/checkpoint, about 2.9 KB per account,
 // only from a peer whose height is ahead (spec 6.6): on an idle chain every peer is at the node's height,
 // tick after tick.
@@ -172,7 +353,7 @@ func TestCatchUpAsksStatusBeforeTheCheckpoint(t *testing.T) {
 		mutex.Lock()
 		asked = nil
 		mutex.Unlock()
-		_, found := node.bestCheckpoint([]string{peer.URL})
+		_, found, _ := node.bestCheckpoint(NewHTTPClient(5*time.Second), [][]string{{peer.URL}})
 		mutex.Lock()
 		want := []string{"/hdls/status"}
 		if nodeHeight < 6 {
@@ -182,6 +363,36 @@ func TestCatchUpAsksStatusBeforeTheCheckpoint(t *testing.T) {
 			t.Errorf("a node at height %d, the peer at 6: found %v, asked %v, want %v", nodeHeight, found, asked, want)
 		}
 		mutex.Unlock()
+	}
+}
+
+// A node follows no redirect (NewHTTPClient): a peer that answers a catch-up request or a gossiped
+// message with one has failed, and the URL it names is never asked. Otherwise a peer, or anyone on the
+// plain-HTTP path, could send the node's requests on to any URL the node can reach (review follow-up).
+func TestNodeFollowsNoRedirect(t *testing.T) {
+	names := []string{"founder", "straggler"}
+	genesis := testGenesis([]ledger.Account{testAccount("founder", "1000"), testAccount("straggler", "0")}, 30*time.Second, 0)
+	checkpoint := checkpointOf(t, 5, testGenesis([]ledger.Account{testAccount("founder", "900"), testAccount("straggler", "50")}, 30*time.Second, 0), validatorsOf(names), nil)
+	var reached atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		reached.Add(1)
+		servePeer(responseWriter, request, checkpoint)
+	}))
+	defer target.Close()
+	redirecting := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		http.Redirect(responseWriter, request, target.URL+request.URL.Path, http.StatusTemporaryRedirect) // 307 keeps a POST and its body
+	}))
+	defer redirecting.Close()
+
+	config := testConfig(staticChain(names...), "straggler", genesis)
+	config.Bootstrap = []string{redirecting.URL}
+	node := New(config, NewHTTPTransport(nil))
+	if _, found := node.catchUpCheckpoint(); found || reached.Load() != 0 {
+		t.Errorf("catch-up followed a redirect: found a checkpoint %v, the URL it names asked %d times", found, reached.Load())
+	}
+	NewHTTPTransport(nil).post([]string{redirecting.URL}, "/hdls/vote", []byte("{}"))
+	if reached.Load() != 0 {
+		t.Error("gossip followed a redirect: the URL it names got the message")
 	}
 }
 

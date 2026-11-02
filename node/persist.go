@@ -86,7 +86,9 @@ func (node *Node) selfConsistent(checkpoint Checkpoint) bool {
 // fastForward sets the committed state to a checkpoint, with the hash of its last block (the one its
 // commit decided, which the check recomputed from the header) and that block's header. It drops, as a
 // commit does, what the node held for the height it leaves: its votes, proposals and blocks, and the
-// last proposal it decided. The caller MUST have verified the checkpoint.
+// last proposal it decided. Then, after a catch-up, it writes the public folder; at Open, from
+// loadSnapshot, the folder is not open yet, and Open writes it whole. The caller MUST have verified the
+// checkpoint.
 func (node *Node) fastForward(checkpoint Checkpoint) {
 	previousAccounts := node.state.Accounts
 	node.state = checkpoint.State
@@ -102,6 +104,7 @@ func (node *Node) fastForward(checkpoint Checkpoint) {
 	node.publishView()
 	node.reconcilePools(previousAccounts)
 	node.resolvePeersFromState() // adopt the peer addresses published in the synced state
+	node.writePublicFolder(previousAccounts)
 }
 
 // saveSnapshot atomically writes the current committed checkpoint to disk. It is called from the

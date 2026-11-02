@@ -45,7 +45,7 @@ func TestReassignmentRequiresTwoThirds(t *testing.T) {
 
 	// All three approve: valid, and applied in a block the balance is overridden (a mint: 10 to 250).
 	ratified := reassignmentBy("coop", "10", "250", 0, "v0", "v1", "v2") // genesis governance sequence 0
-	if !ratified.Valid(signing.MLDSA65{}, testNetwork, validators, previousState) {
+	if !ratified.Valid(signing.NetworkScheme(), testNetwork, validators, previousState) {
 		t.Fatal("a reassignment approved by all validators should be ratified")
 	}
 	block := ProposeBlock(chain, previousState, zeroHash, zeroHash, BlockContent{Reassignment: ratified})
@@ -63,7 +63,7 @@ func TestReassignmentRequiresTwoThirds(t *testing.T) {
 
 	// Only one of three approves (< quorum): not ratified, and a block carrying it is rejected.
 	subQuorum := reassignmentBy("coop", "10", "250", 0, "v0")
-	if subQuorum.Valid(signing.MLDSA65{}, testNetwork, validators, previousState) {
+	if subQuorum.Valid(signing.NetworkScheme(), testNetwork, validators, previousState) {
 		t.Fatal("a sub-⅔ reassignment must not be ratified")
 	}
 	rejected := block
@@ -77,25 +77,25 @@ func TestReassignmentRequiresTwoThirds(t *testing.T) {
 	misattributed, _ := SignReassignmentVote(testSigner("v0"), "v2", Reassignment{Name: "coop", PreviousAmount: rational("10"), NewAmount: rational("250")})
 	forged := reassignmentBy("coop", "10", "250", 0, "v0", "v1")
 	forged.Votes = append(forged.Votes, misattributed)
-	if forged.Valid(signing.MLDSA65{}, testNetwork, validators, previousState) {
+	if forged.Valid(signing.NetworkScheme(), testNetwork, validators, previousState) {
 		t.Fatal("a vote naming v2 but signed under v0's key was counted")
 	}
 
 	// All or nothing: a full quorum with one bad vote in front of it is not ratified (spec 4.8 rule 1).
 	padded := reassignmentBy("coop", "10", "250", 0, "v0", "v1", "v2")
 	padded.Votes = append([]ReassignmentVote{misattributed}, padded.Votes...)
-	if padded.Valid(signing.MLDSA65{}, testNetwork, validators, previousState) {
+	if padded.Valid(signing.NetworkScheme(), testNetwork, validators, previousState) {
 		t.Fatal("a reassignment with a full quorum and one bad vote was ratified: one bad vote must make it invalid")
 	}
 
 	// Non-negative guard: a negative target amount is never valid.
-	if reassignmentBy("coop", "10", "-5", 0, "v0", "v1", "v2").Valid(signing.MLDSA65{}, testNetwork, validators, previousState) {
+	if reassignmentBy("coop", "10", "-5", 0, "v0", "v1", "v2").Valid(signing.NetworkScheme(), testNetwork, validators, previousState) {
 		t.Fatal("a reassignment to a negative balance must be rejected")
 	}
 
 	// Replay guard: once the balance has moved on, the certificate no longer amends it.
 	movedOn := buildLedgerState(0, []Account{namedAccount("coop", "11")}, rational("0.1"))
-	if ratified.Valid(signing.MLDSA65{}, testNetwork, validators, movedOn) {
+	if ratified.Valid(signing.NetworkScheme(), testNetwork, validators, movedOn) {
 		t.Fatal("a certificate must not re-apply against a balance it did not amend (replay guard)")
 	}
 }
@@ -161,6 +161,21 @@ func TestUnfreezeRequiresANewKey(t *testing.T) {
 		if votedAction(testCase.action, "bank-a", "bank-b").Valid(chain.Scheme, chain.NetworkID, chain.ValidatorRule.SetFor(testCase.state), testCase.state) {
 			t.Errorf("%s was valid", testCase.name)
 		}
+	}
+}
+
+// A new key must be a key of the network's scheme in its one spelling (signing.ValidatePublicKeyBase64),
+// and FitsState, which intake and the pool apply before any signature, checks it: another spelling of
+// a genuine key, as long as the key, used to pass FitsState and fail only at the proof.
+func TestNameActionNewKeyIsAKeyInItsOneSpelling(t *testing.T) {
+	_, state := requestFixture()
+	action := rekeyedTo("newcomer-key", Reassignment{Name: "newcomer", PreviousAmount: rational("0"), NewAmount: rational("50")})
+	if err := action.FitsState(state); err != nil {
+		t.Fatalf("premise: the action fits the state (%v)", err)
+	}
+	action.NewKey = otherSpellingOf(t, action.NewKey)
+	if err := action.FitsState(state); err == nil || !strings.Contains(err.Error(), "its new key is not a public key") {
+		t.Errorf("a new key in another spelling fit the state (%v)", err)
 	}
 }
 
@@ -266,7 +281,7 @@ func TestReassignmentSequenceGuardBlocksCycleReplay(t *testing.T) {
 
 	// At sequence 0 with the grantee at 0, the grant is valid.
 	funders := buildLedgerState(0, []Account{namedAccount("v0", "100"), namedAccount("grantee", "0")}, rational("0.1"))
-	if !grant.Valid(signing.MLDSA65{}, testNetwork, validators, funders) {
+	if !grant.Valid(signing.NetworkScheme(), testNetwork, validators, funders) {
 		t.Fatal("the grant should be valid against sequence 0 when the grantee holds 0")
 	}
 
@@ -274,7 +289,7 @@ func TestReassignmentSequenceGuardBlocksCycleReplay(t *testing.T) {
 	// SAME certificate — but the sequence has advanced, so it must be rejected.
 	afterSpend := funders // the grantee at 0 again → AccountAmount == 0 == PreviousAmount
 	afterSpend.GovernanceSequence = 1
-	if grant.Valid(signing.MLDSA65{}, testNetwork, validators, afterSpend) {
+	if grant.Valid(signing.NetworkScheme(), testNetwork, validators, afterSpend) {
 		t.Fatal("a spent-back-to-zero grant must NOT re-mint: the governance sequence advanced (replay guard)")
 	}
 }

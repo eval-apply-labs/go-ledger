@@ -3,6 +3,8 @@ package ledger
 import (
 	"math/big"
 	"strconv"
+
+	"github.com/eval-apply-labs/go-ledger/signing"
 )
 
 // AssumedGossipHopMs is a conservative per-hop budget: how long one relay hop of gossip is assumed to
@@ -34,7 +36,7 @@ type LedgerParameters struct { // implements json.Marshaler and json.Unmarshaler
 	// account update writes a permanently large ledger entry (a megabyte description) that every
 	// validator stores and re-hashes into every subsequent state digest. Governed like the rest of the
 	// profile; MinMessageBytes floors it so a vote cannot set it too small to fit any payment. 0 or
-	// MinMessageBytes..MaxMessageBytesLimit.
+	// MinMessageBytes()..MaxMessageBytesLimit.
 	MaxMessageBytes   int64
 	NewKeyFee         *big.Rat // > 0; the fee of a registration, a key change or a bank change
 	ChangeDelayBlocks int64    // 1..MaxChangeDelayBlocks; how many blocks a key or bank change waits
@@ -43,11 +45,33 @@ type LedgerParameters struct { // implements json.Marshaler and json.Unmarshaler
 	MaxAccountBalance *big.Rat // > 0; the largest balance a payment or the ⅔ may raise an account to
 }
 
-// MinMessageBytes is the smallest MaxMessageBytes governance may set: enough for the largest payment
-// whose comment needs no escaping (spec 4.1: a 280-byte comment, two 32-byte names, a pin, a
-// 27-character amount and a 19-digit block id, with an ML-DSA-65 signature: 4961 bytes), so the bound
-// can never be voted down to a value that bricks payments.
-const MinMessageBytes = 5000
+// The largest payment whose comment needs no escaping (spec 4.1: a 280-byte comment, two 32-byte
+// names, a pin, a 27-character amount and a 19-digit block id) takes paymentBytesBesideTheSignature
+// bytes beside its signature. Escaping every comment byte, as JSON writes <, > and & in six bytes, adds
+// commentEscapingBytes. TestMinimumMessageBoundFitsAPayment measures both.
+const (
+	paymentBytesBesideTheSignature = 549
+	commentEscapingBytes           = 5 * 280
+)
+
+// MinMessageBytes is the smallest MaxMessageBytes governance may set: the largest payment whose comment
+// needs no escaping, with a signature of the network's scheme, rounded up to a hundred bytes (5000 with
+// ML-DSA-65). So the bound can never be voted down to a value that bricks payments, whatever the scheme.
+func MinMessageBytes() int64 {
+	return roundUpToHundred(paymentBytesBesideTheSignature + signatureBase64Length())
+}
+
+// defaultMaxMessageBytes fits that payment even with every comment byte escaped, rounded up to a hundred
+// bytes (6400 with ML-DSA-65).
+func defaultMaxMessageBytes() int64 {
+	return roundUpToHundred(paymentBytesBesideTheSignature + commentEscapingBytes + signatureBase64Length())
+}
+
+func signatureBase64Length() int64 {
+	return int64(signing.SignatureBase64Length(signing.NetworkScheme()))
+}
+
+func roundUpToHundred(bytes int64) int64 { return (bytes + 99) / 100 * 100 }
 
 // The ceilings and floors Acceptable holds the parameters to (spec 3.4). MaxMessageBytesLimit is the
 // 1 MiB every route but the proposal's decodes a body under (the node's maxBodyBytes is this constant).
@@ -63,15 +87,14 @@ const (
 )
 
 // DefaultParameters are the parameters a new network starts from (spec 2.4); the demo and the test
-// fixtures start from them too. The default MaxMessageBytes, 6400, fits that largest payment even with
-// every comment byte escaped, as JSON writes <, > and & in six bytes (6361 bytes).
+// fixtures start from them too.
 func DefaultParameters() LedgerParameters {
 	return LedgerParameters{
 		TransactionCost:   big.NewRat(1, 10),
 		BlockIntervalMs:   1000,
 		StepTimeoutMs:     3000,
 		MaxPeers:          0,
-		MaxMessageBytes:   6400,
+		MaxMessageBytes:   defaultMaxMessageBytes(),
 		NewKeyFee:         big.NewRat(1, 1),
 		ChangeDelayBlocks: 86400, // about a day at one block per second
 		RetainBlocks:      604800,
@@ -133,7 +156,7 @@ func (ledgerParameters LedgerParameters) Acceptable(participants int) bool {
 	switch {
 	case ledgerParameters.TransactionCost == nil || ledgerParameters.TransactionCost.Sign() < 0:
 		return false
-	case ledgerParameters.MaxMessageBytes != 0 && (ledgerParameters.MaxMessageBytes < MinMessageBytes || ledgerParameters.MaxMessageBytes > MaxMessageBytesLimit):
+	case ledgerParameters.MaxMessageBytes != 0 && (ledgerParameters.MaxMessageBytes < MinMessageBytes() || ledgerParameters.MaxMessageBytes > MaxMessageBytesLimit):
 		return false // a bound too small to fit any payment would brick the network
 	case !positive(ledgerParameters.NewKeyFee) || !positive(ledgerParameters.MaxPaymentAmount) || !positive(ledgerParameters.MaxAccountBalance):
 		return false

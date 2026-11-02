@@ -64,7 +64,7 @@ func TestRegistrationCollectsThreeSignatures(t *testing.T) {
 	checkpoint := verified(t, customer)
 	if registration.Name != "alice" || registration.NewKey != customer.PublicKey() || ledger.NameRequestShapeError(registration) != nil ||
 		ledger.NameRequestFitsState(checkpoint.State, consensus.NewValidatorSet(checkpoint.Validators), registration) != nil ||
-		!ledger.VerifyNameRequest(signing.MLDSA65{}, testNetworkID, bank.PublicKey(), bank.PublicKey(), registration) {
+		!ledger.VerifyNameRequest(signing.NetworkScheme(), testNetworkID, bank.PublicKey(), bank.PublicKey(), registration) {
 		t.Errorf("the submitted registration %+v is not alice's for the customer's key, with three valid signatures", registration)
 	}
 }
@@ -210,16 +210,12 @@ func TestRequestBlocksKeepPaymentsInsideTheWindow(t *testing.T) {
 // lowercase base32 without padding: 26 characters, a name. The Requests page offers it, and a
 // registration drafted without a name registers it.
 func TestHashNameConvention(t *testing.T) {
-	seed := make([]byte, 32)
-	for i := range seed {
-		seed[i] = byte(i)
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
 	}
-	signer, err := signing.NewSigner(signing.MLDSA65{}, testNetworkID, seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if name := hashName(signer.PublicKeyBase64()); name != "k-2ztia3qrz3qzu7eyt52el6in" {
-		t.Errorf("the hash name of the key of seed 0..31 is %q, want k-2ztia3qrz3qzu7eyt52el6in", name)
+	if name := hashName(base64.StdEncoding.EncodeToString(key)); name != "k-mmg42klgyqzwneiskrelxms3" {
+		t.Errorf("the hash name of the key 0..31 is %q, want k-mmg42klgyqzwneiskrelxms3", name)
 	}
 
 	testNode := newGovernanceNode(t)

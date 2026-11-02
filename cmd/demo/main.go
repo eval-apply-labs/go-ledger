@@ -12,11 +12,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,13 +29,13 @@ import (
 )
 
 func main() {
-	nodeListen := flag.String("listen", "127.0.0.1:8080", "node HTTP API address")
+	nodeListen := flag.String("listen", "127.0.0.1:8080", "node HTTP API address: an IP address and a port")
 	uiListen := flag.String("ui-listen", "127.0.0.1:8091", "wallet + admin UI address")
 	uiBinary := flag.String("ui", "bin/go_ledger_ui", "path to the wallet UI binary (blank to skip)")
 	network := flag.String("network", "village", "network name (the network id is made from it and the genesis)")
 	flag.Parse()
 
-	scheme := signing.MLDSA65{}
+	scheme := signing.NetworkScheme()
 
 	// The founder is the sole validator AND the wallet's account, so a governance vote reaches the
 	// quorum (1) instantly — you can watch a parameter change or ⅔ name action enact in a block or two.
@@ -43,9 +45,9 @@ func main() {
 
 	// The genesis, checked as a node checks its genesis file. It gives the effective network id, which
 	// every signature binds: the name and the hash of the genesis.
-	chain, genesisState, err := ledger.ValidateGenesis(demoGenesis(*network, founderPublic, bakeryPublic, cafePublic))
+	chain, genesisState, err := ledger.ValidateGenesis(demoGenesis(*network, *nodeListen, founderPublic, bakeryPublic, cafePublic))
 	if err != nil {
-		log.Fatal(err) // only -network can be wrong: it must be a name
+		log.Fatal(err) // only -network and -listen can be wrong: a name, and an IP address and port the founder publishes
 	}
 
 	// The node's snapshot (with the validator's sign log beside it) and the plaintext founder wallet
@@ -127,7 +129,8 @@ func demoNodeConfig(chain ledger.Chain, genesisState ledger.LedgerState, founder
 }
 
 // demoHTTPServer serves the node's API with the timeouts cmd/server's main sets (findings #10), since
-// -listen can move the demo off 127.0.0.1.
+// -listen can move the demo off 127.0.0.1: to another IP address, or to every interface (0.0.0.0:8080 or
+// [::]:8080).
 func demoHTTPServer(listen string, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr: listen, Handler: handler,
@@ -168,25 +171,37 @@ func walletArguments(nodeURL, network, walletPath, listen string) []string {
 }
 
 // demoGenesis is the demo network's genesis (spec 8.3): the founder, the only validator, with no bank
-// of record, and two customers of the founder's bank, the bakery and the cafe. A key change waits 20
-// blocks, so it shows within a minute, and the signature record keeps the fewest blocks it may.
-func demoGenesis(network string, founderKey, bakeryKey, cafeKey []byte) ledger.Genesis {
+// of record, and two customers of the founder's bank, the bakery and the cafe. The founder publishes its
+// node's IP address, as every validator does, and the node, at that IP address and nodeListen's port, as
+// its public address, so the wallet can ask it how far the chain has gone. When the node listens on every
+// interface (0.0.0.0 or ::), an address the ledger refuses as a name's, since it names no one machine, the
+// founder publishes 127.0.0.1, this machine, in both. The network's gossip port is the node's own port:
+// the demo serves gossip on its one port. A key change waits 20 blocks, so it shows within a minute, and
+// the signature record keeps the fewest blocks it may.
+func demoGenesis(network, nodeListen string, founderKey, bakeryKey, cafeKey []byte) ledger.Genesis {
+	ipAddress, port, _ := net.SplitHostPort(nodeListen) // the genesis checks refuse what is not an IP address and a port
+	if listenIP := net.ParseIP(ipAddress); listenIP != nil && listenIP.IsUnspecified() {
+		ipAddress = "127.0.0.1"
+	}
+	gossipPort, _ := strconv.Atoi(port)
 	parameters := ledger.DefaultParameters()
 	parameters.ChangeDelayBlocks = 20
 	parameters.RetainBlocks = 1000
 	return ledger.Genesis{
 		NetworkName: network,
+		GossipPort:  gossipPort,
 		Parameters:  parameters,
 		Validators:  []ledger.GenesisValidator{{Name: "founder", Power: 1}},
 		Accounts: []ledger.GenesisAccount{
-			{Name: "founder", PublicKey: base64.StdEncoding.EncodeToString(founderKey), Amount: "1000", Delegate: "founder", Description: "the founding node"},
+			{Name: "founder", PublicKey: base64.StdEncoding.EncodeToString(founderKey), Amount: "1000", Delegate: "founder", Description: "the founding node",
+				PublicAddress: "http://" + net.JoinHostPort(ipAddress, port), IPAddresses: []string{ipAddress}},
 			{Name: "bakery", PublicKey: base64.StdEncoding.EncodeToString(bakeryKey), Amount: "250", Bank: "founder", Description: "Alice's bakery"},
 			{Name: "cafe", PublicKey: base64.StdEncoding.EncodeToString(cafeKey), Amount: "175", Bank: "founder", Description: "the corner cafe"},
 		},
 	}
 }
 
-// newKeyPair returns a fresh public key and its private key, the seed it derives from.
+// newKeyPair returns a fresh public key and its private key.
 func newKeyPair(scheme signing.Scheme) (public, private []byte) {
 	public, private, err := scheme.GenerateKey()
 	if err != nil {

@@ -10,9 +10,13 @@ Area: **general**: monetary policy spans the whole system.
 This is the monetary side of the ledger — for whoever stewards a community's currency, not just runs
 a node. It matters as much as the code: the software enforces the *rules*, but the community sets the
 *policy* within them. The short version: a > ⅔ vote can **create money out of nothing** — typically
-into a community **treasury** — while ordinary use quietly **burns** it away. Neither inflation nor
-deflation is a default of the system; the **net** of what you mint against what burns is your monetary
-policy, and it is a deliberate choice made in the open by supermajority.
+into a community **treasury** — while each payment **burns** a small fee, set to about what it costs
+the network to process it. The fee is not a tax. The community taxes as it always has, outside the
+ledger, and its people pay those taxes into the treasury like any other payment. The treasury pays the
+community's public workers from both, the banks that run the network among them, and the **ratio of
+taxes to minting** in that pay is your monetary policy: it moves the currency toward inflation or
+deflation, and the community toward an overtaxed private sector or an underfunded public one. It is a
+deliberate choice, made in the open.
 
 ## What "the money supply" is
 
@@ -31,12 +35,14 @@ there is no mining, no faucet, no automatic issuance to dilute it later.
 A payment moves value from payer to payee, and the **transaction fee is burned** — the payer is
 debited the full amount, the payee is credited the amount *minus* the fee, and the difference is
 destroyed, paid to no one (not even the validators — there are **no block rewards** here; validating
-does not mint). So:
+does not mint, and the banks are paid from the treasury, as public work). So:
 
 - A payment can never create money. The supply-conservation property test proves it: payments only
   move value or burn it.
 - Every payment shrinks the total supply by one fee. With activity, the supply **slowly declines**.
-  That deflationary bias is deliberate — the fee is both a spam cost and a supply sink.
+  That drift is a side effect, not a policy: the fee prices the network's work, so that no one can
+  make the banks carry payments that cost them more than they cost the payer (see
+  [setting the fee](#setting-the-fee)).
 - Every registration, key change and bank change burns one **new-key fee** from whoever requests it.
 
 One more rule removes money: a block in which one payer's payments together overdraw it destroys
@@ -49,6 +55,30 @@ Nothing else removes money on its own. A validator caught double-signing is **fr
 its name leaves the validator set and its balance stays where it is. A holder can freeze their own
 name too, and the ⅔ can freeze any name. A freeze only stops the money moving; deciding where it
 goes is a separate, public ⅔ vote (below).
+
+## Setting the fee
+
+Set `transactionCost` to roughly what it costs the network to process one payment, and no higher.
+Add up what the banks spend to run their nodes over a period — machines, power, bandwidth, the people
+who keep them running — and divide by the payments the network carries in that period. Revisit it, by
+a ⅔ vote, when either moves: when costs change, when traffic grows, or when the currency drifts against
+the money those costs are paid in.
+
+- **Too low**, and the fee no longer deters abuse: anyone can make every bank check, store and gossip
+  payments that cost the sender next to nothing.
+- **Too high**, and it is a tax that no one voted as a tax: a charge on every exchange, which falls
+  hardest on small payments and slows the circulation the community needs.
+
+The fee is flat per payment, not a percentage of the amount, because what a payment costs to process
+does not depend on its amount. The same reasoning sets `newKeyFee`, the price of a registration, a key
+change or a bank change.
+
+**Who pays the banks.** The fee pays no one: it is burned. The banks that run the network are paid
+from the treasury, as public work, like anyone else who keeps the community's shared things running:
+from taxes or from a mint, like the rest of the public pay. The cost of the network is then where
+everyone can see it, in the treasury's accounts, and not hidden in a block reward. The part of the banks' pay that is minted puts back about what the fees burned; the part paid
+from taxes does not, and there the burn is a small net withdrawal from the supply, one more reason to
+keep the fee at cost.
 
 ## The only way to create money: the ⅔ name action
 
@@ -93,25 +123,25 @@ lever**:
    community keeps that honest. In static mode (a genesis that lists its validators), the genesis
    fixes each validator's power and delegation moves none: only a new genesis adds a validator or
    changes a power.
-2. **Make minting rare and principled.** Agree, as a community, on what a mint is *for* — a grant
-   to a newcomer, a correction, replenishing burned fees — and treat anything else as out of bounds.
-   The software won't stop a ⅔ majority; a social convention is what keeps it from being abused.
+2. **Mint by a rule, not by mood.** Agree, as a community, on what a mint is *for* — the share of
+   public pay the community has chosen not to tax, a grant to a newcomer, a correction — and treat
+   anything else as out of bounds. The software won't stop a ⅔ majority; a social convention is what
+   keeps it from being abused.
 3. **Publish the supply.** Sum `GET /hdls/accounts` on a schedule and post it. A mint is on-chain and
    visible; watching the total is how the community notices if policy is drifting.
-4. **Tune the fee thoughtfully.** The fee is governed (also a ⅔ vote). A higher fee burns supply faster
-   (more deflation, and it discourages small payments); a lower fee weakens the sink. It is your
-   deflation dial.
-5. **Set the caps on purpose.** `maxPaymentAmount` bounds what one payment, a thief's included, can
+4. **Set the caps on purpose.** `maxPaymentAmount` bounds what one payment, a thief's included, can
    move; `maxAccountBalance` bounds what one name can hold, and what one mint can raise it to. Both
    are ⅔-governed. Keep the largest payment at or above the fee, or no payment can pass.
 
 ## Monetary policy: the line to toe
 
-Put the two flows together and you have the whole policy. Over any period:
+Over any period, the supply moves by:
 
     net supply change  =  treasury mints (⅔ votes)  −  fees burned  −  ⅔ reductions  −  overdraw bans
 
-The last term is zero while every node is honest (above).
+The last term is zero while every node is honest (above). Taxes are not in it: a tax paid into the
+treasury moves money, it does not destroy it. What the treasury takes in and does not spend is out of
+circulation all the same, and a ⅔ reduction of the treasury's balance destroys it for good.
 
 The goal is usually **not** zero — but be precise about *what* you are targeting, because money-supply
 growth and price inflation are not the same thing. Prices move with the supply *relative to real
@@ -123,50 +153,47 @@ real activity it can buy** — mild, steady price growth falls out of that, and 
 deflation (hoarding, a thinning float) and high inflation (lost trust).
 
 Getting there is a balancing act — the trilemma of **low taxes, high services, and a stable currency**.
-You cannot maximise all three at once; stewardship is toeing the line between them, and this system
-gives you two dials:
+You cannot maximise all three at once; stewardship is toeing the line between them. The public sector
+— the people who do work *for* the community: whoever keeps things running, the banks that run the
+network included, settles disputes, builds shared things — is paid from the treasury, and the treasury
+has two sources:
 
-- **The fee is your tax** — a deflationary sink that pulls money out of the private sector. It shares
-  VAT's best properties (automatic, on every payment, netted on receipt, impossible to avoid, and it
-  never stops anyone from working — unlike income or property taxes), but it is a **flat** charge per
-  payment, *not* a percentage of the amount. That is a deliberate choice: a percentage would tax large
-  and internal transfers alike — moving your own funds between wallets, consolidating, a treasury
-  payout — and so tax *velocity itself*, which is the opposite of what a community wants; a flat
-  friction leaves a big legitimate transfer nearly free per unit. Raise it to cool inflation or thin
-  the float; lower it to leave more money in people's hands.
-- **The treasury mint is your spending** — you create money to pay the people who do work *for* the
-  community (its "employees": whoever keeps things running, settles disputes, builds shared things).
-  They accept minted pay because they can spend it on real goods and services inside the community.
+- **Taxes**, assessed and enforced by the community outside the ledger, as it always has: on income,
+  on property, on whatever it chooses. The ledger does not replace them and knows nothing about them;
+  it only carries the payments, each an ordinary signed payment from the taxpayer to the treasury. A
+  tax moves money from the private sector to the public one, and creates none.
+- **Minting**, a ⅔ name action into the treasury. It creates the money it pays, so the pay costs no one
+  directly and every holder of cash a little (see [below](#minting-is-a-tax-on-cash--made-honest)).
 
-But the two dials are **not equal.** Minting is a strong one — arbitrary money creation. The fee is a
-weak one: a small flat charge across a modest number of payments burns only a trickle against the whole
-supply, so its real job is spam deterrence and a mild sink, not inflation control. **Inflation is
-governed almost entirely by minting restraint**; don't imagine you can tax it back with the fee —
-mostly you can't.
+**The ratio of taxes to minting in the public pay is the lever.** Pay the public workers mostly from
+taxes and the currency holds its value, but the private sector carries the whole public sector; pay
+them mostly from new money and the private sector keeps more, but the currency inflates. The fee is
+not part of this: set at the cost of processing, it burns only a trickle against the whole supply, and
+it must not be raised to do more (see [setting the fee](#setting-the-fee)).
 
-The three ways to get it wrong, from the original design's notes:
+The ways to get it wrong:
 
-- **Too much tax** (fee too high) → productivity falls, a black market appears, and your most
-  productive, honest people leave.
-- **Too much minting** → inflation, which you can't always tax back without starving the private
-  sector against the public one.
-- **Too little spending** (services) → discontent; people drift to a community that offers more.
+- **Too much tax** → the private sector is overtaxed: productivity falls, a black market appears, a
+  recession follows, and your most productive, honest people leave. What the treasury takes in and
+  does not spend leaves circulation, and that is deflation on top.
+- **Too much minting** → inflation, and with it lost trust in the currency.
+- **Too little of either** → the public sector is underfunded: the services fail, and the community
+  with them; people drift to one that offers more.
 
-There is no automatic answer baked in — the fee and the treasury are both governed (⅔), and **how you
-balance them is whether you run inflation or deflation, and whether the community feels well-served or
-over-taxed.** It is a deliberate, supermajority, on-chain decision. (Note that the fee does not *fund*
-the treasury — burning and minting are separate flows; spending is financed by fresh minting, and the
-burn only offsets the inflation minting causes. A public sector on the order of a quarter of economic
-activity is a historically workable size to aim for — enough for shared infrastructure while still
-rewarding private enterprise — but it is a dial to tune, not a constant.)
+There is no automatic answer baked in — the mint is governed (⅔), the taxes by however the community
+decides its taxes, and **how you balance them is whether you run inflation or deflation, and whether the
+community feels well-served or over-taxed.** It is a deliberate decision, made in the open. (A public
+sector on the order of a quarter of economic activity is a historically workable size to aim for —
+enough for shared infrastructure while still rewarding private enterprise — but it is a dial to tune,
+not a constant.)
 
 ## There is no solution — it's the short blanket
 
 Say it plainly, because it is the most important thing on this page: the trilemma **has no solution**.
 It is the *short-blanket* problem — pull the blanket up to cover your head and your feet get cold; pull
 it down and your head is out in the cold. Every setting that helps one corner (lower taxes, more
-services, a steadier currency) takes from another. There is no configuration of the fee and the
-treasury that gives you all three at once, because the blanket is simply too short.
+services, a steadier currency) takes from another. There is no mix of taxes and minting that gives
+you all three at once, because the blanket is simply too short.
 
 This is not a bug to be patched or an optimum to be computed. It is a hard, permanent, contested
 problem — a question of values, not of engineering. Different communities will answer it differently
@@ -185,17 +212,18 @@ make your peace with the fact that it is never "done."
 Be clear-eyed about what a mint *is*. Creating an amount into the treasury dilutes every existing holder
 by roughly that amount spread over the whole supply — economically a **flat wealth levy on all cash
 balances**, whose proceeds fund the treasury. That is the *inflation tax* (seigniorage), and there is no
-escaping it: to mint is to tax cash. The fee running the other way is its mirror — the **burn is an
-anti-inflation-tax**, lifting the real value of the cash that remains, a small dividend to holders.
+escaping it: to mint is to tax cash. A direct tax is the visible alternative: it takes from those it
+names, where a mint takes a little from everyone who holds cash. (The burn is neither: set at the cost
+of processing, it is a price, not a tax.)
 
-Structurally, this makes the system a clean, literal instance of what MMT *describes*: because the tax
-(burn) and the spend (mint) are decoupled and there is no debt instrument, public spending is financed
-by money creation and taxation exists only to control the resulting inflation — the currency can never
-"run out of money," only create too much. Where it parts ways with MMT is exactly the part MMT is
-accused of waving away — the budget constraint. Here that constraint is not a promise of restraint but a
-*structure*: the ⅔ gate, the exit door (over-mint and holders flee to another currency), and the
-trilemma that won't let anyone pretend a mint is free. The magic money tree, replaced by an
-un-ignorable tradeoff.
+Structurally, this makes the system a clean, literal instance of what MMT *describes*: there is no
+debt instrument, so public spending is financed by taxes and by money creation, and the currency can
+never "run out of money," only create too much. The share of public pay that is minted rather than
+taxed is what inflates; taxes are what hold it back. Where it parts ways with MMT is exactly the part
+MMT is accused of waving away — the budget constraint. Here that constraint is not a promise of
+restraint but a *structure*: the ⅔ gate, the exit door (over-mint and holders flee to another
+currency), and the trilemma that won't let anyone pretend a mint is free. The magic money tree,
+replaced by an un-ignorable tradeoff.
 
 None of this is new — only the honesty is. Italy ran precisely this tax for decades through the lira,
 and, in its way, ran it astutely: a society shy of direct taxation, with a public sector to fund and an
@@ -209,12 +237,12 @@ could be seen. The hidden tax had been politically usable *because* it was hidde
 
 That is the tradeoff this design makes with its eyes open. It performs the same economic act — a mint is
 a tax on cash — but on a public ledger, by ⅔ vote, with the dilution measurable to the cent, and
-*defaulted off* (the deflationary bias means the resting state is no inflation tax at all). The honest
-cost is real: a visible inflation tax is a *resisted* inflation tax, so you trade the frictionless
-efficacy Italy enjoyed for consent and legitimacy — a trade you can only afford at community scale,
-where consent is actually reachable. This is the concrete meaning of the currency's Austrian accent: not
-sound-money piety, but the rule that *the inflation tax must be opt-in and visible, never the silent
-default* — "never again the invisible lira," turned into architecture.
+*defaulted off* (nothing is minted unless the ⅔ vote it, so the resting state is no inflation tax at
+all). The honest cost is real: a visible inflation tax is a *resisted* inflation tax, so you trade the
+frictionless efficacy Italy enjoyed for consent and legitimacy — a trade you can only afford at
+community scale, where consent is actually reachable. This is the concrete meaning of the currency's
+Austrian accent: not sound-money piety, but the rule that *the inflation tax must be opt-in and
+visible, never the silent default* — "never again the invisible lira," turned into architecture.
 
 One inheritance worth claiming. Because the mint lands *directly* — in the treasury, then in the hands
 of the people doing community work — it sidesteps the failure that dogged the post-crisis central banks:
@@ -239,6 +267,7 @@ A few ways communities bootstrap it (any mix works):
 
 - Pay the people doing community work in the currency, and promise to accept it back in your own
   business.
+- Accept it for the community's taxes and dues: whoever owes them has a reason to hold it.
 - Extend a little credit or a gift to a promising newcomer so they can start transacting.
 - Build or buy something the community needs with your own effort, and offer it for the currency.
 - Start tiny — 5 to 10 people settling real exchanges — and grow by invitation.
@@ -262,14 +291,44 @@ day, and payments count their deadline in days rather than blocks — so it is a
 daily-commerce one: the fallback that lets a community keep its books no matter what the network is (or
 isn't) doing.
 
+**The carrier.** The banks carry the messages themselves. Each bank's engine exports a *bundle*: a
+text file of every message it would send to the others, each signed on its own. A courier takes the
+bundles to every other bank, on a USB stick, by email, by radio or on foot, and each bank imports
+what it receives. Whoever carries a bundle can lose it or delay it, but cannot change a message
+without the change being refused. A bank that has fallen far behind takes a carried *checkpoint*
+instead: the committed state, which proves itself by its ⅔ signatures. And a customer who is cut
+off can sign a payment as text and hand it to the next courier.
+
+**The way in: the slow-down switch.** Changing the window is itself a ⅔ vote, and a vote needs a
+block, which needs the very network that has gone. So each bank also has a manual switch in its own
+config, `minimumStepTimeoutMs`, which makes its node wait longer for each round, long enough for the
+courier. The banks holding more than ⅔ of the power agree out of band, by phone, by radio or in
+person, to turn it on, and each restarts its node. When the link is back, they turn it off. It
+cannot fork the chain or move money: no rule reads the clock, so a longer wait only makes a node
+slower to give up on a round. The governed window stays the way to set a slow tempo for good; the
+switch is the way in when the network cannot carry the vote.
+
+**A second path.** Where the direct links between banks are cut but their public websites still
+get through, the banks' nodes fetch each other's newest messages from those websites, on their own.
+
+**The honest limit.** A payment counts only in the block it names, at most 64 blocks ahead. In
+pigeon mode that is many carries away. But if one area is cut off while the rest of the network runs
+at full speed, a payment carried out of it expires in about a minute when the chain is busy, or
+about five hours when it idles. Pigeon mode keeps a whole community's books when the network fails;
+it does not let one cut-off village keep paying into a network that runs on without it.
+
+The steps, for the banks' operators, are in
+[operating-a-network.md](operating-a-network.md#when-the-network-splits).
+
 ## The levers, at a glance
 
 | lever | who controls it | effect on supply |
 |---|---|---|
 | genesis balances | whoever writes the genesis file | sets the starting supply |
-| transaction fee | governed, > ⅔ vote | burns each payment — the deflation dial |
+| transaction fee | governed, > ⅔ vote | burns each payment; set to the cost of processing one, it prices the network's work and is not a policy lever |
 | new-key fee | governed, > ⅔ vote | burns each registration, key change and bank change |
 | ⅔ name action (the treasury tap) | governed, > ⅔ vote | the **only** way to mint — creates supply out of nothing (or reduces a balance) |
+| taxes | the community, outside the ledger | none: paid into the treasury as ordinary payments; with the mint they pay the public workers, and their ratio to it is the policy |
 | caps (largest payment, largest balance) | governed, > ⅔ vote | none directly; they bound what one payment moves and one name holds |
 | the freeze | the holder, a double-sign, or a > ⅔ vote | none: it stops a name's money moving until the ⅔ decide |
 | delegation | each account holder | in dynamic mode, decides who holds the votes above; in static mode, none (the genesis fixes the powers) |
@@ -280,7 +339,10 @@ isn't) doing.
 - Keep a written convention for when a ⅔ name action that mints is acceptable.
 - In dynamic mode, watch delegated-stake concentration — no bank should quietly approach a ⅓ veto or
   a ⅔ majority.
-- Review the fee against how fast supply is burning, and adjust by vote if it drifts.
+- Publish the treasury's accounts: taxes in, mints in, public pay out (the banks' included), and so
+  the ratio of taxes to minting.
+- Review the fee against what it costs the banks to process a payment, and adjust it by vote when it
+  drifts.
 - Remember the guarantee the code gives you: **no minority can create money, and no payment can.**
 
 ## At national scale: caveats, and the smells of misuse
@@ -348,7 +410,8 @@ instrument is being turned against the people it was meant to serve:
   can freeze any name; neither moves money. Moving the money is a separate ⅔ name action, whose votes
   are collected off the network; announce it once it has enacted.)
 - **The fee is weaponised** — the transaction fee is set punitively to tax or exclude particular people
-  or activity, rather than tuned as honest monetary policy.
+  or activity, rather than at the cost of processing a payment. A fee far above that cost is a tax by
+  the back door.
 - **Exit is blocked** — holding or trading alternative currencies is forbidden and there is no way to
   cash out. A currency that traps you is relying on the trap, not on being good.
 

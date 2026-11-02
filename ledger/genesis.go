@@ -18,6 +18,7 @@ import (
 // reads it and ValidateGenesis checks it.
 type Genesis struct {
 	NetworkName        string             `json:"networkName"`        // the readable half of the network id; a name
+	GossipPort         int                `json:"gossipPort"`         // the one port every validator gossips on, at each of its IP addresses
 	Parameters         LedgerParameters   `json:"parameters"`         // the genesis parameters, every one given
 	Validators         []GenesisValidator `json:"validators"`         // static mode: the seated names and their powers
 	ValidatorThreshold string             `json:"validatorThreshold"` // dynamic mode: the stake a name needs to be seated
@@ -25,7 +26,7 @@ type Genesis struct {
 }
 
 // GenesisValidator is one seat of a static genesis. It signs with its account's key, and gossips at
-// its account's address.
+// its account's IP addresses, on the network's gossip port.
 type GenesisValidator struct {
 	Name  string `json:"name"`
 	Power int64  `json:"power"`
@@ -33,13 +34,14 @@ type GenesisValidator struct {
 
 // GenesisAccount is one account of the genesis. No genesis account is frozen or has a pending change.
 type GenesisAccount struct {
-	Name        string `json:"name"`
-	PublicKey   string `json:"publicKey"`
-	Amount      string `json:"amount"`   // the balance; zero is allowed
-	Bank        string `json:"bank"`     // the bank of record: "" for none, or a name the genesis seats
-	Delegate    string `json:"delegate"` // the name this balance backs as stake; "" for none
-	Description string `json:"description"`
-	Address     string `json:"address"` // the gossip URL a validator publishes (peer DNS)
+	Name          string   `json:"name"`
+	PublicKey     string   `json:"publicKey"`
+	Amount        string   `json:"amount"`   // the balance; zero is allowed
+	Bank          string   `json:"bank"`     // the bank of record: "" for none, or a name the genesis seats
+	Delegate      string   `json:"delegate"` // the name this balance backs as stake; "" for none
+	Description   string   `json:"description"`
+	PublicAddress string   `json:"publicAddress"` // the name's public face: "" or CanonicalAddress
+	IPAddresses   []string `json:"ipAddresses"`   // at most MaxIPAddresses, each CanonicalIPAddress; a validator's are its gossip addresses (peer DNS)
 }
 
 // genesisParameterNames are the keys of the genesis parameters. The file must give every one: a
@@ -93,8 +95,10 @@ func ParseGenesis(data []byte) (Genesis, error) {
 // accounts in name order, the parameters, governance sequence 0 and height 0. Each refusal names the
 // field to fix. The genesis must be a state the ledger itself could reach: one account per name and
 // one name per key, each in its one spelling (a key shared by two names would let its holder sign as
-// both), balances within the cap, delegates and banks that exist, banks that are seated, and
-// parameters a vote could have set.
+// both), balances within the cap, public addresses and IP addresses as an update could set them
+// (CanonicalAddress, CanonicalIPAddress), delegates and banks that exist, banks that are seated, and
+// parameters a vote could have set. The gossip port is a port: it has no default, as no parameter has
+// one, and 8070 is the usual choice: clear of the operator port's 8080 and the wallet's 8090.
 func ValidateGenesis(genesis Genesis) (Chain, LedgerState, error) {
 	fail := func(format string, arguments ...any) (Chain, LedgerState, error) {
 		return Chain{}, LedgerState{}, fmt.Errorf("genesis: "+format, arguments...)
@@ -102,6 +106,9 @@ func ValidateGenesis(genesis Genesis) (Chain, LedgerState, error) {
 	const nameRule = "1 to 32 lowercase letters, digits and hyphens, starting and ending with a letter or a digit"
 	if !CanonicalName(genesis.NetworkName) {
 		return fail("networkName %q is not a name: %s", genesis.NetworkName, nameRule)
+	}
+	if genesis.GossipPort < 1 || genesis.GossipPort > 65535 {
+		return fail("gossipPort %d is not a port from 1 to 65535; every validator gossips on it, usually 8070", genesis.GossipPort)
 	}
 
 	accounts := make([]Account, 0, len(genesis.Accounts))
@@ -114,10 +121,12 @@ func ValidateGenesis(genesis Genesis) (Chain, LedgerState, error) {
 			return fail("accounts: the name %q is given twice", account.Name)
 		}
 		names[account.Name] = true
-		// Only the canonical spelling: signatures verify under no other, and keys are compared as
-		// strings, so another spelling of a key would pass for a second key.
-		if !signing.ValidPublicKeyBase64(account.PublicKey) {
-			return fail("accounts: the publicKey of %q is not an ML-DSA-65 key in canonical base64 (%d characters)", account.Name, signing.PublicKeyBase64Length)
+		// Only a key the scheme accepts, in its canonical spelling: signatures verify under no other
+		// spelling, and keys are compared as strings, so another spelling of a key would pass for a
+		// second key.
+		if err := signing.ValidatePublicKeyBase64(signing.NetworkScheme(), account.PublicKey); err != nil {
+			return fail("accounts: the publicKey of %q is not a key of the network's scheme, %s: %v",
+				account.Name, signing.NetworkScheme().Name(), err)
 		}
 		if keys[account.PublicKey] {
 			return fail("accounts: the publicKey of %q is another account's too", account.Name)
@@ -127,8 +136,14 @@ func ValidateGenesis(genesis Genesis) (Chain, LedgerState, error) {
 		if err != nil {
 			return fail("accounts: the amount %q of %q: %v", account.Amount, account.Name, err)
 		}
+		if account.PublicAddress != "" && !CanonicalAddress(account.PublicAddress) {
+			return fail("accounts: the public address %q of %q is not an address: %s", account.PublicAddress, account.Name, addressRule)
+		}
+		if err := ipAddressesError(account.IPAddresses); err != nil {
+			return fail("accounts: the IP addresses of %q: %v", account.Name, err)
+		}
 		accounts = append(accounts, Account{Name: account.Name, PublicKey: account.PublicKey, Amount: amount, Bank: account.Bank,
-			Delegate: account.Delegate, Description: account.Description, Address: account.Address})
+			Delegate: account.Delegate, Description: account.Description, PublicAddress: account.PublicAddress, IPAddresses: account.IPAddresses})
 	}
 	slices.SortFunc(accounts, func(first, second Account) int { return strings.Compare(first.Name, second.Name) })
 	for _, account := range accounts {
@@ -189,7 +204,7 @@ func ValidateGenesis(genesis Genesis) (Chain, LedgerState, error) {
 			"neither timing may exceed %d ms (one day); maxPeers 0..%d; maxMessageBytes 0 or %d..%d; "+
 			"newKeyFee, maxPaymentAmount and maxAccountBalance above 0; changeDelayBlocks 1..%d; retainBlocks %d..%d",
 			AssumedGossipHopMs, len(validators.Validators()), parameters.MaxPeers, MaxTimingMs, MaxPeersLimit,
-			MinMessageBytes, MaxMessageBytesLimit, MaxChangeDelayBlocks, MinRetainBlocks, MaxRetainBlocks)
+			MinMessageBytes(), MaxMessageBytesLimit, MaxChangeDelayBlocks, MinRetainBlocks, MaxRetainBlocks)
 	}
 	for _, account := range accounts {
 		if account.Amount.Cmp(genesis.Parameters.MaxAccountBalance) > 0 {
@@ -202,22 +217,23 @@ func ValidateGenesis(genesis Genesis) (Chain, LedgerState, error) {
 		}
 	}
 
-	genesisHash := GenesisHash(genesis.NetworkName, state, validatorRule)
-	chain := Chain{Scheme: signing.MLDSA65{}, NetworkID: NetworkID(genesis.NetworkName, genesisHash), GenesisHash: genesisHash, ValidatorRule: validatorRule}
+	genesisHash := GenesisHash(genesis.NetworkName, genesis.GossipPort, state, validatorRule)
+	chain := Chain{Scheme: signing.NetworkScheme(), NetworkID: NetworkID(genesis.NetworkName, genesisHash), GenesisHash: genesisHash,
+		GossipPort: genesis.GossipPort, ValidatorRule: validatorRule}
 	return chain, state, nil
 }
 
-// GenesisHash is the hash of a network's genesis (spec 2.3): the network's name, the digest of its
-// genesis state (the accounts, the parameters, the governance sequence and the height), and the rule
-// that seats its validators. Block 1 builds on it, and the effective network id that every signature
-// binds is made from it (NetworkID). So a re-genesis that changes anything is another network: the old
-// payments and certificates do not verify on it (E20).
+// GenesisHash is the hash of a network's genesis (spec 2.3): the network's name, its gossip port, the
+// digest of its genesis state (the accounts, the parameters, the governance sequence and the height),
+// and the rule that seats its validators. Block 1 builds on it, and the effective network id that
+// every signature binds is made from it (NetworkID). So a re-genesis that changes anything is another
+// network: the old payments and certificates do not verify on it (E20).
 //
-// The rule is written as "static", then each static validator's name and power in ascending byte order
-// of name, or as "dynamic" and the threshold.
-func GenesisHash(networkName string, genesisState LedgerState, validatorRule ValidatorRule) [32]byte {
+// The port is written in decimal. The rule is written as "static", then each static validator's name
+// and power in ascending byte order of name, or as "dynamic" and the threshold.
+func GenesisHash(networkName string, gossipPort int, genesisState LedgerState, validatorRule ValidatorRule) [32]byte {
 	stateDigest := genesisState.Digest()
-	fields := [][]byte{[]byte("go-ledger genesis v2"), []byte(networkName), stateDigest[:]}
+	fields := [][]byte{[]byte("go-ledger genesis v2"), []byte(networkName), []byte(strconv.Itoa(gossipPort)), stateDigest[:]}
 	if len(validatorRule.StaticValidators) > 0 {
 		fields = append(fields, []byte("static"))
 		byName := func(first, second StaticValidator) int { return strings.Compare(first.Name, second.Name) }

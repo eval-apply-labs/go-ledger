@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -38,7 +39,7 @@ func TestWalletFindsItsNameByKey(t *testing.T) {
 	if _, _, err := wallet.Send("shop", "1"); err == nil || !strings.Contains(err.Error(), "not the key of any name") {
 		t.Errorf("a wallet holding no name paid: %v", err)
 	}
-	if _, err := wallet.UpdateAccount("hello", "", ""); err == nil || !strings.Contains(err.Error(), "not the key of any name") {
+	if _, err := wallet.UpdateAccount("hello", "", "", ""); err == nil || !strings.Contains(err.Error(), "not the key of any name") {
 		t.Errorf("a wallet holding no name sent an update: %v", err)
 	}
 	if posts := testNode.posted(); len(posts) != 0 {
@@ -78,7 +79,7 @@ func TestWalletPaysByName(t *testing.T) {
 	if posts := testNode.posted(); len(posts) != 1 || posts[0].path != "/hdls/pay" || json.Unmarshal(posts[0].body, &payment) != nil {
 		t.Fatalf("want one payment sent to /hdls/pay, got %d request(s)", len(posts))
 	}
-	if payment.From != "bob" || payment.To != nameOf(shop) || !ledger.VerifyPayment(signing.MLDSA65{}, testNetworkID, wallet.PublicKey(), payment) {
+	if payment.From != "bob" || payment.To != nameOf(shop) || !ledger.VerifyPayment(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(), payment) {
 		t.Errorf("the payment goes from %q to %q, want from bob to %s, signed under the wallet's key", payment.From, payment.To, nameOf(shop))
 	}
 }
@@ -265,10 +266,10 @@ func TestAccountUpdatesNameBlocksOfTheirOwn(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	testNode.setState(nil, ledger.Account{Name: "kay", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
-	if _, err := wallet.UpdateAccount("the corner shop", "", ""); err != nil {
+	if _, err := wallet.UpdateAccount("the corner shop", "", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := wallet.UpdateAccount("", "kay", ""); err != nil {
+	if _, err := wallet.UpdateAccount("", "kay", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var description, delegation ledger.AccountUpdate
@@ -280,6 +281,86 @@ func TestAccountUpdatesNameBlocksOfTheirOwn(t *testing.T) {
 	}
 	if paymentBlockID := nextBlockID(t, wallet, 10); paymentBlockID <= delegation.BlockID {
 		t.Fatalf("a payment after the updates names block %d, not past theirs (%d)", paymentBlockID, delegation.BlockID)
+	}
+}
+
+// A payment saved as text takes a block of the payment counter, as a sent payment does (spec §7.8):
+// two saves, and a save and a send, never name one block, so the wallet never signs two payments for one
+// block. The text is a bundle of the one signed payment, for the pinned network, and the saves send
+// nothing.
+func TestSavedPaymentsNameBlocksOfTheirOwn(t *testing.T) {
+	testNode := newGovernanceNode(t)
+	wallet := newTestWallet(t, testNode.baseURL)
+	shop := testNodeSigner(t)
+	testNode.setState(nil, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(50, 1)}, accountOf(shop, "0"))
+	checkpoint := verified(t, wallet)
+	first, err := wallet.SavePayment(checkpoint, nameOf(shop), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := wallet.SavePayment(checkpoint, nameOf(shop), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.BlockID != checkpoint.State.Height+1+wallet.lookahead || second.BlockID != first.BlockID+1 {
+		t.Errorf("two saves name blocks %d and %d, want %d and the next", first.BlockID, second.BlockID, checkpoint.State.Height+1+wallet.lookahead)
+	}
+	if posts := testNode.posted(); len(posts) != 0 {
+		t.Fatalf("saving payments sent %d request(s)", len(posts))
+	}
+	if _, _, err := wallet.Send(nameOf(shop), "1"); err != nil {
+		t.Fatal(err)
+	}
+	var sent ledger.Payment
+	if posts := testNode.posted(); len(posts) != 1 || json.Unmarshal(posts[0].body, &sent) != nil || sent.BlockID != second.BlockID+1 {
+		t.Errorf("a payment sent after the saves names block %d, want %d", sent.BlockID, second.BlockID+1)
+	}
+
+	lines := strings.Split(strings.TrimSuffix(first.Text, "\n"), "\n")
+	var header node.BundleHeader
+	var line node.BundleLine
+	var saved ledger.Payment
+	if len(lines) != 2 || json.Unmarshal([]byte(lines[0]), &header) != nil || json.Unmarshal([]byte(lines[1]), &line) != nil || json.Unmarshal(line.Body, &saved) != nil {
+		t.Fatalf("the saved text is not a bundle of one message: %q", first.Text)
+	}
+	if header != (node.BundleHeader{Bundle: node.BundleVersion, NetworkID: testNetworkID, From: "alice", HeightInProgress: checkpoint.State.Height + 1}) || line.Type != "payment" {
+		t.Errorf("the bundle's header is %+v and its message a %q", header, line.Type)
+	}
+	if saved.From != "alice" || saved.To != nameOf(shop) || saved.BlockID != first.BlockID || !ledger.VerifyPayment(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(), saved) {
+		t.Errorf("the saved payment goes from %q to %q for block %d; want alice's to %s for block %d, signed under the wallet's key", saved.From, saved.To, saved.BlockID, nameOf(shop), first.BlockID)
+	}
+}
+
+// "Sign and save as text" follows post, redirect, get: the POST signs the payment, keeps it, and
+// redirects to GET /send, which shows the payment saved last. So a reload, or Back and Forward, repeats
+// the GET and signs nothing: the payment counter does not move, and the page shows the same text. With
+// nothing saved, GET /send goes to the main page.
+func TestSaveStepSignsOnceWhateverTheReloads(t *testing.T) {
+	testNode := newGovernanceNode(t)
+	wallet := newTestWallet(t, testNode.baseURL)
+	shop := testNodeSigner(t)
+	testNode.setState(nil, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(50, 1)}, accountOf(shop, "0"))
+	nothingSaved := httptest.NewRecorder()
+	routes(wallet, "127.0.0.1:8090").ServeHTTP(nothingSaved, httptest.NewRequest("GET", "http://127.0.0.1:8090/send", nil))
+	if nothingSaved.Code != http.StatusSeeOther || nothingSaved.Header().Get("Location") != "/" {
+		t.Errorf("GET /send with nothing saved: status %d to %q, want a redirect to /", nothingSaved.Code, nothingSaved.Header().Get("Location"))
+	}
+
+	saved := submitForm(wallet, "/send", url.Values{"step": {"save"}, "to": {nameOf(shop)}, "amount": {"10"}})
+	if saved.Code != http.StatusSeeOther || saved.Header().Get("Location") != "/send" {
+		t.Fatalf("the save step: status %d to %q (%q), want a redirect to /send", saved.Code, saved.Header().Get("Location"), redirectError(saved))
+	}
+	wallet.mutex.Lock()
+	counter := wallet.saved.LastPaymentBlockID
+	wallet.mutex.Unlock()
+	first, reload := page(t, wallet, "/send"), page(t, wallet, "/send")
+	if want := fmt.Sprintf("pay <strong>10</strong> to <strong>%s</strong>, for block %d", nameOf(shop), counter); !strings.Contains(first, want) || first != reload {
+		t.Errorf("GET /send does not show the payment saved, for block %d, the same on a reload", counter)
+	}
+	wallet.mutex.Lock()
+	defer wallet.mutex.Unlock()
+	if wallet.saved.LastPaymentBlockID != counter || len(testNode.posted()) != 0 {
+		t.Errorf("showing the saved payment again moved the payment counter from %d to %d, or sent something", counter, wallet.saved.LastPaymentBlockID)
 	}
 }
 
@@ -315,7 +396,7 @@ func TestAccountFormDelegates(t *testing.T) {
 	if len(posts) != 2 || json.Unmarshal(posts[0].body, &update) != nil || json.Unmarshal(posts[1].body, &cleared) != nil {
 		t.Fatalf("want two account updates sent, got %d request(s)", len(posts))
 	}
-	if update.Name != "kay" || update.Delegate != "kay" || !ledger.VerifyAccountUpdate(signing.MLDSA65{}, testNetworkID, wallet.PublicKey(), update) {
+	if update.Name != "kay" || update.Delegate != "kay" || !ledger.VerifyAccountUpdate(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(), update) {
 		t.Errorf("the update of %q delegates to %q, want kay's to kay, signed under the wallet's key", update.Name, update.Delegate)
 	}
 	if cleared.Delegate != ledger.ClearField {
@@ -631,7 +712,7 @@ func TestFreezeButtonSubmitsAFreeze(t *testing.T) {
 		t.Fatalf("want one freeze sent to /hdls/name-request, got %d request(s)", len(posts))
 	}
 	if freeze.Kind != ledger.FreezeKind || freeze.Name != "alice" || freeze.Requestor != "alice" || freeze.BlockID != 13 ||
-		ledger.NameRequestShapeError(freeze) != nil || !ledger.VerifyNameRequest(signing.MLDSA65{}, testNetworkID, wallet.PublicKey(), "", freeze) {
+		ledger.NameRequestShapeError(freeze) != nil || !ledger.VerifyNameRequest(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(), "", freeze) {
 		t.Errorf("the freeze sent is %+v, want alice's own freeze for block 13 (height 10 + lookahead 3), signed under the wallet's key", freeze)
 	}
 	if body := page(t, wallet, "/"); !strings.Contains(body, "Your freeze of alice was sent for block 13.") {
@@ -732,7 +813,7 @@ func TestFreezeWorksWhenNoStateVerifies(t *testing.T) {
 	if posts := testNode.posted(); len(posts) != 1 || json.Unmarshal(posts[0].body, &freeze) != nil {
 		t.Fatalf("want one freeze sent, got %d request(s)", len(posts))
 	}
-	if freeze.Name != "alice" || !ledger.VerifyNameRequest(signing.MLDSA65{}, testNetworkID, wallet.PublicKey(), "", freeze) {
+	if freeze.Name != "alice" || !ledger.VerifyNameRequest(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(), "", freeze) {
 		t.Errorf("the freeze sent is of %q, want alice's, signed under the wallet's key for the pinned network", freeze.Name)
 	}
 	if _, err := stranger.Freeze(); err == nil || len(testNode.posted()) != 1 {
@@ -831,7 +912,7 @@ func TestAccountUpdateRunsTheLedgersRules(t *testing.T) {
 	closed := ledger.Account{Name: "closed", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: new(big.Rat), Frozen: true}
 	refused := func(description, delegate, reason string) {
 		t.Helper()
-		if _, err := wallet.UpdateAccount(description, delegate, ""); err == nil || !strings.Contains(err.Error(), reason) {
+		if _, err := wallet.UpdateAccount(description, delegate, "", ""); err == nil || !strings.Contains(err.Error(), reason) {
 			t.Errorf("an update (a %d-byte description, delegate %q): %v, want a refusal saying %q", len(description), delegate, err, reason)
 		}
 	}
@@ -848,7 +929,7 @@ func TestAccountUpdateRunsTheLedgersRules(t *testing.T) {
 
 	kay.Frozen = false
 	testNode.setState(nil, kay, closed)
-	if update, err := wallet.UpdateAccount("hello", "", ""); err != nil || update.BlockID != 13 {
+	if update, err := wallet.UpdateAccount("hello", "", "", ""); err != nil || update.BlockID != 13 {
 		t.Errorf("the update after the refusals names block %d (err %v), want 13: a refusal used up a block", update.BlockID, err)
 	}
 }
@@ -866,7 +947,7 @@ func TestWalletRefusesNonCanonicalNames(t *testing.T) {
 			t.Errorf("a payment to %q passed review", refused)
 		}
 		if refused != "" && refused != ledger.ClearField {
-			if _, err := wallet.UpdateAccount("", refused, ""); err == nil {
+			if _, err := wallet.UpdateAccount("", refused, "", ""); err == nil {
 				t.Errorf("a delegation to %q was signed", refused)
 			}
 		}
@@ -896,14 +977,46 @@ func TestWalletRefusesNonCanonicalNames(t *testing.T) {
 	}
 }
 
-// The account form takes an address, as well as a description and a delegate (spec 7.3): a validator
-// publishes the address its peers reach it at, and "-" withdraws it.
+// A key a person pastes is taken trimmed, and refused when the network's scheme refuses it, with the
+// scheme's reason: a key cut short says how long a key is.
+func TestTypedKeyGivesTheSchemesReason(t *testing.T) {
+	signer, err := signing.Generate(signing.NetworkScheme(), testNetworkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := signer.PublicKeyBase64()
+	if typed, err := typedKey(" " + key + "\n"); err != nil || typed != key {
+		t.Fatalf("the pasted key was read as %.20q… (%v), want the key", typed, err)
+	}
+	cut, _ := base64.StdEncoding.DecodeString(key[:len(key)-4])
+	reason := signing.NetworkScheme().ValidatePublicKey(cut)
+	if _, err := typedKey(key[:len(key)-4]); err == nil || reason == nil || !strings.Contains(err.Error(), reason.Error()) {
+		t.Errorf("a key cut short was refused with %v, want the scheme's reason, %v", err, reason)
+	}
+}
+
+// The account form takes a public address and IP addresses, as well as a description and a delegate
+// (spec 7.3, §4): a bank publishes its public face, and the IP addresses the other validators send it
+// their messages at, separated by spaces, which replace the whole list; "-" withdraws either. An
+// address in another form than the ledger's (ledger.CanonicalAddress, ledger.CanonicalIPAddress), here
+// with a path or a leading zero, is refused with the reason, and nothing is sent.
 func TestAccountFormTakesAnAddress(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	testNode.setState(nil, ledger.Account{Name: "kay", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
-	for _, address := range []string{"http://10.0.0.2:8080", ledger.ClearField} {
-		if refusal := redirectError(submitForm(wallet, "/update", url.Values{"address": {address}})); refusal != "" {
+	for _, refused := range []struct{ field, value, want string }{
+		{"publicAddress", "https://bank-a.example/", `the public address "https://bank-a.example/" is not an address`},
+		{"ipAddresses", "203.0.113.7 010.0.0.2", `the IP address "010.0.0.2" is not an IP address`},
+	} {
+		if refusal := redirectError(submitForm(wallet, "/update", url.Values{refused.field: {refused.value}})); !strings.Contains(refusal, refused.want) {
+			t.Errorf("the %s %q: %q, want its refusal", refused.field, refused.value, refusal)
+		}
+	}
+	for _, form := range []url.Values{
+		{"publicAddress": {"https://bank-a.example"}, "ipAddresses": {" 203.0.113.7  2001:db8::7 "}},
+		{"publicAddress": {ledger.ClearField}, "ipAddresses": {ledger.ClearField}},
+	} {
+		if refusal := redirectError(submitForm(wallet, "/update", form)); refusal != "" {
 			t.Fatal(refusal)
 		}
 	}
@@ -912,8 +1025,12 @@ func TestAccountFormTakesAnAddress(t *testing.T) {
 	if len(posts) != 2 || json.Unmarshal(posts[0].body, &published) != nil || json.Unmarshal(posts[1].body, &withdrawn) != nil {
 		t.Fatalf("want two account updates sent, got %d request(s)", len(posts))
 	}
-	if published.Address != "http://10.0.0.2:8080" || withdrawn.Address != ledger.ClearField || !ledger.VerifyAccountUpdate(signing.MLDSA65{}, testNetworkID, wallet.PublicKey(), published) {
-		t.Errorf("the updates publish %q and then %q, want the address and then %q, signed under the wallet's key", published.Address, withdrawn.Address, ledger.ClearField)
+	if published.PublicAddress != "https://bank-a.example" || !slices.Equal(published.IPAddresses, []string{"203.0.113.7", "2001:db8::7"}) ||
+		!ledger.VerifyAccountUpdate(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(), published) {
+		t.Errorf("the first update publishes %q and %v, want https://bank-a.example and the two IP addresses, signed under the wallet's key", published.PublicAddress, published.IPAddresses)
+	}
+	if withdrawn.PublicAddress != ledger.ClearField || !slices.Equal(withdrawn.IPAddresses, []string{ledger.ClearField}) {
+		t.Errorf("the second update publishes %q and %v, want %q for both", withdrawn.PublicAddress, withdrawn.IPAddresses, ledger.ClearField)
 	}
 }
 
@@ -974,6 +1091,7 @@ func TestPagesReadTheCheckpointOnce(t *testing.T) {
 		"the requests page":     func() { page(t, wallet, "/requests") },
 		"a payment review":      func() { submitForm(wallet, "/send", url.Values{"to": {"shop"}, "amount": {"1"}}) },
 		"a payment":             func() { submitForm(wallet, "/send", url.Values{"step": {"confirm"}, "to": {"shop"}, "amount": {"1"}}) },
+		"a payment saved":       func() { submitForm(wallet, "/send", url.Values{"step": {"save"}, "to": {"shop"}, "amount": {"1"}}) },
 		"an account update":     func() { submitForm(wallet, "/update", url.Values{"description": {"hello"}}) },
 		"a freeze confirmation": func() { submitForm(wallet, "/freeze", nil) },
 		"a name action draft":   func() { submitForm(wallet, "/admin/reassignment", url.Values{"name": {"shop"}, "amount": {"1"}}) },

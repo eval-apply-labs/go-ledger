@@ -144,7 +144,7 @@ func TestRegistrationNeedsAllThreeSignatures(t *testing.T) {
 // "name-request-new-key". So a signer that sees only the domain knows what it signs, and a requestor's
 // signature for one kind does not verify for another.
 func TestRequestorSignsInTheDomainOfItsKind(t *testing.T) {
-	scheme := signing.MLDSA65{}
+	scheme := signing.NetworkScheme()
 	verifies := func(signature, signerName string, domain signing.Domain, request NameRequest) bool {
 		feeText := FormatAmount(request.Fee)
 		return signing.VerifyBase64(scheme, testNetwork, testSigner(signerName).PublicKeyBase64(), domain, signature,
@@ -181,7 +181,8 @@ func TestRequestorSignsInTheDomainOfItsKind(t *testing.T) {
 
 // The shape check runs first and refuses a request whose fields do not fit its kind: an unknown kind,
 // a name that is not canonical, another requestor outside a registration, a field the kind leaves
-// empty that is set or the reverse, a new key or signature of the wrong length, a block id of 0.
+// empty that is set or the reverse, a new key of the wrong length or in another spelling (one as long
+// as the key used to pass), a signature of the wrong length, a block id of 0.
 func TestNameRequestShapeIsCheckedFirst(t *testing.T) {
 	registration := registrationOf("dave", "alice", "bank-a", "dave-key")
 	freeze := freezeOf("alice", requestBlock)
@@ -192,7 +193,8 @@ func TestNameRequestShapeIsCheckedFirst(t *testing.T) {
 		"an unknown kind":               func(request *NameRequest) { request.Kind = "rename" },
 		"a name in capitals":            func(request *NameRequest) { request.Name = "Dave" },
 		"a bank that is not a name":     func(request *NameRequest) { request.Bank = "-" },
-		"a new key of the wrong length": func(request *NameRequest) { request.NewKey = request.NewKey[:100] },
+		"a new key of the wrong length": func(request *NameRequest) { request.NewKey = request.NewKey[:len(request.NewKey)-4] },
+		"a new key in another spelling": func(request *NameRequest) { request.NewKey = otherSpellingOf(t, request.NewKey) },
 		"a short bank signature":        func(request *NameRequest) { request.BankSignature = request.BankSignature[4:] },
 		"no new key proof":              func(request *NameRequest) { request.NewKeySignature = "" },
 		"block 0":                       func(request *NameRequest) { request.BlockID = 0 },
@@ -411,7 +413,7 @@ func TestSeatedNameCannotFileAChange(t *testing.T) {
 // a seated name's key and bank change only by the ⅔. Here alice files a key change, and stake
 // delegated to her in the meantime seats her before it falls due. The fee stays burned.
 func TestPendingChangeLapsesWhenItsNameIsSeatedAtMaturity(t *testing.T) {
-	chain := Chain{Scheme: signing.MLDSA65{}, NetworkID: testNetwork, ValidatorRule: ValidatorRule{Threshold: rational("50")}}
+	chain := Chain{Scheme: signing.NetworkScheme(), NetworkID: testNetwork, ValidatorRule: ValidatorRule{Threshold: rational("50")}}
 	bankA, bankB, alice := namedAccount("bank-a", "100"), namedAccount("bank-b", "100"), namedAccount("alice", "10")
 	bankA.Delegate, bankB.Delegate, alice.Bank = "bank-a", "bank-b", "bank-a"
 	state := buildLedgerState(requestBlock-1, []Account{bankA, bankB, alice, namedAccount("bob", "10")}, rational("0.1"))
@@ -601,15 +603,15 @@ func TestFeesAddUpToAtMostTheBalance(t *testing.T) {
 	refuses(t, chain, state, requests(pair...), "rules 16, 19")
 }
 
-// verificationCounter is ML-DSA-65 that counts its signature checks.
-type verificationCounter struct { // implements signing.Scheme: MLDSA65's methods, with Verify replaced
-	signing.MLDSA65
+// verificationCounter is the network's scheme, counting its signature checks.
+type verificationCounter struct { // implements signing.Scheme: the network scheme's methods, with Verify replaced
+	signing.Scheme
 	checks *atomic.Int64
 }
 
 func (scheme verificationCounter) Verify(publicKey, message, signature []byte) bool {
 	scheme.checks.Add(1)
-	return scheme.MLDSA65.Verify(publicKey, message, signature)
+	return scheme.Scheme.Verify(publicKey, message, signature)
 }
 
 // ProposeBlock checks an entry's signatures only when the entry is about to go into the block, after
@@ -618,7 +620,7 @@ func (scheme verificationCounter) Verify(publicKey, message, signature []byte) b
 func TestProposeBlockVerifiesOnlyWhatItCarries(t *testing.T) {
 	chain, state := requestFixture()
 	checks := &atomic.Int64{}
-	chain.Scheme = verificationCounter{checks: checks}
+	chain.Scheme = verificationCounter{Scheme: signing.NetworkScheme(), checks: checks}
 	var content BlockContent
 	for later := int64(requestBlock + 1); later < requestBlock+40; later++ { // a full pool for later blocks
 		content.Payments = append(content.Payments, signedPayment("alice", "bob", "1", later))
@@ -683,7 +685,7 @@ func TestNoBlockLeavesTheSetEmpty(t *testing.T) {
 	}
 	refuses(t, chain, state, BlockContent{Reassignment: actionFreeze}, "rule 24")
 
-	dynamic := Chain{Scheme: signing.MLDSA65{}, NetworkID: testNetwork, ValidatorRule: ValidatorRule{Threshold: rational("50")}}
+	dynamic := Chain{Scheme: signing.NetworkScheme(), NetworkID: testNetwork, ValidatorRule: ValidatorRule{Threshold: rational("50")}}
 	founder := namedAccount("founder", "60")
 	founder.Delegate = "founder"
 	dynamicState := buildLedgerState(requestBlock-1, []Account{founder, namedAccount("alice", "10"), namedAccount("bob", "0")}, rational("0.1"))

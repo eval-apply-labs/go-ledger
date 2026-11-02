@@ -5,8 +5,8 @@
 A Byzantine-fault-tolerant ledger in which **names are the accounts**: you register a name at your
 bank, pay people by name, and look names up on-chain. Validators are the banks, each with the
 voting power the genesis gives it (or, in the optional dynamic mode, the stake delegated to it).
-Everything, the validator node and the wallet, builds with `go build`, with **no runtime
-and no third-party dependencies**: Tendermint-style ⅔ commit safety, post-quantum ML-DSA-65
+Everything, the validator node, its public face and the wallet, builds with `go build`, with **no
+runtime and no third-party dependencies**: Tendermint-style ⅔ commit safety, post-quantum ML-DSA-65
 signatures, exact decimal money, ⅔ governance, and a browser wallet, in a codebase small enough to
 read. It descends from the original Hypernode ledger (see [Origins](#origins)).
 
@@ -23,6 +23,23 @@ Ctrl-C stops it.
 
 ![The admin page: the ten parameters in force, a parameter change to draft and sign, and the ⅔ name action](docs/admin.png)
 
+## Try four banks in containers
+
+    make quickstart
+
+This builds the container images, writes a new network of four banks into `deploy/quickstart/`
+(their keys, the genesis and their node configs), and starts it with Docker Compose: each bank is
+an engine and a fetcher, its public face. The public faces are on this machine at
+`http://127.0.0.1:18081` to `http://127.0.0.1:18084`. To pay as `alice`, one of the two funded
+customers the quickstart makes:
+
+    make build
+    bin/go_ledger_ui -node http://127.0.0.1:18081 -network quickstart -wallet deploy/quickstart/alice.wallet.json -listen 127.0.0.1:8090
+
+and open `http://127.0.0.1:8090`. `make quickstart-clean` removes the network, its chain and its
+keys. Podman, the ports, and what a wallet on this machine cannot check are in
+[the runbook](docs/operating-a-network.md#four-banks-on-one-machine-the-quickstart).
+
 ## Design goals
 
 - **No JVM, no dependencies.** One static binary per command (`make build` sets `CGO_ENABLED=0`),
@@ -38,7 +55,7 @@ Ctrl-C stops it.
 A runnable, race-free, multi-node ledger, the Go port of the Java Hypernode engine, hardened by
 several review rounds: the 2026-07 security audit and a release-candidate pass
 ([`findings.md`](findings.md)), and the post-eMudhra review of 2026-10-27
-([`findings_20261027.md`](findings_20261027.md)). Its fixes came in two phases. Phase 1 fixed what
+([`findings_20261027.md`](findings_20261027.md)). Its fixes came in phases. Phase 1 fixed what
 needed no new genesis. Phase 2, built by 2026-10-31, is one new genesis:
 
 - **ML-DSA-65** is the only signature scheme, and the network id is bound to the genesis.
@@ -55,25 +72,50 @@ needed no new genesis. Phase 2, built by 2026-10-31, is one new genesis:
 - **Each block hash covers its body, its signing set and a random nonce**, and proposals sign it.
 - **The signature record** keeps who signed each block for `retainBlocks` heights, and every
   governance certificate and double-sign proof for life. It never keeps payments.
-- **The idle chain**: a height starts only when there is work, so a network nobody uses commits,
-  signs and records nothing after block 1.
+- **The idle chain**: a height starts at once when there is work, and otherwise after a five-minute
+  heartbeat, so a network nobody uses commits, signs and records one empty block about every five
+  minutes, and a wallet can tell an idle chain from a stalled one.
 - **The fork-binding pin** binds a payment to the full state digest its block builds on.
 
 The Phase 2 build record, its spec and the code notes are in [`review/`](review/README.md); start
-with [`review/phase2_progress.md`](review/phase2_progress.md). Where things stand on 2026-10-31:
-Phase 2 and the fixes from its final read-through are built and checked, and they await the
-owner's review before they are pushed. What the owner decided, and what is still a builder default,
-is in the spec's [§12](review/phase2_spec.md#12-open-questions-for-the-owner); what is left to do is in [`TODO.md`](TODO.md). The words and the finding ids
-(A1, C1, E1, Q1, R1 and the rest) are explained in [`docs/glossary.md`](docs/glossary.md).
+with [`review/phase2_progress.md`](review/phase2_progress.md). Phase 2 and the fixes from its final
+read-through were built and checked by 2026-10-31. What the owner decided, and what is still a
+builder default, is in the spec's [§12](review/phase2_spec.md#12-open-questions-for-the-owner).
 
-Phase 3, the split into four containers, one per docs area (a signer, an engine, an edge proxy and
-the wallet), is planned, not built (see [`TODO.md`](TODO.md)). The real gate before value rides on
-it is an independent **human** audit: an AI review is an input, not a substitute. Why the project
-stays small: [`docs/why-small-and-auditable.md`](docs/why-small-and-auditable.md).
+Phase 3, built on 2026-11-01, is another new genesis. It splits the deployment, and keeps the
+network going when the internet does not:
+
+- **Two ports.** A bank's engine serves the other validators on a gossip port, behind an allow
+  list of the validators' IP addresses, which it reads from the chain. It serves the bank's own
+  machines on an operator port, which is never published.
+- **The public face.** The engine writes the files the public reads: the status, the checkpoint,
+  the accounts, governance, a record per name and the public bundle. A small fetcher
+  (`cmd/fetcher`) serves them, with the signature record, behind a CDN, and passes customers'
+  payments, updates and name requests on to the engine.
+- **Names as a name service.** Every name may publish a public address and up to 4 IP addresses,
+  which its own key signs. A validator's IP addresses are where gossip goes, and where it may come
+  from.
+- **Pigeon mode.** When the network is cut, the banks carry signed messages by hand in bundles,
+  carry checkpoints to banks that fell behind, and turn on a slow-down switch that lets each round
+  wait for the carrier. Where direct gossip is blocked but the public faces still get through, the
+  engines pull each other's public bundles on their own.
+- **Containers and the quickstart.** Images for the engine and the fetcher, and for the wallet, and
+  a compose file that runs four banks on one machine (`make quickstart`).
+
+The fourth container, the signer, which takes the key off the networked machine, is still to come.
+The Phase 3 spec is [`review/phase3_spec.md`](review/phase3_spec.md), and its build record
+[`review/phase3_progress.md`](review/phase3_progress.md). What is left to do is in
+[`TODO.md`](TODO.md). The words and the finding ids (A1, C1, E1, Q1, R1 and the rest) are explained
+in [`docs/glossary.md`](docs/glossary.md).
+
+The real gate before value rides on it is an independent **human** audit: an AI review is an input,
+not a substitute. Why the project stays small:
+[`docs/why-small-and-auditable.md`](docs/why-small-and-auditable.md).
 
 The docs are in [`docs/`](docs/), in four areas: signature, node, API/CDN and UI. Just as important
 as the code is [**managing the currency**](docs/managing-the-currency.md): the monetary policy of a
-burn-and-mint community currency, and its honest limits.
+community currency, where taxes and minting pay the public sector and the fee only prices the
+network's work, and its honest limits.
 
 ## Layout
 
@@ -84,13 +126,17 @@ burn-and-mint community currency, and its honest limits.
 | `consensus/` | node | the validator set, votes, the commit, signed proposals, double-sign evidence, the round driver |
 | `ledger/` | node | the state, the messages, the ⅔ certificates, the genesis, `ProposeBlock` and `ApplyBlock`; no I/O |
 | `node/` | node, API/CDN | the running node: event loop, pools, snapshot and sign log, catch-up, the signature record; its HTTP routes, relay and peers |
-| `cmd/server/` | API/CDN | runs one node from a config file and a genesis file |
+| `cmd/server/` | API/CDN | runs one node, the engine, from a config file and a genesis file: the gossip port and the operator port |
+| `cmd/fetcher/` | API/CDN | a bank's public face, the origin of its CDN: serves the files the engine writes, and passes customers' messages on |
 | `cmd/demo/` | API/CDN | runs one node and one wallet on this machine |
+| `cmd/quickstart/` | API/CDN | writes a network of four banks for `deploy/compose.yaml` |
+| `deploy/` | API/CDN | the container images and the quickstart's compose file |
 | `ui/` | UI | the wallet, its own Go module |
 | `docs/` | | the docs, in the four areas |
 
 The imports run `signing` → `consensus` → `ledger` → `node` → `cmd/server`, `cmd/demo` and `ui`;
-`cmd/keygen` imports only `signing`. To read the code in that order, one step at a time with each
+`cmd/keygen` imports only `signing`, `cmd/fetcher` only `ledger`, and `cmd/quickstart` only `ledger`
+and `signing`. To read the code in that order, one step at a time with each
 step's tests, follow [`docs/reading-the-code.md`](docs/reading-the-code.md).
 
 ## Audit invariants enforced in `ledger`
@@ -135,6 +181,23 @@ id change, and frozen marks and pending changes do not carry over. It is a plann
 and a decision the community owns (see
 [`docs/operating-a-network.md`](docs/operating-a-network.md#starting-a-new-network)).
 
+In the code, the scheme is the three files `signing/mldsa65*.go`: the scheme, its tests and its build
+guard. Its type is unexported, so no other package can name it; the rest of the code reaches it only
+through the `signing.Scheme` interface and `signing.NetworkScheme()`, and the message-size floor and
+default follow its signature size. To change the scheme, replace those files with ones that implement
+`Scheme` and define `NetworkScheme`, and update the two comments in `scheme.go` that name the
+implementations. `Scheme`'s comment says what a scheme must do, and the signing tests check the new one
+against it. Among those duties, `ValidatePublicKey` says which public keys the scheme accepts: the
+right size, decodable, and not degenerate, as the scheme defines it (a second encoding of a key, or
+the weak keys it refuses: for ML-DSA-65 the most degenerate ones, a sanity check whose limits
+[docs/signature.md](docs/signature.md) states). Every key that
+enters, from the genesis, a node's config, the wallet or a request, passes it, and `Verify` refuses
+every key it refuses. Ed25519, ML-DSA-87 and a stand-in with 20000-byte signatures, each swapped in for
+the three files with nothing else changed, passed the whole suite; the Ed25519 file refuses Ed25519's
+weak and non-canonical keys, with tests of its own (`review/_evidence_phase2/scheme-drop-in/`).
+A scheme much slower, or with keys and signatures much larger, would need its timing and the byte
+bounds listed in `Scheme`'s comment rechecked.
+
 ## Consensus
 
 The audit's central consensus finding (A1, A4): finalising on "more than ½ of all stake" in one
@@ -162,7 +225,8 @@ See [`docs/consensus.md`](docs/consensus.md) and [`docs/architecture.md`](docs/a
     go test -short ./...            # fast: skips the chaos scenarios, runs fewer simulator seeds
     go test -race ./...             # full, as CI runs it
     go test -C ui -race ./...       # the wallet module
-    make build                      # the four programs into bin/, static (CGO_ENABLED=0)
+    make build                      # the five programs into bin/, static (CGO_ENABLED=0)
+    make images                     # the container images (CONTAINER=podman for Podman)
 
 Requires Go 1.27 or later. A chaos run prints a `GOLEDGER_CHAOS_SEED` that replays its fault
 schedule; `GOLEDGER_CHAOS_SOAK_SECONDS` lengthens the random soak, `GOLEDGER_SIM_SEED_FACTOR` scales

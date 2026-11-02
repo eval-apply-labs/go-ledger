@@ -248,7 +248,7 @@ func returnsPromptly(t *testing.T, call func() []Action) []Action {
 
 // brokenScheme is a test scheme whose keys cannot sign. Its private key is only the public key it
 // stands for, so a driver can hold a validator's key and still fail every signature.
-type brokenScheme struct{ signing.MLDSA65 } // implements signing.Scheme: MLDSA65's methods, with ParsePrivateKey replaced
+type brokenScheme struct{ signing.Scheme } // implements signing.Scheme: the network scheme's methods, with ParsePrivateKey replaced
 
 func (brokenScheme) ParsePrivateKey(publicKey []byte) (signing.PrivateKey, error) {
 	return brokenKey(publicKey), nil
@@ -271,7 +271,7 @@ func TestDriverBrokenSignerDropsVoteQuietly(t *testing.T) {
 	signerByName := byName(signers)
 	const height = int64(1)
 	broken := func(signer *signing.Signer) *Driver {
-		brokenSigner, err := signing.NewSigner(brokenScheme{}, network, signer.PublicKey())
+		brokenSigner, err := signing.NewSigner(brokenScheme{signing.NetworkScheme()}, network, signer.PublicKey())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -754,15 +754,15 @@ func TestDriverWithoutSignerNeverSigns(t *testing.T) {
 	}
 }
 
-// countingScheme is ML-DSA-65 that counts its signature checks.
-type countingScheme struct { // implements signing.Scheme: MLDSA65's methods, with Verify replaced
-	signing.MLDSA65
+// countingScheme is the network's scheme, counting its signature checks.
+type countingScheme struct { // implements signing.Scheme: the network scheme's methods, with Verify replaced
+	signing.Scheme
 	checks *int
 }
 
 func (scheme countingScheme) Verify(publicKey, message, signature []byte) bool {
 	*scheme.checks++
-	return scheme.MLDSA65.Verify(publicKey, message, signature)
+	return scheme.Scheme.Verify(publicKey, message, signature)
 }
 
 // The vote set that counts a vote checks its signature, and the driver takes that check's word: a vote
@@ -772,7 +772,7 @@ func TestDriverChecksItsOwnReGossipedVoteOnce(t *testing.T) {
 	const height = int64(1)
 	me := nonProposer(validatorSet, byName(signers), height, 0)
 	checks := 0
-	driver := NewDriver(me, nameOf(me), validatorSet, countingScheme{checks: &checks}, network, height, digest(0x01))
+	driver := NewDriver(me, nameOf(me), validatorSet, countingScheme{Scheme: signing.NetworkScheme(), checks: &checks}, network, height, digest(0x01))
 	driver.Start()
 	driver.ReceiveVote(mustVote(t, me, height, 0, Prevote, digest(0x11)))
 	if checks != 1 || !driver.sentPrevote[0] {

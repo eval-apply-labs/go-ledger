@@ -11,8 +11,8 @@ import (
 // testNetwork is the network id the ledger tests sign for.
 const testNetwork = "testnet"
 
-// testSigners holds the signer of each test account, made on first use: generating an ML-DSA-65 key
-// costs about a millisecond, so the tests share a few. The ledger tests do not run in parallel.
+// testSigners holds the signer of each test account, made on first use: generating a key costs about
+// a millisecond, so the tests share a few. The ledger tests do not run in parallel.
 var testSigners = map[string]*signing.Signer{}
 
 // testSigner returns the signer that holds the key of the test account `name`, the same one each time.
@@ -20,7 +20,7 @@ func testSigner(name string) *signing.Signer {
 	if signer, found := testSigners[name]; found {
 		return signer
 	}
-	signer, err := signing.Generate(signing.MLDSA65{}, testNetwork)
+	signer, err := signing.Generate(signing.NetworkScheme(), testNetwork)
 	if err != nil {
 		panic(err)
 	}
@@ -42,7 +42,7 @@ func seatedAccount() Account {
 	return account
 }
 
-// testChain is the ledger tests' chain: ML-DSA-65 on testNetwork, with the given names as its static
+// testChain is the ledger tests' chain: the network's scheme on testNetwork, with the given names as its static
 // validators, each of power 1, or, when none is given, dynamic with no threshold (any stake seats the
 // name it backs).
 func testChain(validatorNames ...string) Chain {
@@ -50,7 +50,7 @@ func testChain(validatorNames ...string) Chain {
 	for _, name := range validatorNames {
 		validatorRule.StaticValidators = append(validatorRule.StaticValidators, StaticValidator{Name: name, Power: 1})
 	}
-	return Chain{Scheme: signing.MLDSA65{}, NetworkID: testNetwork, ValidatorRule: validatorRule}
+	return Chain{Scheme: signing.NetworkScheme(), NetworkID: testNetwork, ValidatorRule: validatorRule}
 }
 
 // signedPayment is a payment of amount from the test account `from` to the name `to`, for the block

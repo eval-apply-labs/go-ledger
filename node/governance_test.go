@@ -184,7 +184,7 @@ func TestGovernanceViewShowsTheTenParameters(t *testing.T) {
 	}
 
 	view := validatorNode.governanceView()
-	inForce := ParametersView{TransactionCost: "0.1", BlockIntervalMs: 500, StepTimeoutMs: 2000, MaxPeers: 0, MaxMessageBytes: 6400,
+	inForce := ParametersView{TransactionCost: "0.1", BlockIntervalMs: 500, StepTimeoutMs: 2000, MaxPeers: 0, MaxMessageBytes: ledger.DefaultParameters().MaxMessageBytes,
 		NewKeyFee: "2.5", ChangeDelayBlocks: 20, RetainBlocks: 1000, MaxPaymentAmount: "500", MaxAccountBalance: "9000.5"}
 	if view.Parameters != inForce {
 		t.Errorf("the view shows the parameters in force as %+v, want %+v", view.Parameters, inForce)

@@ -103,11 +103,12 @@ func VerifyReassignmentVote(scheme signing.Scheme, networkID, publicKey string, 
 // rules intake and the pool apply before any signature is checked. It amends the state's governance
 // sequence; its name is canonical; it does not freeze and also unfreeze or re-key; its two amounts are
 // both set or both nil, and if set the first is the name's balance (0 for a new name) and the second
-// is not negative and raises no balance above the largest balance; a new key has the exact length, is
-// no name's key, and comes with a proof, which is otherwise empty; a bank is "", ClearField, or another
-// name that exists and is not frozen. A new name gets a key and a balance and is neither frozen nor
-// unfrozen; a frozen name is unfrozen exactly when it gets a new key; a name that is not frozen is not
-// unfrozen. It returns an error naming the first rule the action breaks.
+// is not negative and raises no balance above the largest balance; a new key is one the network's
+// scheme accepts, in its one spelling (signing.ValidatePublicKeyBase64), is no name's key, and comes
+// with a proof, which is otherwise empty; a bank is "", ClearField, or another name that exists and is
+// not frozen. A new name gets a key and a balance and is neither frozen nor unfrozen; a frozen name is
+// unfrozen exactly when it gets a new key; a name that is not frozen is not unfrozen. It returns an
+// error naming the first rule the action breaks.
 func (reassignment Reassignment) FitsState(state LedgerState) error {
 	account, exists := FindAccount(state.Accounts, reassignment.Name)
 	bank, bankExists := FindAccount(state.Accounts, reassignment.Bank)
@@ -127,8 +128,8 @@ func (reassignment Reassignment) FitsState(state LedgerState) error {
 		return errors.New("its new amount is negative")
 	case setsAmount && reassignment.NewAmount.Cmp(state.Parameters.MaxAccountBalance) > 0 && reassignment.NewAmount.Cmp(reassignment.PreviousAmount) > 0:
 		return errors.New("it raises the balance above the largest balance")
-	case reassignment.NewKey != "" && (len(reassignment.NewKey) != signing.PublicKeyBase64Length || keyInUse(state.Accounts, reassignment.NewKey)):
-		return errors.New("its new key is not of the exact length, or is already a name's key")
+	case reassignment.NewKey != "" && (signing.ValidatePublicKeyBase64(signing.NetworkScheme(), reassignment.NewKey) != nil || keyInUse(state.Accounts, reassignment.NewKey)):
+		return errors.New("its new key is not a public key of the network's scheme in its one spelling, or is already a name's key")
 	case (reassignment.NewKey == "") != (reassignment.NewKeySignature == ""):
 		return errors.New("it carries a new key without its proof, or a proof without a new key")
 	case reassignment.Bank != "" && reassignment.Bank != ClearField && (!bankExists || bank.Frozen || reassignment.Bank == reassignment.Name):

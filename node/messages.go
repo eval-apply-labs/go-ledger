@@ -7,9 +7,10 @@
 // The node is transport-agnostic: it takes a Transport to send messages to peers. Messages come in
 // through its methods: SubmitProposal and SubmitVote post an event; AdmitPayment, AdmitUpdate,
 // AdmitNameRequest and the two Admit*Certificate methods wait for the loop's verdict, the first three
-// after their checks have run off the loop against the committed view. Snapshot and GovernanceView
-// read through the loop. The HTTP layer (httptransport.go) is a thin adapter over these; /hdls/status,
-// /hdls/resolve and the record routes read the committed view or the record files without the loop.
+// after their checks have run off the loop against the committed view. ImportBundle hands each message
+// of a bundle to one of these (bundle.go). Snapshot, GovernanceView and ExportBundle read through the
+// loop. The HTTP layer (httptransport.go) is a thin adapter over these; /hdls/status, /hdls/resolve and
+// the record routes read the committed view or the record files without the loop.
 package node
 
 import (
@@ -53,6 +54,29 @@ type Message struct {
 	NameRequest     *ledger.NameRequest
 	ParameterChange *ledger.ParameterChange
 	Reassignment    *ledger.Reassignment
+}
+
+// gossipRoute is the last segment of the gossip route that takes message, under /hdls/, and the body
+// that route takes: what HTTPTransport posts, and what a bundle's line holds (EncodeBundle). It is ""
+// for a message of no known type.
+func gossipRoute(message Message) (routeName string, body any) {
+	switch message.Type {
+	case MessageProposal:
+		return "proposal", message.Proposal
+	case MessageVote:
+		return "vote", message.Vote
+	case MessagePayment:
+		return "payment", message.Payment
+	case MessageUpdate:
+		return "update", message.Update
+	case MessageNameRequest:
+		return "name-request", message.NameRequest
+	case MessageParameterCertificate:
+		return "parameter-vote", message.ParameterChange
+	case MessageReassignmentCertificate:
+		return "reassignment-vote", message.Reassignment
+	}
+	return "", nil
 }
 
 // Transport sends a message to a node's peers. Implementations MUST deliver asynchronously (not

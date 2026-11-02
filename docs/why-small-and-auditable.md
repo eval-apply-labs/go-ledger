@@ -61,12 +61,17 @@ inputs to that audit, not as a substitute for it.
 
 - **Testing:** the single Go application stays the testing setup. One binary runs a node
   (`cmd/server`), and `cmd/demo` starts a node and a wallet on one machine.
-- **Deployment:** three containers that can live on separate devices. This is planned, not built
-  yet (Phase 3 of the review's fix plan).
-  - The **fetcher** faces the network and forwards only the routes the outside may use.
-  - The **engine** runs the ledger and talks only to the fetcher and the signer.
-  - The **signer** holds the key behind a firewall and refuses to sign two different things for the
-    same slot.
+- **Deployment:** containers that can live on separate devices. Phase 3 of the review's fix plan
+  built them on 2026-11-01, but for the signer.
+  - The **fetcher** is a bank's public face, behind a CDN. It serves the files the engine writes for
+    the public, and passes on only the customer messages the outside may send.
+  - The **engine** runs the ledger. It serves the other validators on a gossip port, behind an allow
+    list of their IP addresses, and the bank's own machines on an operator port, which is never
+    published.
+  - The **wallet** runs in a container of its own too, or on the user's machine.
+  - The **signer**, still to come, is to hold the key behind a firewall and refuse to sign two
+    different things for the same slot. Until then the engine holds the key, and its sign log keeps
+    it from signing twice.
 
 (Owner, 2026-10-30: four containers, one per docs area, the wallet included; see
 [`TODO.md`](../TODO.md).)

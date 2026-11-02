@@ -1,13 +1,21 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
+	"net/netip"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/eval-apply-labs/go-ledger/consensus"
+	"github.com/eval-apply-labs/go-ledger/ledger"
 )
 
 // syncThenStart runs in a goroutine at Start when Bootstrap peers are configured. It fetches the
@@ -16,27 +24,146 @@ import (
 // starts at the configured height. Ordering is guaranteed by the single event channel: the adopt
 // event is enqueued before the start event.
 func (node *Node) syncThenStart() {
-	if best, found := node.bestCheckpoint(node.config.Bootstrap); found {
+	if best, found, _ := node.bestCheckpoint(catchUpClient(), eachItsOwnPeer(node.config.Bootstrap)); found {
 		node.enqueue(event{kind: eventAdopt, checkpoint: &best})
 	}
 	node.enqueue(event{kind: eventStart})
 }
 
 // catchUpCheckpoint is the best verified checkpoint a running node can catch up to if it falls
-// behind: its bootstrap peers', or, when none of them yields one (none is configured, all are down,
-// or none verifies), its current GOSSIP peers'. So any networked node can self-recover from a peer
-// that is ahead, and while a bootstrap peer yields a checkpoint the gossip peers are not asked. Any
-// peer is a safe source: bestCheckpoint verifies a checkpoint against the validators of the node's own
-// last committed state. The gossip peers come from the transport's Peers method, which HTTPTransport
-// has (and, in tests, peeredRecorder).
+// behind: its bootstrap peers'; when none of them yields one (none is configured, all are down, or
+// none verifies), its current GOSSIP peers'; and when none of those does either, the public faces' of
+// the other validators of the committed view, at their public addresses, where the fetcher serves
+// hdls/status and hdls/checkpoint (spec §6.1). So any networked node can self-recover from a peer that
+// is ahead, even while gossip is blocked, as on the second path (spec §7.7), or while the other
+// validators' gossip ports refuse it, as they refuse a validator dropped while it was away; and while a
+// source yields a checkpoint, the ones after it are not asked. Every public face is asked only when no
+// bootstrap or gossip peer answered at all, or while the node is stuck on its height (see
+// pullPublicBundles): on a healthy network the gossip peers answer, at the node's own height, and every
+// node asking every other bank's public face at each tick would cost them for nothing. Otherwise one
+// public face is asked a tick, each in turn (publicFaceTurn): one small request a tick, which finds
+// within about as many ticks as there are validators that the node lags behind banks its gossip peers
+// are not among, as when the network splits. An idle node runs no driver, so it is never stuck, and
+// without that it would not find out until its heartbeat starts a driver, minutes later (review R2-2).
+// Any peer is a safe source: bestCheckpoint verifies a checkpoint against the validators of the node's
+// own last committed state.
+// The gossip peers come from the transport's Peers method, which HTTPTransport has (and, in tests,
+// peeredRecorder).
 func (node *Node) catchUpCheckpoint() (Checkpoint, bool) {
-	if checkpoint, found := node.bestCheckpoint(node.config.Bootstrap); found {
+	client := catchUpClient()
+	checkpoint, found, bootstrapPeerAnswered := node.bestCheckpoint(client, eachItsOwnPeer(node.config.Bootstrap))
+	if found {
 		return checkpoint, true
 	}
-	if peerProvider, isPeerProvider := node.transport.(interface{ Peers() []string }); isPeerProvider {
-		return node.bestCheckpoint(peerProvider.Peers())
+	gossipPeerAnswered := false
+	if peerProvider, isPeerProvider := node.transport.(interface{ Peers() [][]string }); isPeerProvider {
+		if checkpoint, found, gossipPeerAnswered = node.bestCheckpoint(client, peerProvider.Peers()); found {
+			return checkpoint, true
+		}
 	}
-	return Checkpoint{}, false
+	publicAddresses := node.otherValidatorsPublicAddresses()
+	if (bootstrapPeerAnswered || gossipPeerAnswered) && !node.stuckOnItsHeight.Load() && len(publicAddresses) > 0 {
+		turn := node.publicFaceTurn.Add(1) % uint64(len(publicAddresses))
+		publicAddresses = publicAddresses[turn : turn+1]
+	}
+	checkpoint, found, _ = node.bestCheckpoint(node.publicAddressClient(), eachItsOwnPeer(publicAddresses))
+	return checkpoint, found
+}
+
+// catchUpClient is the client of the fetches from the bootstrap and gossip peers, at the start
+// (syncThenStart) and at each catch-up tick (catchUpCheckpoint): as NewHTTPClient's, it gives up after 5
+// seconds and follows no redirect, and its connections give up after peerDialTimeout, so a URL that never
+// answers costs a tick 2 seconds, not 5 (review N8). Every client shares its transport, catchUpTransport,
+// so that the fetches reuse their connections.
+func catchUpClient() *http.Client {
+	client := NewHTTPClient(5 * time.Second)
+	client.Transport = catchUpTransport
+	return client
+}
+
+// catchUpTransport is catchUpClient's transport.
+var catchUpTransport = peerRoundTripper()
+
+// eachItsOwnPeer is a peer list (see bestCheckpoint) in which each of urls is the one URL of a peer of
+// its own: a bootstrap peer, or a validator's public address.
+func eachItsOwnPeer(urls []string) [][]string {
+	peers := make([][]string, len(urls))
+	for i, url := range urls {
+		peers[i] = []string{url}
+	}
+	return peers
+}
+
+// otherValidatorsPublicAddresses is the public address of each validator of the committed view, but the
+// node itself, that publishes one: where the node pulls public bundles (pullPublicBundles), and the last
+// source of a catch-up (catchUpCheckpoint), each through publicAddressClient. It reads only the committed
+// view, so it is safe to call from a goroutine.
+func (node *Node) otherValidatorsPublicAddresses() []string {
+	view := node.view.Load()
+	var publicAddresses []string
+	for _, validator := range view.validators.Validators() {
+		account, _ := ledger.FindAccount(view.state.Accounts, validator.Name)
+		if validator.Name != node.self && account.PublicAddress != "" {
+			publicAddresses = append(publicAddresses, account.PublicAddress)
+		}
+	}
+	return publicAddresses
+}
+
+// publicAddressClient is the client of the fetches from the other validators' public addresses: as
+// catchUpClient's, it gives up after 5 seconds, a connection after peerDialTimeout, and follows no
+// redirect, and its transport, publicAddressTransport, refuses to connect to the node's own machine. A
+// public address is on chain, so any validator chooses its own: one that published
+// http://127.0.0.1:8080 would make every bank stuck at a height fetch its own operator port's routes, up
+// to a 64 MiB export that bank's loop builds, and so would one that published an address every bank
+// has, such as rootless Podman's 10.0.2.100. Another private address is reached as any other: the
+// quickstart's banks have them. A test's config may let loopback through (allowLoopbackPublicAddresses).
+func (node *Node) publicAddressClient() *http.Client {
+	client := NewHTTPClient(5 * time.Second)
+	if !node.config.allowLoopbackPublicAddresses {
+		client.Transport = publicAddressTransport
+	}
+	return client
+}
+
+// publicAddressTransport is publicAddressClient's transport. Its dialer, dialPublicAddress, refuses the
+// node's own machine as a destination. It uses no proxy, so the address it connects to is the
+// destination's. Every client shares it, so that the fetches reuse their connections.
+var publicAddressTransport = &http.Transport{
+	DialContext:     dialPublicAddress,
+	IdleConnTimeout: 90 * time.Second,
+}
+
+// publicAddressDialer is dialPublicAddress's. A connection gives up after peerDialTimeout. Its Control
+// refuses a loopback destination (refuseLoopback): it runs on the address the connection goes to, once a
+// name is resolved, so a name that resolves to 127.0.0.1 is refused too, before a packet is sent.
+var publicAddressDialer = &net.Dialer{Timeout: peerDialTimeout, Control: refuseLoopback}
+
+// dialPublicAddress connects as publicAddressDialer does, then drops a connection whose remote address is
+// its local one (bothEndsOneAddress): the node reaching its own machine through one of its own addresses
+// that is not loopback (review N7). Such an address is on every interface of a machine whose operator
+// port listens on :8080, as in a container, and some are every bank's: rootless Podman's 10.0.2.100, or
+// the first container's on a Docker bridge. No other machine's address is the node's own.
+func dialPublicAddress(dialContext context.Context, network, address string) (net.Conn, error) {
+	connection, err := publicAddressDialer.DialContext(dialContext, network, address)
+	if err == nil && bothEndsOneAddress(connection) {
+		connection.Close()
+		return nil, fmt.Errorf("refused: %s is this host's own address, and a public address never is", address)
+	}
+	return connection, err
+}
+
+// refuseLoopback is publicAddressDialer's Control: it refuses a connection to a loopback address, or to
+// the unspecified one (0.0.0.0, ::), which reaches the node's own host too.
+func refuseLoopback(network, address string, _ syscall.RawConn) error {
+	addressAndPort, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return err
+	}
+	if ip := addressAndPort.Addr().Unmap(); ip.IsLoopback() || ip.IsUnspecified() {
+		return fmt.Errorf("refused: %s is this host's own address, and a public address never is", address)
+	}
+	return nil
 }
 
 // catchUpLoop runs alongside the started node and periodically fetches catchUpCheckpoint, every
@@ -84,16 +211,19 @@ func (node *Node) everyInterval(interval func() time.Duration, action func()) {
 // lets the same round still decide. The cadence is reGossipInterval, the governed step timeout:
 // frequent enough to unstick a merged network within a few rounds. A tick is not cheap. While a driver
 // runs (without one nothing is re-gossiped), each tick sends every peer every vote the node holds for
-// the height, about 4.7 KB of JSON each; the last commit's precommits and its decided proposal, block
-// included (sendLastCommit); and the current round's proposal, block included. A receiver reads and
-// decodes each proposal, up to 2 MiB, before it can drop a copy it holds or one of a height it has
-// left. The loop's eventRegossip handler does the send (reGossipVotes, reGossipProposal).
+// the height, about 4.7 KB of JSON each with ML-DSA-65; the last commit's precommits and its
+// decided proposal, block included (lastCommitMessages); and the current round's proposal, block
+// included. A receiver reads and decodes each proposal, up to 2 MiB, before it can drop a copy it
+// holds or one of a height it has left. The loop's eventRegossip handler does the send (reGossip),
+// writes the public bundle (publishBundle), and pulls the other validators' when the height is stuck
+// (pullPublicBundles).
 func (node *Node) reGossipLoop() {
 	node.everyInterval(node.reGossipInterval, func() { node.enqueue(event{kind: eventRegossip}) })
 }
 
-// reGossipInterval is the cadence of reGossipLoop, and half the wait of a node back without its sign
-// log (see waitForOwnSignatures): the step timeout of the committed view, so it follows a ⅔ vote.
+// reGossipInterval is the cadence of reGossipLoop, and, unless the slow-down switch is longer, half the
+// wait of a node back without its sign log (see ownSignaturesWait): the step timeout of the committed
+// view, so it follows a ⅔ vote.
 func (node *Node) reGossipInterval() time.Duration {
 	milliseconds := node.view.Load().state.Parameters.StepTimeoutMs
 	if milliseconds <= 0 {
@@ -102,36 +232,173 @@ func (node *Node) reGossipInterval() time.Duration {
 	return time.Duration(milliseconds) * time.Millisecond
 }
 
-// bestCheckpoint fetches a checkpoint from each source peer that is ahead of the node, keeps only those
-// that verifyCheckpoint accepts with the validators of the node's last committed state as the trust
-// anchor, and returns the one at the highest committed height. It asks each peer's height first, and
-// fetches a checkpoint, about 2.9 KB per account, only from a peer whose height is ahead (spec 6.6): on
-// an idle chain every peer is at the node's height, tick after tick. It reads only immutable config and
-// the committed view the loop publishes (see publishView), so it is safe to call from a goroutine.
-func (node *Node) bestCheckpoint(sources []string) (Checkpoint, bool) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	view := node.view.Load()
-	anchor := view.validators
-	var best Checkpoint
-	found := false
-	for _, peer := range sources {
-		if peerHeight, err := fetchHeight(client, peer); err != nil || peerHeight <= view.state.Height+1 {
-			continue // unreachable, or not ahead of the height in progress
-		}
-		checkpoint, err := fetchCheckpoint(client, peer, MaxCheckpointBytes)
-		if err != nil {
-			continue
-		}
-		// The anchor filter must stay even though adopt/catchUp re-verify against the live state in
-		// the loop: without it a forged checkpoint at a higher height would win the pick below.
-		if !node.verifyCheckpoint(checkpoint, anchor) {
-			continue // invalid quorum, block hash mismatch, or no trusted validator vouches for the set
-		}
-		if !found || checkpoint.Commit.Height > best.Commit.Height {
-			best, found = checkpoint, true
+// pullPublicBundles is the second path (spec §7.7), run on the loop at each re-gossip tick. Once the
+// driver of the height in progress has run for 4 step timeouts without deciding it, the node fetches
+// the public bundle (see publishBundle) of every other current validator, of the committed view's, that
+// publishes a public address, and imports each, which takes its votes and proposals as it takes gossip.
+// So where direct gossip is blocked but the banks' public faces still get through, the banks exchange
+// votes and proposals all the same. Every message is signed, so the path needs no trust, and the allow
+// list is not involved: the pull goes out, it doesn't come in. The import checks each vote and proposal
+// off the loop first, and stops at the first line that fails that check, is unreadable, or is refused
+// (see pulledCheck and importBundle), so a hostile public face spends the loop's time on no forged vote
+// or proposal, and on one line of anything else.
+//
+// The node pulls again at each tick until a commit or a catch-up ends the height; then no driver runs
+// until the next height starts, and that height's driver counts its own 4 step timeouts. An idle node
+// runs no driver, so it never pulls, and its count starts when work or the heartbeat starts the driver
+// (startHeight sets heightStartedAt). The 4 step timeouts are the governed step timeout, the re-gossip
+// interval, and not the slow-down switch's: with the switch on, the round timers wait for a carrier, and
+// the pull starts as soon as on a network that runs at full speed.
+//
+// The decision is the loop's, and the fetches run off it, one goroutine for each validator, so a slow
+// public face holds up no other, and the loop not at all. One round of fetches runs at a time: a tick
+// that finds the last round still running skips its own, so a public face that hangs holds the pulls up
+// for the client's 5 seconds at most, and never piles up goroutines tick after tick. The round is
+// untracked, as the backup mirror is (see saveSnapshot): it may outlive Stop, and the stopped loop
+// handles nothing it hands over.
+func (node *Node) pullPublicBundles() {
+	stuck := node.driver != nil && time.Since(node.heightStartedAt) >= 4*node.reGossipInterval()
+	if stuck != node.pullingPublicBundles {
+		node.pullingPublicBundles = stuck
+		node.stuckOnItsHeight.Store(stuck)
+		if stuck {
+			log.Printf("public bundles: height %d has run for 4 step timeouts without a commit: the node pulls the other validators' public bundles until it commits", node.height())
+		} else {
+			log.Printf("public bundles: the node stops pulling them, having committed height %d", node.state.Height)
 		}
 	}
-	return best, found
+	if !stuck || !node.pullRoundRunning.CompareAndSwap(false, true) {
+		return // not stuck, or the last round still runs
+	}
+	publicAddresses, client := node.otherValidatorsPublicAddresses(), node.publicAddressClient()
+	go func() {
+		defer node.pullRoundRunning.Store(false)
+		var fetches sync.WaitGroup
+		for _, publicAddress := range publicAddresses {
+			fetches.Go(func() {
+				if bundle := fetchPublicBundle(client, publicAddress); bundle != nil {
+					node.importBundle(bundle, node.pulledCheck()) // a bundle it refuses whole, of another network, is nothing too
+				}
+			})
+		}
+		fetches.Wait()
+	}()
+}
+
+// pulledCheck is the check each vote and each proposal of a pulled public bundle passes in the pull's
+// goroutine, before the import hands it to the loop (see importBundle). It is of the height in progress,
+// whose set is the committed view's validators, or of the last committed height, whose set signed the
+// last commit. A vote is by a validator of that set, and its signature verifies under the key the set
+// holds for the name, a check made once a height (see verifiedVotes). A proposal names the proposer the
+// set schedules for its height and round, and its signature verifies under that proposer's key
+// (fromItsProposer), as onProposal checks it. The sets are the committed view's as the import of the
+// bundle starts. Otherwise a hostile public face, the bank's CDN or anyone on a plain-HTTP path to it,
+// could fill 8 MiB with about 1,800 forged votes or 1,600 forged proposals, each of which costs the loop
+// a signature check, or with 300,000 small ones, at every pull while the node is stuck. Any other
+// message passes: its intake checks it.
+//
+// A public bundle holds what decided the publisher's last height, then its votes and proposal of the
+// height after. Every vote and proposal of a bank at the node's height passes. Of a bank one height
+// ahead, the last commit passes, which decides the node's height, and the import stops at the first
+// message of the height after, which the node takes at its pulls there. Of a bank further ahead or behind,
+// none passes, and none would count: catch-up brings the node up. No honest bundle holds another vote or
+// proposal that fails, so the import stops at the first that fails, and a forged bundle costs one
+// signature check. It reads only immutable config and the committed view, so it is safe to call from a
+// goroutine.
+func (node *Node) pulledCheck() func(Message) bool {
+	view := node.view.Load()
+	setOf := func(height int64) *consensus.ValidatorSet {
+		switch height {
+		case view.state.Height + 1:
+			return view.validators
+		case view.state.Height:
+			return view.lastCommitValidators
+		}
+		return nil
+	}
+	return func(message Message) bool {
+		switch message.Type {
+		case MessageVote:
+			vote := *message.Vote
+			signers := setOf(vote.Height)
+			return signers != nil && signers.Contains(vote.Validator) && node.pulledVotes.verifiedOnce(view.state.Height, vote, func() bool {
+				return vote.Verify(node.config.Chain.Scheme, node.config.Chain.NetworkID, signers.PublicKey(vote.Validator))
+			})
+		case MessageProposal:
+			proposers := setOf(message.Proposal.Proposal.Height)
+			return proposers != nil && node.fromItsProposer(message.Proposal.Proposal, proposers)
+		}
+		return true
+	}
+}
+
+// verifiedVotes are the votes of pulled public bundles whose signatures verified at one committed
+// height, so that a pull does not verify one again (review R2-4): a public bundle holds the same votes
+// pull after pull, as every bank's does, about 1,200 with 21 banks, and each check costs half a
+// millisecond. A vote is remembered whole, signature and signed fields, since a copy of its signature
+// on another field verifies no longer. The pulls of a round run on a goroutine each, so a mutex guards
+// them, held while a vote is checked, so that a vote two banks' bundles carry is checked once, not once
+// by each. They start again when the committed height changes, and when they number maxVerifiedVotes,
+// about twice what a public bundle holds, so that a validator that signs vote after vote cannot make them
+// grow without bound.
+type verifiedVotes struct {
+	mutex  sync.Mutex
+	height int64 // the committed height the votes verified at
+	votes  map[consensus.Vote]bool
+}
+
+const maxVerifiedVotes = 4096
+
+// verifiedOnce reports whether vote verifies: true if it verified before at committedHeight, and
+// otherwise what verify reports, which it remembers.
+func (memory *verifiedVotes) verifiedOnce(committedHeight int64, vote consensus.Vote, verify func() bool) bool {
+	memory.mutex.Lock()
+	defer memory.mutex.Unlock()
+	if memory.votes == nil || memory.height != committedHeight || len(memory.votes) >= maxVerifiedVotes {
+		memory.height, memory.votes = committedHeight, make(map[consensus.Vote]bool)
+	}
+	if !memory.votes[vote] && verify() {
+		memory.votes[vote] = true
+	}
+	return memory.votes[vote]
+}
+
+// bestCheckpoint fetches a checkpoint from each peer that is ahead of the node, keeps only those that
+// verifyCheckpoint accepts with the validators of the node's last committed state as the trust anchor,
+// and returns the one at the highest committed height. It asks each peer's height first, and fetches a
+// checkpoint, about 2.9 KB per account with ML-DSA-65, only from a peer whose height is ahead (spec
+// 6.6): on an idle chain every peer is at the node's height, tick after tick. A peer is the list of base
+// URLs one node is reached at, as for HTTPTransport.Broadcast: the operator's, one made of a validator's
+// IP address, which the ledger takes only in its one plain form, and the gossip port, or a validator's
+// public address. The node asks a peer at the first of its URLs that answers its status, and at no
+// other: they reach one node, so a peer ahead sends its checkpoint once. The client is the caller's,
+// and follows no redirect (NewHTTPClient).
+// It also reports whether any peer answered its status at all, ahead or not. It reads only immutable
+// config and the committed view the loop publishes (see publishView), so it is safe to call from a
+// goroutine.
+func (node *Node) bestCheckpoint(client *http.Client, peers [][]string) (best Checkpoint, found bool, anyPeerAnswered bool) {
+	view := node.view.Load()
+	anchor := view.validators
+	for _, peerURLs := range peers {
+		for _, peerURL := range peerURLs {
+			peerHeight, err := fetchHeight(client, peerURL)
+			if err != nil {
+				continue // no answer: the peer's next URL
+			}
+			anyPeerAnswered = true
+			if peerHeight > view.state.Height+1 { // ahead of the height in progress
+				checkpoint, err := fetchCheckpoint(client, peerURL, MaxCheckpointBytes)
+				// The anchor filter must stay even though adopt/catchUp re-verify against the live state in
+				// the loop: without it a forged checkpoint at a higher height would win the pick. It refuses an
+				// invalid quorum, a block hash mismatch, or a set no trusted validator vouches for.
+				if err == nil && node.verifyCheckpoint(checkpoint, anchor) && (!found || checkpoint.Commit.Height > best.Commit.Height) {
+					best, found = checkpoint, true
+				}
+			}
+			break // the peer answered: its other URLs reach the same node
+		}
+	}
+	return best, found, anyPeerAnswered
 }
 
 // MaxCheckpointBytes bounds a fetched checkpoint. It is generous, because an honest checkpoint holds
@@ -175,6 +442,27 @@ func fetchCheckpoint(client *http.Client, peer string, maxBytes int64) (Checkpoi
 	return checkpoint, nil
 }
 
+// fetchPublicBundle GETs the public bundle a validator's public face serves (spec §7.7), or nil when
+// there is none to read: the request fails, the answer is not 200, or the body can't be read. The ledger
+// takes a public address only in its one plain form, with no path (ledger.CanonicalAddress), so the
+// route is the whole path. Only MaxPublicBundleBytes of the body are read: of a larger one, the import
+// takes the whole lines, and counts the line cut short as unreadable.
+func fetchPublicBundle(client *http.Client, publicAddress string) []byte {
+	response, err := client.Get(publicAddress + "/hdls/bundle")
+	if err != nil {
+		return nil
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil
+	}
+	bundle, err := io.ReadAll(io.LimitReader(response.Body, MaxPublicBundleBytes))
+	if err != nil {
+		return nil
+	}
+	return bundle
+}
+
 // adopt fast-forwards to a verified checkpoint if it is ahead of us and consensus has not started
 // yet (a fresh or rebooting node). The certificate is verified against the set it carries, which the
 // node's own validators must vouch for, and must be for the block hash the header and the digest of the
@@ -206,16 +494,19 @@ func (node *Node) adopt(checkpoint Checkpoint) {
 // timers/messages from the abandoned height are dropped by their height/round guards. From a height it
 // may have signed at before it lost its sign log, the node may have signed at the network's height too,
 // so it waits there before it starts it (see waitForOwnSignatures), and empties its sign log at the log's
-// own height, as adopt does, so that a restart during the wait waits too.
-func (node *Node) catchUp(checkpoint Checkpoint) {
+// own height, as adopt does, so that a restart during the wait waits too. It returns nil once it has
+// fast-forwarded, or the reason it did not, which ImportCheckpoint answers. A checkpoint of another
+// network does not verify: every signature binds the network id, and the checkpoint carries no other
+// mark of its network, so the reason names both.
+func (node *Node) catchUp(checkpoint Checkpoint) error {
 	if !node.started {
-		return // pre-start is adopt()'s job
+		return errors.New("the node is still starting: try again once it runs") // pre-start is adopt()'s job
 	}
 	if checkpoint.Commit.Height+1 <= node.height() {
-		return // not actually ahead of us
+		return fmt.Errorf("not ahead: the checkpoint is of height %d, and this node has committed height %d", checkpoint.Commit.Height, node.state.Height)
 	}
 	if !node.verifyCheckpoint(checkpoint, node.view.Load().validators) {
-		return
+		return errors.New("does not verify: it is not a state this network's validators signed, so it is another network's checkpoint, or damaged")
 	}
 	waits := node.height() <= node.mayHaveSignedUpTo
 	node.fastForward(checkpoint)
@@ -228,9 +519,21 @@ func (node *Node) catchUp(checkpoint Checkpoint) {
 	}
 	if waits {
 		node.waitForOwnSignatures()
-		return
+		return nil
 	}
 	node.startHeight()
+	return nil
+}
+
+// ImportCheckpoint takes a checkpoint a carrier brought (spec §7.5) through the event catch-up uses: the
+// loop verifies it as catch-up does, with the validators of the node's last committed state as the
+// anchor, and adopts it if it is ahead. It returns nil once the node has adopted it, or the reason it did
+// not (see catchUp).
+func (node *Node) ImportCheckpoint(checkpoint Checkpoint) error {
+	verdict := make(chan admission, 1)
+	node.enqueue(event{kind: eventCatchUp, checkpoint: &checkpoint, admit: verdict})
+	_, err := node.awaitAdmission(verdict)
+	return err
 }
 
 // verifyCheckpoint reports whether a peer's checkpoint is trustworthy from THIS node's vantage, the

@@ -10,10 +10,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/eval-apply-labs/go-ledger/consensus"
 	"github.com/eval-apply-labs/go-ledger/ledger"
 	"github.com/eval-apply-labs/go-ledger/signing"
 )
@@ -44,10 +48,10 @@ func TestNodesReachConsensusOverHTTP(t *testing.T) {
 		}
 	}()
 	for i := 0; i < nodeCount; i++ {
-		var peers []string
+		var peers [][]string
 		for j := 0; j < nodeCount; j++ {
 			if j != i {
-				peers = append(peers, servers[j].URL)
+				peers = append(peers, []string{servers[j].URL})
 			}
 		}
 		transports[i].SetPeers(peers)
@@ -98,12 +102,158 @@ func TestNodesReachConsensusOverHTTP(t *testing.T) {
 	}
 }
 
+// A peer is the list of its URLs (spec §4), so a validator that publishes a second IP address, a second
+// line to the internet, stays reachable when the first refuses connections: the transport tries the
+// next URL. It moves on only when a URL gives no answer. An answer, even an error status, means the
+// peer was reached, and the URLs after it get nothing.
+func TestTransportTriesAPeersNextAddressWhenOneRefusesConnections(t *testing.T) {
+	refusing := httptest.NewServer(http.NotFoundHandler())
+	refusingURL := refusing.URL
+	refusing.Close() // nothing listens at its address any more, so a connection to it is refused
+	var mutex sync.Mutex
+	askedPaths := map[string][]string{} // the paths each server was asked for, by its name
+	startServer := func(name string, status int) string {
+		server := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			mutex.Lock()
+			askedPaths[name] = append(askedPaths[name], request.URL.Path)
+			mutex.Unlock()
+			responseWriter.WriteHeader(status)
+		}))
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+	asked := func(name string) []string {
+		mutex.Lock()
+		defer mutex.Unlock()
+		return slices.Clone(askedPaths[name])
+	}
+	secondURL, thirdURL := startServer("second", http.StatusAccepted), startServer("third", http.StatusAccepted)
+	failingURL := startServer("failing", http.StatusInternalServerError)
+
+	transport := NewHTTPTransport(nil)
+	transport.SetPeers([][]string{{refusingURL, secondURL, thirdURL}})
+	transport.Broadcast("self", Message{Type: MessageVote, Vote: &consensus.Vote{Height: 1}})
+	waitFor(t, 5*time.Second, func() bool { return len(asked("second")) > 0 }, "the vote did not reach the peer's second URL once its first refused the connection")
+	if paths := asked("second"); !slices.Equal(paths, []string{"/hdls/vote"}) {
+		t.Errorf("the second URL was asked for %v, want the vote route once", paths)
+	}
+
+	transport.post([]string{failingURL, thirdURL}, "/hdls/vote", []byte("{}"))
+	if failed, third := asked("failing"), asked("third"); len(failed) != 1 || len(third) != 0 {
+		t.Errorf("the URL that answered 500 was asked %d times and the URL after it %d times, want once and never", len(failed), len(third))
+	}
+}
+
+// A peer whose pushes fail is logged once when they start failing and once when it answers again, never
+// once per message (spec §5.4, Q10), and at most once a minute (review N4): so a bank whose connections
+// the others' allow lists refuse finds it in its log, as does the operator of a peer that went down. A
+// change within the minute after a line waits for the next push after it. The test lets a minute pass
+// by moving the last line's time back.
+func TestTransportLogsAPeerThatStartsFailingAndAnswersAgain(t *testing.T) {
+	var refusing atomic.Bool
+	refusing.Store(true)
+	peer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		if refusing.Load() { // the connection closes with no answer, as when an allow list refuses it
+			connection, _, _ := responseWriter.(http.Hijacker).Hijack()
+			connection.Close()
+			return
+		}
+		responseWriter.WriteHeader(http.StatusAccepted)
+	}))
+	defer peer.Close()
+	logged := captureLog(t)
+	transport := NewHTTPTransport([]string{peer.URL})
+	pushThreeVotes := func() {
+		for range 3 {
+			transport.post(transport.Peers()[0], "/hdls/vote", []byte("{}"))
+		}
+	}
+	linesSaying := func(phrase string) int {
+		count := 0
+		for _, line := range strings.Split(logged.String(), "\n") {
+			if strings.Contains(line, peer.URL) && strings.Contains(line, phrase) {
+				count++
+			}
+		}
+		return count
+	}
+
+	aMinutePasses := func() {
+		transport.peerLogMutex.Lock()
+		defer transport.peerLogMutex.Unlock()
+		lastLine := transport.peerLogLines[peer.URL]
+		lastLine.loggedAt = lastLine.loggedAt.Add(-peerLogInterval)
+		transport.peerLogLines[peer.URL] = lastLine
+	}
+
+	for _, step := range []struct {
+		aMinutePassed, refusing    bool
+		wantFailing, wantAnswering int
+	}{{false, true, 1, 0}, {false, false, 1, 0}, {true, false, 1, 1}, {false, true, 1, 1}, {true, true, 2, 1}} {
+		if step.aMinutePassed {
+			aMinutePasses()
+		}
+		refusing.Store(step.refusing)
+		pushThreeVotes()
+		if failing, answering := linesSaying("fail"), linesSaying("answers again"); failing != step.wantFailing || answering != step.wantAnswering {
+			t.Fatalf("after three pushes with the peer refusing %t, a minute passed %t: %d lines say the pushes fail and %d that the peer answers again, want %d and %d: %q",
+				step.refusing, step.aMinutePassed, failing, answering, step.wantFailing, step.wantAnswering, logged.String())
+		}
+	}
+}
+
+// A peer that flaps, one push failing and the next answered, costs one log line a minute, not one per
+// message (review N4).
+func TestTransportLogsAFlappingPeerOnceAMinute(t *testing.T) {
+	var pushes atomic.Int32
+	peer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		if pushes.Add(1)%2 == 0 {
+			connection, _, _ := responseWriter.(http.Hijacker).Hijack()
+			connection.Close()
+			return
+		}
+		responseWriter.WriteHeader(http.StatusAccepted)
+	}))
+	defer peer.Close()
+	logged := captureLog(t)
+	transport := NewHTTPTransport([]string{peer.URL})
+	for range 100 {
+		transport.post(transport.Peers()[0], "/hdls/vote", []byte("{}"))
+	}
+	if lines := strings.Count(logged.String(), "\n"); lines != 1 || !strings.Contains(logged.String(), "fail") {
+		t.Errorf("100 pushes to a peer that flaps wrote %d log lines, want one, that its pushes fail", lines)
+	}
+}
+
+// Once a request is sent, the transport never sends it again at the peer's next URL (review N3): a peer
+// that took a message but answers too slowly gets it once, not once per URL. The test shortens the
+// client's 5-second timeout.
+func TestTransportSendsASlowPeerAMessageOnce(t *testing.T) {
+	var received atomic.Int32
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		received.Add(1)
+		<-release // the peer took the request, but its loop is busy past the sender's timeout
+		responseWriter.WriteHeader(http.StatusAccepted)
+	}))
+	defer slow.Close()
+	defer close(release)
+	transport := NewHTTPTransport(nil)
+	transport.client.Timeout = 200 * time.Millisecond
+	// The same peer at two URLs: 127.0.0.1 and localhost name one listener here, as a bank's two lines would.
+	transport.post([]string{slow.URL, strings.Replace(slow.URL, "127.0.0.1", "localhost", 1)}, "/hdls/vote", []byte("{}"))
+	if count := received.Load(); count != 1 {
+		t.Errorf("a peer that took a push but answered too slowly received it %d times, want once", count)
+	}
+}
+
 // The decentralized name server: GET /hdls/resolve turns a name into the account's current public key,
-// its bank of record, whether it is frozen, AND its published network address (or the reverse, by
-// key), each answer naming the committed height and digest it was read from.
+// its bank of record, whether it is frozen, AND where it is reached, its publicAddress and its
+// ipAddresses, each only when set (or the reverse, by key), each answer naming the committed height
+// and digest it was read from.
 func TestResolveEndpointServesNameAndAddress(t *testing.T) {
 	alice := testAccount("alice", "50")
-	alice.Bank, alice.Description, alice.Address = "validator", "the bakery", "http://10.0.0.7:8080"
+	alice.Bank, alice.Description, alice.PublicAddress, alice.IPAddresses = "validator", "the bakery", "https://bakery.example", []string{"10.0.0.7", "2001:db8::7"}
 	carol := testAccount("carol", "1")
 	carol.Frozen = true
 	genesis := testGenesis([]ledger.Account{testAccount("validator", "100"), alice, carol},
@@ -115,24 +265,31 @@ func TestResolveEndpointServesNameAndAddress(t *testing.T) {
 	defer server.Close()
 	waitFor(t, 5*time.Second, func() bool { return node.Snapshot().Height == 2 }, "block 1 was not committed")
 
+	answers := map[string]string{} // the body of each answer, by its query
 	resolve := func(query string) (int, ResolveRecord) {
 		response, err := http.Get(server.URL + "/hdls/resolve" + query)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		answers[query] = string(body)
 		var record ResolveRecord
-		_ = json.NewDecoder(response.Body).Decode(&record)
+		_ = json.Unmarshal(body, &record)
 		return response.StatusCode, record
 	}
 
 	status, record := resolve("?name=alice")
 	if status != http.StatusOK || record.PublicKey != alice.PublicKey || record.Bank != "validator" || record.Frozen ||
-		record.Address != "http://10.0.0.7:8080" || record.Description != "the bakery" {
+		record.PublicAddress != "https://bakery.example" || !slices.Equal(record.IPAddresses, alice.IPAddresses) || record.Description != "the bakery" ||
+		!strings.Contains(answers["?name=alice"], `"publicAddress":"https://bakery.example","ipAddresses":["10.0.0.7","2001:db8::7"]`) {
 		t.Fatalf("resolve by name: status=%d record=%+v", status, record)
 	}
 	if status, record := resolve("?name=carol"); status != http.StatusOK || !record.Frozen || record.Bank != "" {
 		t.Fatalf("a frozen name must resolve as frozen: status=%d record=%+v", status, record)
+	}
+	if answer := answers["?name=carol"]; strings.Contains(answer, "publicAddress") || strings.Contains(answer, "ipAddresses") || strings.Contains(answer, `"address"`) {
+		t.Errorf("the answer for a name that publishes no address names one: %s", answer)
 	}
 	// The answer names the state it was read from: block 1 and the digest of the state it committed,
 	// not the height the node is working on.
@@ -176,7 +333,7 @@ func TestRoutesAnswer405ToAnotherMethod(t *testing.T) {
 	node.Start()
 	defer node.Stop()
 	handler := NewServer(node).Handler()
-	for _, path := range []string{"/hdls/status", "/hdls/accounts", "/hdls/checkpoint", "/hdls/governance", "/hdls/resolve?name=validator", "/hdls/record", "/hdls/lifelong-record"} {
+	for _, path := range []string{"/hdls/status", "/hdls/accounts", "/hdls/governance", "/hdls/resolve?name=validator", "/hdls/record", "/hdls/lifelong-record"} {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}")))
 		if recorder.Code != http.StatusMethodNotAllowed {
@@ -188,6 +345,39 @@ func TestRoutesAnswer405ToAnotherMethod(t *testing.T) {
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusMethodNotAllowed {
 			t.Errorf("GET %s answered %d, want 405", path, recorder.Code)
+		}
+	}
+}
+
+// The two ports (spec §3): the gossip port serves only the routes validators use, and answers 404 to a
+// wallet's payment, the account list, a name lookup, governance, the record, the bundle routes and a
+// checkpoint's import, all of which the operator port serves. Both serve the gossip routes.
+func TestGossipPortServesOnlyTheGossipRoutes(t *testing.T) {
+	node := New(testConfig(staticChain("validator"), "validator", testGenesis([]ledger.Account{testAccount("validator", "100")}, 5*time.Second, time.Hour)), NewHTTPTransport(nil))
+	node.Start()
+	defer node.Stop()
+	gossipHandler, operatorHandler := NewServer(node).GossipHandler(), NewServer(node).Handler()
+	answer := func(handler http.Handler, route string) int {
+		method, path, _ := strings.Cut(route, " ")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(method, path, strings.NewReader("{}")))
+		return recorder.Code
+	}
+	for _, route := range []string{"POST /hdls/pay", "GET /hdls/accounts", "GET /hdls/resolve?name=validator", "GET /hdls/governance",
+		"GET /hdls/record", "GET /hdls/record?from=0", "GET /hdls/lifelong-record", "GET /hdls/bundle", "POST /hdls/bundle", "POST /hdls/checkpoint"} {
+		if code := answer(gossipHandler, route); code != http.StatusNotFound {
+			t.Errorf("the gossip port answered %s with %d, want 404", route, code)
+		}
+		if code := answer(operatorHandler, route); code == http.StatusNotFound || code == http.StatusMethodNotAllowed {
+			t.Errorf("the operator port answered %s with %d, want it served", route, code)
+		}
+	}
+	for _, route := range []string{"POST /hdls/proposal", "POST /hdls/vote", "POST /hdls/payment", "POST /hdls/update", "POST /hdls/name-request",
+		"POST /hdls/parameter-vote", "POST /hdls/reassignment-vote", "GET /hdls/status", "GET /hdls/checkpoint"} {
+		for portName, handler := range map[string]http.Handler{"gossip": gossipHandler, "operator": operatorHandler} {
+			if code := answer(handler, route); code == http.StatusNotFound || code == http.StatusMethodNotAllowed {
+				t.Errorf("the %s port answered %s with %d, want it served", portName, route, code)
+			}
 		}
 	}
 }
@@ -345,7 +535,7 @@ func TestResolveServesTheStateDigest(t *testing.T) {
 // '+' to a space — so a raw (unescaped) key in ?key= used to match nothing and 404. handleResolve
 // restores the '+', so the reverse lookup works with a key pasted verbatim.
 func TestResolveToleratesRawPlusInKey(t *testing.T) {
-	scheme := signing.MLDSA65{}
+	scheme := signing.NetworkScheme()
 	validatorSigner := testSigner("validator")
 	var alice *signing.Signer
 	for i := 0; i < 4000 && alice == nil; i++ {

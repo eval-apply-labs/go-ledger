@@ -22,7 +22,7 @@ const MaxRoundLookahead int32 = 256
 // fully unit-testable. The caller (a networked node) feeds it events -- Resume at the start of every
 // height, ReceiveProposal, ReceiveVote, Timeout -- and executes the Actions it returns
 // (broadcast a proposal/vote, arm a timer, or record a decision). The driver signs its own votes
-// (ML-DSA-65 signing is deterministic here, so it stays deterministic) and counts them itself.
+// (a PrivateKey signs deterministically, so the driver stays deterministic) and counts them itself.
 //
 // Scope: a single height with full locking (lockedValue/lockedRound, validValue/validRound), round
 // advancement, and the "f+1 messages from a higher round -> skip to it" catch-up for round

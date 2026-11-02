@@ -1,8 +1,15 @@
 # The review folder
 
-The reviews of go-ledger, and the record of the Phase 2 build. One line per file and folder; start
-with the first, the build record.
+The reviews of go-ledger, and the records of the Phase 2 and Phase 3 builds. One line per file and
+folder; start with the build records.
 
+- [`phase3_progress.md`](phase3_progress.md): the Phase 3 build record: where the branch stands,
+  how each slice was built and checked, the owner's decisions, the independent review of
+  2026-11-01 and the fix of each finding, and how to resume.
+- [`phase3_spec.md`](phase3_spec.md): the Phase 3 spec, the deployment split and pigeon mode, with
+  its notes on what the build and the review's fixes changed.
+- [`_evidence_phase3/`](_evidence_phase3/README.md): the three reports of the Phase 3 review,
+  findings N1 to N13, B1 to B8 and W1 to W10.
 - [`phase2_progress.md`](phase2_progress.md): the Phase 2 build record: where the branch stands, how
   each slice and each fix run was built and checked, the owner's decisions, the cost, and how to
   resume.
@@ -33,11 +40,15 @@ with the first, the build record.
 
 ## The commits these files cite
 
-The files here cite commits by hash. On `main`, the work they record, from the post-eMudhra review
-of 2026-10-27 to the end of Phase 2 on 2026-10-31, is one commit, the child of `9a60643`. The hashes
-name commits of the development history squashed into it, 430 of them, which the maintainer keeps
-and which are not in this repository. The squashed commit's tree is that history's last tree, file
-for file.
+The files here cite commits by hash. On `main`, the work they record is two commits:
+
+- the post-eMudhra review of 2026-10-27 to the end of Phase 2 on 2026-10-31, the child of
+  `9a60643`, squashing 430 commits;
+- the scheme drop-in, the owner's decisions on spec §12, Phase 3 and the currency's fee and taxes,
+  2026-10-31 to 2026-11-02, the child of the first, squashing 122 commits.
+
+The hashes name commits of those development histories, which the maintainer keeps and which are
+not in this repository. Each squashed commit's tree is its history's last tree, file for file.
 
 ## The external review (GLM), 2026-08-02
 

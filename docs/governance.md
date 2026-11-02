@@ -2,7 +2,8 @@
 
 Area: **node**. Code: `ledger/parameters.go`, `ledger/governance.go` (`ParameterChange`),
 `ledger/reassignment.go` (the ⅔ name action), and the pools in `node/governance.go` and
-`node/reassignment.go`. The admin page that drafts and signs the votes is in `ui/admin.go`.
+`node/reassignment.go`. The admin page that drafts and signs the votes is in `ui/admin.go`. The
+names as a name service: `ledger/account_update.go` and `ledger/address.go`.
 
 Validators holding more than ⅔ of the power can do two things that no single holder can: change
 the network's parameters, and act on one name (its balance, its key, its bank of record, its frozen
@@ -62,7 +63,10 @@ Keep `maxPaymentAmount` at or above `transactionCost`. Nothing refuses a lower v
 - **What follows the governed values.** The step timeouts, the block interval, the re-gossip
   interval, the wait of a node back without its sign log, the catch-up interval, and the fan-out of
   peers resolved from the chain. A running node's re-gossip and catch-up loops take a new value
-  within a second, whether it is shorter or longer.
+  within a second, whether it is shorter or longer. A node's slow-down switch,
+  `minimumStepTimeoutMs` in its config, can make its round timers longer than the governed step
+  timeout, never shorter, and the wait of a node back without its sign log with them; it changes
+  nothing else (see [consensus.md](consensus.md#the-timers-and-the-slow-down-switch)).
 
 ## Parameter change
 
@@ -87,7 +91,8 @@ It is valid (`Reassignment.FitsState`, `Reassignment.Valid`) only if:
 - the name is canonical, and `Freeze` is not set with `Unfreeze` or `NewKey`;
 - the two amounts are both null or both set; if set, `PreviousAmount` is the name's balance (0 for
   a new name), `NewAmount` is not negative, and it raises no balance above `maxAccountBalance`;
-- a `NewKey` has the exact size, is no name's key, and its proof verifies under it;
+- a `NewKey` is a key the network's scheme accepts, in its one spelling, is no name's key, and its
+  proof verifies under it;
 - `Bank` is `""` (leave it), `-` (none), or another name that exists and is not frozen;
 - for a name no account has: it sets a key and a balance, and neither freezes nor unfreezes;
 - for a frozen name: it unfreezes exactly when it gives a new key, so every unfreeze re-keys;
@@ -133,6 +138,41 @@ is about 0.5 KB plus 4.4 KB per vote, a name action about 7 KB plus 4.4 KB per v
 certificates with their voters' power. The signature record keeps every governance certificate for
 the life of the chain, with each signer's name, key and power (see
 [architecture.md](architecture.md#the-signature-record)).
+
+## Names as a name service
+
+The names on chain are a name service: each name publishes where it can be reached, and signs what
+it publishes.
+
+| A name publishes | Who changes it |
+|---|---|
+| its key | a key change, which the holder, its bank and the new key sign; or the ⅔ name action |
+| its bank of record | a bank change, which the holder and the new bank sign; or the ⅔ name action |
+| its public address: `http(s)://host[:port]`, its public face, such as a bank's CDN name or any name's website | the name alone, by an account update its key signs |
+| its IP addresses: at most 4, IPv4 or IPv6, what DNS A and AAAA records would hold | the name alone, by an account update its key signs |
+| its description | the name alone, by an account update its key signs |
+
+The genesis sets each of them for the names it creates.
+
+- **Only the name signs its addresses.** No bank co-signs them, and the ⅔ name action does not set
+  them. A frozen name sends no update, so its addresses stay as they were. A key change, a sale
+  included, keeps them: the new holder changes them.
+- **A validator's IP addresses do two more jobs.** The other validators gossip to them, on the
+  network's gossip port, and the gossip port's allow list lets in connections from them (see
+  [api.md](api.md#two-ports-and-the-public-face)). So the chain is the network's routing table, and
+  no node looks a name up in DNS.
+- **Where to read them.** `GET /hdls/resolve?name=` on a bank's operator port, or the files
+  `/hdls/resolve/name/<name>` and `/hdls/resolve/key/<SHA-256 of the key's bytes, in hex>` on any
+  bank's public face (see [api.md](api.md#the-public-face)). Each answer is a bank's word: a reader
+  that trusts no single bank asks several, or checks the record against a checkpoint, which carries
+  its ⅔ commit.
+- **Public for good.** What a name publishes is in every node's state, every checkpoint and every
+  account list. An update replaces it on chain, but does not take back what anyone copied
+  meanwhile.
+- **What comes later.** A gateway that answers DNS queries from the chain's records, so ordinary
+  resolvers can use them, and a TLS key record that the name's key signs, as DANE's TLSA records do
+  in DNS. A name's payment key should not become its TLS key: a web server's key sits on a machine
+  facing the internet, and a payment key must not. Both are in [TODO.md](../TODO.md).
 
 ## Extending it
 

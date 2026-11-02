@@ -39,10 +39,10 @@ func TestPaymentGossipReceiptAndReplay(t *testing.T) {
 		}
 	}()
 	for i := 0; i < nodeCount; i++ {
-		var peers []string
+		var peers [][]string
 		for j := 0; j < nodeCount; j++ {
 			if j != i {
-				peers = append(peers, servers[j].URL)
+				peers = append(peers, []string{servers[j].URL})
 			}
 		}
 		transports[i].SetPeers(peers)
@@ -73,7 +73,7 @@ func TestPaymentGossipReceiptAndReplay(t *testing.T) {
 	if receipt.Node != names[0] {
 		t.Fatal("receipt does not name the node we submitted to")
 	}
-	if !receipt.Verify(signing.MLDSA65{}, testNetworkID, testSigner(names[0]).PublicKeyBase64()) {
+	if !receipt.Verify(signing.NetworkScheme(), testNetworkID, testSigner(names[0]).PublicKeyBase64()) {
 		t.Fatal("the node's payment receipt did not verify under its key")
 	}
 
@@ -233,7 +233,7 @@ func TestRepeatPaymentGetsNoNewReceipt(t *testing.T) {
 	status, answer := pay("/hdls/pay")
 	var receipt ledger.Receipt
 	if err := json.Unmarshal(answer, &receipt); err != nil || status != http.StatusOK || receipt.Node != "bank-a" || receipt.PaymentID != ledger.PaymentID(payment) ||
-		!receipt.Verify(signing.MLDSA65{}, testNetworkID, testSigner("bank-a").PublicKeyBase64()) {
+		!receipt.Verify(signing.NetworkScheme(), testNetworkID, testSigner("bank-a").PublicKeyBase64()) {
 		t.Fatalf("the first submission: %d %s, want 200 and a receipt from bank-a for this payment", status, answer)
 	}
 	for _, route := range []string{"/hdls/pay", "/hdls/payment"} {

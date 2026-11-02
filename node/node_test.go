@@ -1,7 +1,9 @@
 package node
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"math/big"
 	"slices"
 	"strings"
@@ -17,8 +19,8 @@ import (
 // testNetworkID is the network id the node tests sign for.
 const testNetworkID = "testnet"
 
-// testSigners holds the signer of each test name, made on first use and shared by every test: an
-// ML-DSA-65 key costs about a millisecond to generate.
+// testSigners holds the signer of each test name, made on first use and shared by every test: a key
+// costs about a millisecond to generate.
 var (
 	testSignersMutex sync.Mutex
 	testSigners      = map[string]*signing.Signer{}
@@ -31,7 +33,7 @@ func testSigner(name string) *signing.Signer {
 	if signer, found := testSigners[name]; found {
 		return signer
 	}
-	signer, err := signing.Generate(signing.MLDSA65{}, testNetworkID)
+	signer, err := signing.Generate(signing.NetworkScheme(), testNetworkID)
 	if err != nil {
 		panic(err)
 	}
@@ -53,19 +55,19 @@ func validatorNames(count int) []string {
 	return names
 }
 
-// staticChain is a test chain: ML-DSA-65 on testNetworkID, the names given its static validators, each
+// staticChain is a test chain: the network's scheme on testNetworkID, the names given its static validators, each
 // of power 1.
 func staticChain(names ...string) ledger.Chain {
 	var validatorRule ledger.ValidatorRule
 	for _, name := range names {
 		validatorRule.StaticValidators = append(validatorRule.StaticValidators, ledger.StaticValidator{Name: name, Power: 1})
 	}
-	return ledger.Chain{Scheme: signing.MLDSA65{}, NetworkID: testNetworkID, ValidatorRule: validatorRule}
+	return ledger.Chain{Scheme: signing.NetworkScheme(), NetworkID: testNetworkID, ValidatorRule: validatorRule}
 }
 
 // dynamicChain is a test chain whose validators follow stake, seated from the threshold given.
 func dynamicChain(threshold string) ledger.Chain {
-	return ledger.Chain{Scheme: signing.MLDSA65{}, NetworkID: testNetworkID, ValidatorRule: ledger.ValidatorRule{Threshold: rational(threshold)}}
+	return ledger.Chain{Scheme: signing.NetworkScheme(), NetworkID: testNetworkID, ValidatorRule: ledger.ValidatorRule{Threshold: rational(threshold)}}
 }
 
 // testConfig is the config of the node of the test name on chain, from genesis.
@@ -126,6 +128,36 @@ func testGenesis(accounts []ledger.Account, stepTimeout, blockInterval time.Dura
 	parameters.BlockIntervalMs = blockInterval.Milliseconds()
 	sorted := slices.SortedFunc(slices.Values(accounts), func(first, second ledger.Account) int { return strings.Compare(first.Name, second.Name) })
 	return ledger.LedgerState{Accounts: sorted, Parameters: parameters}
+}
+
+// lockedBuffer is a buffer that the log package and a test can use at once.
+type lockedBuffer struct { // implements io.Writer
+	mutex  sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (logged *lockedBuffer) Write(data []byte) (int, error) {
+	logged.mutex.Lock()
+	defer logged.mutex.Unlock()
+	return logged.buffer.Write(data)
+}
+
+func (logged *lockedBuffer) String() string {
+	logged.mutex.Lock()
+	defer logged.mutex.Unlock()
+	return logged.buffer.String()
+}
+
+// captureLog sends the log to a lockedBuffer until the test ends, and returns the buffer. Another
+// goroutine may log at any moment, even one a test before this one left behind: a transport whose
+// peer stopped answering, or a gossip port's report of the connections it refused. So the buffer is
+// locked, and a test looks only for its own lines.
+func captureLog(t *testing.T) *lockedBuffer {
+	t.Helper()
+	logged, previousOutput := &lockedBuffer{}, log.Writer()
+	log.SetOutput(logged)
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+	return logged
 }
 
 func rational(literal string) *big.Rat {
@@ -261,7 +293,7 @@ func heights(snapshots []Snapshot) []int64 {
 
 // The node takes its height from the state it holds and keeps no count of its own: opened on a state
 // at height 7, it works on block 8, and commits a payment that names block 8. A node still at its
-// genesis state starts at once, without the re-gossip wait of a node back from a snapshot.
+// genesis state starts at once, without the wait of a node back from a snapshot without its sign log.
 func TestNodeHeightComesFromState(t *testing.T) {
 	genesis := testGenesis([]ledger.Account{testAccount("validator", "100"), testAccount("payer", "100")},
 		5*time.Second, 20*time.Millisecond) // a re-gossip interval longer than the wait below
