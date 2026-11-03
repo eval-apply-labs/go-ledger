@@ -25,8 +25,12 @@ import (
 //   - hdls/resolve/name/<name> and hdls/resolve/key/<SHA-256 of the key's bytes, in hex>: the name's
 //     record (see publishNameRecord), written when a commit or a catch-up changes it, removed with the
 //     name, and the key's removed when the name's key changes;
+//   - hdls/zone and hdls/resolve/ip/<address>, the name service's files (see zone.go);
 //   - hdls/bundle, the public bundle (spec §7.7): the consensus part of the node's bundle, written with
-//     the files of a commit or a catch-up and at each re-gossip tick (publishBundle).
+//     the files of a commit or a catch-up and at each re-gossip tick (publishBundle);
+//   - hdls/frames, the frames since the oldest height the record holds (Phase 4 spec §4.4, frames.go),
+//     written when a commit starts a frame of other names or keys (noteFrame), and read back at Open
+//     (openFrames).
 //
 // The loop makes each file's content, as it makes the snapshot's, and a publicFolderWriter writes it off
 // the loop, through a temporary file in .incoming and a rename into place, so a reader never sees a
@@ -56,9 +60,9 @@ func keyRecordPath(publicKey string) string {
 // openPublicFolder creates the public folder's folders, and writes every file once, from the state the
 // node opened at: the folder may be empty, or hold the files of an older state. A record file the folder
 // holds as it is now is left alone, so a restart does not write every name's two files again. The
-// resolve files of no current name or key are removed, and so is .incoming, with the temporary file of
-// any write a crash cut short (see writeFile). Open calls it last, without a public path it does
-// nothing, and a folder it can't create or clear is an error.
+// resolve files of no current name, key or IP address are removed, and so is .incoming, with the
+// temporary file of any write a crash cut short (see writeFile). Open calls it last, without a public
+// path it does nothing, and a folder it can't create or clear is an error.
 func (node *Node) openPublicFolder() error {
 	if node.config.PublicPath == "" {
 		return nil
@@ -66,12 +70,13 @@ func (node *Node) openPublicFolder() error {
 	if err := os.RemoveAll(filepath.Join(node.config.PublicPath, incomingFolder)); err != nil {
 		return fmt.Errorf("public folder: %w", err)
 	}
-	for _, folder := range []string{incomingFolder, nameRecordFolder, keyRecordFolder} {
+	for _, folder := range []string{incomingFolder, nameRecordFolder, keyRecordFolder, ipLookupFolder} {
 		if err := os.MkdirAll(filepath.Join(node.config.PublicPath, folder), 0o755); err != nil {
 			return fmt.Errorf("public folder: %w", err)
 		}
 	}
 	node.publicFolder = newPublicFolderWriter(node.config.PublicPath)
+	node.openFrames()
 	currentPaths := map[string]bool{} // the record paths of the current names and keys
 	for _, account := range node.state.Accounts {
 		record, _ := jsonAnswer(nameRecordOf(account)) // strings, numbers and booleans: it always marshals
@@ -82,7 +87,8 @@ func (node *Node) openPublicFolder() error {
 			}
 		}
 	}
-	for _, folder := range []string{nameRecordFolder, keyRecordFolder} {
+	node.openNameService(currentPaths)
+	for _, folder := range []string{nameRecordFolder, keyRecordFolder, ipLookupFolder} {
 		entries, err := os.ReadDir(filepath.Join(node.config.PublicPath, folder))
 		if err != nil {
 			return fmt.Errorf("public folder: %w", err)
@@ -123,6 +129,7 @@ func (node *Node) writePublicFolder(previousAccounts []ledger.Account) {
 			node.publishNameRecord(account)
 		}
 	}
+	node.writeIPLookups(previousAccounts)
 	node.publishCommittedState()
 }
 
@@ -146,9 +153,10 @@ func (node *Node) publishCommittedState() {
 	snapshot := node.snapshot()
 	node.publishAnswer("hdls/checkpoint", snapshot.checkpoint())
 	node.publishAnswer("hdls/accounts", snapshot.Accounts)
+	node.publishZone()
 	node.publishGovernance()
 	node.publishBundle()
-	node.publishAnswer("hdls/status", node.statusOf(node.state))
+	node.publishAnswer("hdls/status", node.statusOf(node.view.Load()))
 }
 
 // publishBundle queues hdls/bundle, the public bundle (spec §7.7): the consensus part of the node's
@@ -193,6 +201,7 @@ func (node *Node) publishAnswer(path string, value any) {
 // remove); a goroutine, started when the queue gets a file and ending when it is empty, writes.
 type publicFolderWriter struct {
 	folder  string            // Config.PublicPath
+	zone    string            // the zone file as last queued, or as the folder held it at Open (see publishZone); the loop's alone
 	mutex   sync.Mutex        // guards the fields below: the loop queues, the writing goroutine takes
 	queue   []string          // the paths queued and not taken yet, relative to folder, each once, in the order first queued
 	pending map[string][]byte // the newest content queued for each path in queue; nil to remove the file

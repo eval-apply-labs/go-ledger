@@ -1,0 +1,25 @@
+$ORIGIN hdls.example.org.
+$TTL 60
+@ SOA ns1.example.org. hostmaster.example.org. 1043 300 60 86400 60
+@ NS ns1.example.org.
+@ NS ns2.example.org.
+bank-a A 203.0.113.10
+bank-a AAAA 2001:db8::10
+bank-a TXT "hdls-public-address=https://bank-a.example.org"
+_443._tcp.bank-a TLSA 3 1 1 a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1
+bank-b A 203.0.113.20
+bank-b TXT "hdls-public-address=https://bank-b.example.org:8443"
+_8443._tcp.bank-b TLSA 3 1 1 b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1
+_8443._tcp.bank-b TLSA 3 1 1 b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2
+bank-c A 203.0.113.10
+dave AAAA 2001:db8::7
+dave A 198.51.100.7
+dave TXT "hdls-public-address=http://[2001:db8::7]:8080"
+validators-of-the-height-in-progress A 203.0.113.10
+validators-of-the-height-in-progress AAAA 2001:db8::10
+validators-of-the-height-in-progress A 203.0.113.20
+c6336407._ip TXT "carol (frozen)" "dave"
+cb00710a._ip TXT "bank-a" "bank-c"
+cb007114._ip TXT "bank-b"
+20010db8000000000000000000000007._ip TXT "dave"
+20010db8000000000000000000000010._ip TXT "bank-a"

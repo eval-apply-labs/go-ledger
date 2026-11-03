@@ -1,22 +1,38 @@
-# Four banks on one machine: the quickstart network. Each bank is an engine (cmd/server) and a fetcher
-# (cmd/fetcher), both from the go-ledger image (deploy/Dockerfile). make quickstart writes
-# deploy/quickstart/ with cmd/quickstart (the keys, the genesis, the node configs and network.env),
-# builds the images, then starts this file:
+# Four banks on one machine: the quickstart network. Each bank is an engine (cmd/server), a signer
+# (cmd/signer) and a fetcher (cmd/fetcher), from the go-ledger image (deploy/Dockerfile), and a wallet,
+# from the go-ledger-ui image (deploy/ui.Dockerfile). make quickstart writes deploy/quickstart/ with
+# cmd/quickstart (the keys, the genesis, the configs, the secrets and network.env), builds the images,
+# then starts this file:
 #
 #   docker compose -f deploy/compose.yaml --env-file deploy/quickstart/network.env up -d
 #
 # - The engines gossip on the gossip port, 8070, at the fixed IP addresses below, which the genesis
 #   lists. Each engine's allow list lets in only those addresses. The port is not published.
-# - The fetchers have fixed IP addresses too, so that no container of this file takes an address from
-#   the network's pool: one that took a stopped engine's would be let in by the others.
-# - Each engine's operator port, 8080, serves every route, for its fetcher. It is not published either.
-#   On a real network it sits on the bank's own network; here every container shares one.
+# - The fetchers and the wallets have fixed IP addresses on that network, ledger, too, so that no
+#   container of this file takes an address from its pool: one that took a stopped engine's would be
+#   let in by the others.
+# - Each engine's operator port, 8080, serves every route, for its fetcher and its bank's wallet. It is
+#   not published either. On a real network it sits on the bank's own network; here every container
+#   shares one.
 # - Each fetcher is its bank's public face and its public address on chain, such as
 #   http://bank-a-fetcher:8080. It is published on this machine only, at 127.0.0.1:18081 to 18084, for
 #   a wallet.
 # - Each engine keeps its data in a volume, which its fetcher mounts read-only. Both run as the image's
 #   user, 65532, since the engine keeps its record files readable by that user only.
-# - Each node config holds its bank's private key, and is mounted read-only as a secret.
+# - Each bank's key is in its signer only, sealed, with the passphrase that opens it (spec §2.8). The
+#   signer sits on the bank's signing network, such as signing-bank-a: internal, so nothing on it reaches
+#   out, and joined by no container but the signer and its two clients, the bank's engine and wallet. Its
+#   port is not published, and its allowFrom lets in that network's subnet only (spec §2.2). The engine's
+#   config and its client secret, and the wallet's client secret, are mounted read-only as secrets. Each
+#   signer keeps its logs in deploy/quickstart, beside its files.
+# - The engine and the wallet take an address from their signing network's pool: Podman 3.4 keeps one
+#   fixed address per container, on its first network by name, and theirs must be on ledger. So each
+#   signing network's name sorts after ledger's.
+# - Each bank's wallet, its desk and its admin page in one, signs through its signer, and holds only the
+#   bank's public key. It is published on this machine only, at 127.0.0.1:18091 to 18094, under the port
+#   it listens on: the wallet refuses a request for another port. In its container it listens beyond
+#   loopback, where any container on ledger reaches it, so it asks for a password, under any user name:
+#   the one in deploy/quickstart, such as bank-a.wallet.password, mounted as a secret.
 # - GENESIS_HASH_PREFIX, from network.env, is the first 16 hex digits of the genesis hash. The engine
 #   names its record files with it, so that each network's are apart.
 
@@ -24,11 +40,28 @@ services:
   bank-a-engine:
     image: go-ledger
     command: ["/server", "-config", "/run/secrets/bank-a-config"]
-    secrets: [bank-a-config]
+    secrets: [bank-a-config, bank-a-engine-secret]
     volumes: ["./quickstart/genesis.json:/genesis.json:ro", "bank-a-data:/data"]
     networks:
       ledger:
         ipv4_address: 172.28.70.11
+      signing-bank-a:
+    depends_on: [bank-a-signer]
+    restart: on-failure # its key self-test fails until its signer answers, and stops it
+  bank-a-signer:
+    image: go-ledger
+    # The signer runs in /quickstart, where its files have the names they have in deploy/quickstart, the
+    # names its config gives them. Only this bank's are mounted: its key, its passphrase and its clients'
+    # secrets, read-only, and the folder of its logs.
+    command: ["/signer", "-config", "bank-a.signer.json"]
+    working_dir: /quickstart
+    volumes: ["./quickstart/genesis.json:/quickstart/genesis.json:ro", "./quickstart/bank-a.signer.json:/quickstart/bank-a.signer.json:ro",
+      "./quickstart/bank-a.key.json:/quickstart/bank-a.key.json:ro", "./quickstart/bank-a.passphrase:/quickstart/bank-a.passphrase:ro",
+      "./quickstart/bank-a.engine.secret:/quickstart/bank-a.engine.secret:ro", "./quickstart/bank-a.wallet.secret:/quickstart/bank-a.wallet.secret:ro",
+      "./quickstart/bank-a.signer-logs:/quickstart/bank-a.signer-logs"]
+    networks:
+      signing-bank-a:
+        ipv4_address: 172.28.71.254
   bank-a-fetcher:
     image: go-ledger
     command: ["/fetcher", "-engine", "http://bank-a-engine:8080", "-folder", "/data/public",
@@ -40,15 +73,42 @@ services:
       ledger:
         ipv4_address: 172.28.70.21
     depends_on: [bank-a-engine] # the engine mounts the volume first, writable, so it gets /data's owner
+  bank-a-wallet:
+    image: go-ledger-ui
+    command: ["-node", "http://bank-a-engine:8080", "-network", "quickstart", "-listen", ":18091",
+      "-password-file", "/run/secrets/bank-a-wallet-password",
+      "-signer-url", "http://172.28.71.254:7000", "-signer-client", "wallet", "-signer-secret-file", "/run/secrets/bank-a-wallet-secret"]
+    secrets: [bank-a-wallet-secret, bank-a-wallet-password]
+    volumes: ["bank-a-wallet:/wallet", "./quickstart/bank-a.wallet.json:/wallet/wallet.json:ro"]
+    ports: ["127.0.0.1:18091:18091"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.31
+      signing-bank-a:
+    depends_on: [bank-a-engine]
 
   bank-b-engine:
     image: go-ledger
     command: ["/server", "-config", "/run/secrets/bank-b-config"]
-    secrets: [bank-b-config]
+    secrets: [bank-b-config, bank-b-engine-secret]
     volumes: ["./quickstart/genesis.json:/genesis.json:ro", "bank-b-data:/data"]
     networks:
       ledger:
         ipv4_address: 172.28.70.12
+      signing-bank-b:
+    depends_on: [bank-b-signer]
+    restart: on-failure
+  bank-b-signer:
+    image: go-ledger
+    command: ["/signer", "-config", "bank-b.signer.json"]
+    working_dir: /quickstart
+    volumes: ["./quickstart/genesis.json:/quickstart/genesis.json:ro", "./quickstart/bank-b.signer.json:/quickstart/bank-b.signer.json:ro",
+      "./quickstart/bank-b.key.json:/quickstart/bank-b.key.json:ro", "./quickstart/bank-b.passphrase:/quickstart/bank-b.passphrase:ro",
+      "./quickstart/bank-b.engine.secret:/quickstart/bank-b.engine.secret:ro", "./quickstart/bank-b.wallet.secret:/quickstart/bank-b.wallet.secret:ro",
+      "./quickstart/bank-b.signer-logs:/quickstart/bank-b.signer-logs"]
+    networks:
+      signing-bank-b:
+        ipv4_address: 172.28.72.254
   bank-b-fetcher:
     image: go-ledger
     command: ["/fetcher", "-engine", "http://bank-b-engine:8080", "-folder", "/data/public",
@@ -60,15 +120,42 @@ services:
       ledger:
         ipv4_address: 172.28.70.22
     depends_on: [bank-b-engine]
+  bank-b-wallet:
+    image: go-ledger-ui
+    command: ["-node", "http://bank-b-engine:8080", "-network", "quickstart", "-listen", ":18092",
+      "-password-file", "/run/secrets/bank-b-wallet-password",
+      "-signer-url", "http://172.28.72.254:7000", "-signer-client", "wallet", "-signer-secret-file", "/run/secrets/bank-b-wallet-secret"]
+    secrets: [bank-b-wallet-secret, bank-b-wallet-password]
+    volumes: ["bank-b-wallet:/wallet", "./quickstart/bank-b.wallet.json:/wallet/wallet.json:ro"]
+    ports: ["127.0.0.1:18092:18092"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.32
+      signing-bank-b:
+    depends_on: [bank-b-engine]
 
   bank-c-engine:
     image: go-ledger
     command: ["/server", "-config", "/run/secrets/bank-c-config"]
-    secrets: [bank-c-config]
+    secrets: [bank-c-config, bank-c-engine-secret]
     volumes: ["./quickstart/genesis.json:/genesis.json:ro", "bank-c-data:/data"]
     networks:
       ledger:
         ipv4_address: 172.28.70.13
+      signing-bank-c:
+    depends_on: [bank-c-signer]
+    restart: on-failure
+  bank-c-signer:
+    image: go-ledger
+    command: ["/signer", "-config", "bank-c.signer.json"]
+    working_dir: /quickstart
+    volumes: ["./quickstart/genesis.json:/quickstart/genesis.json:ro", "./quickstart/bank-c.signer.json:/quickstart/bank-c.signer.json:ro",
+      "./quickstart/bank-c.key.json:/quickstart/bank-c.key.json:ro", "./quickstart/bank-c.passphrase:/quickstart/bank-c.passphrase:ro",
+      "./quickstart/bank-c.engine.secret:/quickstart/bank-c.engine.secret:ro", "./quickstart/bank-c.wallet.secret:/quickstart/bank-c.wallet.secret:ro",
+      "./quickstart/bank-c.signer-logs:/quickstart/bank-c.signer-logs"]
+    networks:
+      signing-bank-c:
+        ipv4_address: 172.28.73.254
   bank-c-fetcher:
     image: go-ledger
     command: ["/fetcher", "-engine", "http://bank-c-engine:8080", "-folder", "/data/public",
@@ -80,15 +167,42 @@ services:
       ledger:
         ipv4_address: 172.28.70.23
     depends_on: [bank-c-engine]
+  bank-c-wallet:
+    image: go-ledger-ui
+    command: ["-node", "http://bank-c-engine:8080", "-network", "quickstart", "-listen", ":18093",
+      "-password-file", "/run/secrets/bank-c-wallet-password",
+      "-signer-url", "http://172.28.73.254:7000", "-signer-client", "wallet", "-signer-secret-file", "/run/secrets/bank-c-wallet-secret"]
+    secrets: [bank-c-wallet-secret, bank-c-wallet-password]
+    volumes: ["bank-c-wallet:/wallet", "./quickstart/bank-c.wallet.json:/wallet/wallet.json:ro"]
+    ports: ["127.0.0.1:18093:18093"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.33
+      signing-bank-c:
+    depends_on: [bank-c-engine]
 
   bank-d-engine:
     image: go-ledger
     command: ["/server", "-config", "/run/secrets/bank-d-config"]
-    secrets: [bank-d-config]
+    secrets: [bank-d-config, bank-d-engine-secret]
     volumes: ["./quickstart/genesis.json:/genesis.json:ro", "bank-d-data:/data"]
     networks:
       ledger:
         ipv4_address: 172.28.70.14
+      signing-bank-d:
+    depends_on: [bank-d-signer]
+    restart: on-failure
+  bank-d-signer:
+    image: go-ledger
+    command: ["/signer", "-config", "bank-d.signer.json"]
+    working_dir: /quickstart
+    volumes: ["./quickstart/genesis.json:/quickstart/genesis.json:ro", "./quickstart/bank-d.signer.json:/quickstart/bank-d.signer.json:ro",
+      "./quickstart/bank-d.key.json:/quickstart/bank-d.key.json:ro", "./quickstart/bank-d.passphrase:/quickstart/bank-d.passphrase:ro",
+      "./quickstart/bank-d.engine.secret:/quickstart/bank-d.engine.secret:ro", "./quickstart/bank-d.wallet.secret:/quickstart/bank-d.wallet.secret:ro",
+      "./quickstart/bank-d.signer-logs:/quickstart/bank-d.signer-logs"]
+    networks:
+      signing-bank-d:
+        ipv4_address: 172.28.74.254
   bank-d-fetcher:
     image: go-ledger
     command: ["/fetcher", "-engine", "http://bank-d-engine:8080", "-folder", "/data/public",
@@ -100,25 +214,86 @@ services:
       ledger:
         ipv4_address: 172.28.70.24
     depends_on: [bank-d-engine]
+  bank-d-wallet:
+    image: go-ledger-ui
+    command: ["-node", "http://bank-d-engine:8080", "-network", "quickstart", "-listen", ":18094",
+      "-password-file", "/run/secrets/bank-d-wallet-password",
+      "-signer-url", "http://172.28.74.254:7000", "-signer-client", "wallet", "-signer-secret-file", "/run/secrets/bank-d-wallet-secret"]
+    secrets: [bank-d-wallet-secret, bank-d-wallet-password]
+    volumes: ["bank-d-wallet:/wallet", "./quickstart/bank-d.wallet.json:/wallet/wallet.json:ro"]
+    ports: ["127.0.0.1:18094:18094"]
+    networks:
+      ledger:
+        ipv4_address: 172.28.70.34
+      signing-bank-d:
+    depends_on: [bank-d-engine]
 
 networks:
   ledger:
     ipam:
       config:
         - subnet: 172.28.70.0/24
+  signing-bank-a:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.71.0/24
+  signing-bank-b:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.72.0/24
+  signing-bank-c:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.73.0/24
+  signing-bank-d:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.74.0/24
 
 volumes:
   bank-a-data:
   bank-b-data:
   bank-c-data:
   bank-d-data:
+  bank-a-wallet:
+  bank-b-wallet:
+  bank-c-wallet:
+  bank-d-wallet:
 
 secrets:
   bank-a-config:
     file: ./quickstart/bank-a.json
+  bank-a-engine-secret:
+    file: ./quickstart/bank-a.engine.secret
+  bank-a-wallet-secret:
+    file: ./quickstart/bank-a.wallet.secret
+  bank-a-wallet-password:
+    file: ./quickstart/bank-a.wallet.password
   bank-b-config:
     file: ./quickstart/bank-b.json
+  bank-b-engine-secret:
+    file: ./quickstart/bank-b.engine.secret
+  bank-b-wallet-secret:
+    file: ./quickstart/bank-b.wallet.secret
+  bank-b-wallet-password:
+    file: ./quickstart/bank-b.wallet.password
   bank-c-config:
     file: ./quickstart/bank-c.json
+  bank-c-engine-secret:
+    file: ./quickstart/bank-c.engine.secret
+  bank-c-wallet-secret:
+    file: ./quickstart/bank-c.wallet.secret
+  bank-c-wallet-password:
+    file: ./quickstart/bank-c.wallet.password
   bank-d-config:
     file: ./quickstart/bank-d.json
+  bank-d-engine-secret:
+    file: ./quickstart/bank-d.engine.secret
+  bank-d-wallet-secret:
+    file: ./quickstart/bank-d.wallet.secret
+  bank-d-wallet-password:
+    file: ./quickstart/bank-d.wallet.password

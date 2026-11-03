@@ -4,8 +4,8 @@ Area: **general**: the threat model spans all four areas. `go_ledger` is a Go po
 Hypernode ledger (see the [README](../README.md#origins)), hardened as it was ported. The review
 rounds are in [`findings.md`](../findings.md) and [`findings_20261027.md`](../findings_20261027.md).
 This doc states the threat model, what the design fixes by construction, the limits of the freeze
-and of the banks, what the two ports and the public face protect, and what a deployment is still
-responsible for.
+and of the banks, what the signer, the two ports, the public face, the name service and the joiner
+protect, and what a deployment is still responsible for.
 
 ## Threat model and target
 
@@ -101,9 +101,10 @@ neither pays nor is paid and leaves the validator set until the ⅔ re-key it.
   more, recovery is a new genesis with new keys and a new network id.
 - Losing the largest validator must still leave more than ⅔ of the rest online, or the chain stops.
 - A holder's own freeze has no cap. A bank holding a third or more that freezes itself hands the
-  chain to the rest. Nodes that lag then need a snapshot from a node you trust (see
-  [operating-a-network.md](operating-a-network.md#rejoining-after-a-restart)), and wallets that
-  pinned it need a new list.
+  chain to the rest. Nodes that lag then walk the frames from the public faces, or, where they
+  can't, need a snapshot from a node you trust (see
+  [operating-a-network.md](operating-a-network.md#a-joining-node)), and wallets that pinned it need
+  a new list.
 - The last seated name cannot freeze itself, and no ⅔ action may freeze it: a block that seats no
   name could never be followed. So the last bank has no emergency brake.
 
@@ -137,7 +138,7 @@ co-signatures, so freezing a leaked bank key stops both at once.
   ⅓ of the power, and so does hiding a node's lag from a wallet that heard from more than ⅔. See
   [ui/README.md](../ui/README.md#how-it-works).
 - A wallet's pin follows the validator set, but only to a set that more than ⅔ of its pinned power
-  signed for, never by the ⅓ rule of a node's catch-up: a pin may hold keys that leaked. If banks
+  signed for, the rule a node's catch-up follows too: a pin may hold keys that leaked. If banks
   holding a third or more of the pinned power change between two of its reads, it needs a new list,
   and its pages say so. Any node, or anyone on the plain-HTTP path, can make them say so, by serving
   a made-up set that signs for itself, to get its own list trusted; so the message says to take a
@@ -165,6 +166,29 @@ complete unit for good. On the operator port, a request with `from` reads at mos
 100 heights: in static mode about 3.7 MB with 4 validators and 14 MB with 21; in dynamic mode, where
 most entries carry the set, about 5.8 MB and 26 MB. A request without `from` also lists the record
 folder, about 6,000 files at the default retention. See [api.md](api.md#the-record-routes).
+
+## The key's place: the signer
+
+A bank's one key can live in the signer, `cmd/signer`, a program on the bank's private network that
+accepts nothing from the internet. The engine and the bank's wallet hold the public key only, and ask
+it for each signature, each as a client with its own secret and its own list of domains. Its rules,
+its logs and its limits are in [signature.md](signature.md#the-signer).
+
+- **What it changes.** A break-in on the engine or on a wallet terminal no longer takes the key. It
+  gets only what that client's domains allow, in the bank's own name, and the signer gives each vote
+  and proposal slot one signature, written to disk before it is made. So a stolen engine cannot get
+  the bank frozen for a double-sign.
+- **What it does not change.** A stolen engine still keeps the bank from voting, can have votes
+  signed for heights to come, which stops the bank voting until it re-keys, and signs receipts that
+  lie. A stolen admin terminal still pays the bank's money, changes its addresses and TLS keys, and
+  signs its governance votes. A stolen desk co-signs, and can freeze the bank. A break-in on the
+  signer's own machine, once its passphrase is read, takes the key: the key is in its memory while it
+  runs, and only hardware, outside the standard library, would keep it out.
+- **It does not stop a fork on its own.** The engine's own sign log, with its lock, still does that
+  job.
+- **The link has no TLS.** It carries only what the bank will publish. An HMAC under each client's
+  secret tells who asks, and every client checks every answer under the bank's public key. Someone
+  on the bank's private network can read the requests and drop them, which costs the bank its vote.
 
 ## The two ports and the public face
 
@@ -240,14 +264,65 @@ What this leaves of `findings.md` #10, the open API: the gossip routes are behin
 and their signatures, the public routes behind a CDN and the fetcher's cap, and the operator port,
 which still has neither, is never published.
 
+## The name service
+
+The engine writes the names' records as a zone file, and a lookup from an IP address to the names
+that list it (see [operating-a-network.md](operating-a-network.md#the-name-service)).
+
+- **A record is a claim.** Nothing checks that a name controls the addresses it lists. The lookup
+  says who *claims* an address, not who uses it, and names every claimant. So a flood that the
+  allow-list refusal line or the fetcher's line attributes to a name is a reason to call that name's
+  bank, not proof. No code bans anyone.
+- **The zone is a bank's word.** It follows from the committed accounts and the zone settings, so
+  two banks with one setting serve the same zone, apart from its serial, and anyone can compare
+  them. The engine does not sign it with DNSSEC; without that, a DNS answer can be forged on the path,
+  and a `TLSA` record counts for nothing.
+- **The wallet pins a bank's web server by the chain.** When a bank lists TLS keys on its account, a
+  wallet that verified a state takes, at that bank's public address, only a certificate whose key is
+  one of them, and asks no certificate authority (`ui/tlspin.go`). Only a validator's record pins,
+  since any name may list any address. Before the wallet verifies a state, at its first read after
+  each start, the usual check by certificate authority applies.
+- **An IPv6 flooder can spread over a /64**, so that each of its addresses sends little, and the
+  lines that name the address that sent the most name none of them.
+
+## Joining: trust a frame, not a peer
+
+A node takes a newer checkpoint only when names holding more than ⅔ of the power of the validator
+set it trusts signed it, under that set's keys: forging a state takes the keys of more than ⅔ of a
+set the node already trusts, not ⅓ as before. Where the set changed too much, it walks from set to
+set, each signed off by more than ⅔ of the one before. It asks every validator, so one peer that
+withholds the newest checkpoint is outvoted, and two valid commits for different blocks at one
+height stop it with an alarm, for people to look (see
+[operating-a-network.md](operating-a-network.md#a-joining-node)).
+
+What is still trusted:
+
+- **The first frame.** A fresh node trusts its genesis, and a seeded one its seed. If the seed is
+  false, every later check runs inside a false world, so a joiner checks its seed with a second bank.
+  A seated node is confirmed once a commit holds its own precommit; a node whose seed was altered
+  never is.
+- **Old keys.** There is no trusting period. Keys of more than ⅔ of the power of any old set on the
+  walk's path, stolen or sold, can sign a false history that a node away since then takes.
+- **A fork it cannot see.** The check needs a peer still at the node's own height. A node behind on
+  the other side of a fork, with every peer two or more heights ahead, as on a busy chain, takes
+  their side without an alarm.
+- **More than ⅓ lying together** can still make two valid commits at one height. The alarm turns that
+  into a stop, not a silent choice.
+
 ## The deployment is responsible for
 
 - **Keeping private keys private.** Keys are made by `keygen` or the wallet on the machine that
-  holds them, and never sent. Never put a private key on a network endpoint.
+  holds them, and never sent. Never put a private key on a network endpoint. A bank's key goes in
+  its signer, sealed, with its passphrase off the key's disk, and the signer's port reaches only the
+  bank's engine and wallet (see
+  [operating-a-network.md](operating-a-network.md#running-a-signer)).
 - **Exposing each port only to whom it is for.** The gossip port faces the internet behind its
   allow list, at the IP addresses the bank publishes, with each caller's own address intact, and
   the bank publishes every address its engine connects from. The operator port is never published.
-  The public face stands behind a CDN, which limits each client. See
+  The public face stands behind a CDN, which limits each client. A bank's wallet signs as the bank,
+  so only its operator reaches it, never from a network others share, and anywhere but a loopback
+  address it
+  asks for a password. See
   [operating-a-network.md](operating-a-network.md#network-exposure).
 - **Provisioning for liveness.** Finalisation needs > ⅔ of the power online. On flaky hardware, put
   enough power on the machines you can keep awake. A partition that leaves no side above ⅔ stalls;
@@ -257,7 +332,11 @@ which still has neither, is never published.
 - **Persistence, the sign log and backups.** A validator must set `snapshotPath`, keep its sign log,
   run its key on one node only (see [signature.md](signature.md#the-sign-log)), and never restart
   from an old backup. Keep an off-machine export of the state too. See
-  [operating-a-network.md](operating-a-network.md#rejoining-after-a-restart).
+  [operating-a-network.md](operating-a-network.md#rejoining-after-a-restart). A signer's sign log is
+  kept the same way, one per signer, and its audit log is rotated before it fills the disk, which
+  would stop the bank voting.
+- **A checked seed.** A node seeded from a snapshot trusts it; check its height and block with a
+  second bank before its first start.
 - **A clean new genesis.** A new `networkName`, and no snapshot, sign log or record files of the old
   network.
 

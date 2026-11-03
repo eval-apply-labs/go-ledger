@@ -1,17 +1,19 @@
 package ledger
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/eval-apply-labs/go-ledger/consensus"
 )
 
-// forgeBlock is the block at height that carries payments on previousState, with the signing set's hash
-// and the digest of the state they result in: a block whose only fault can be a rule about the payments
-// themselves.
+// forgeBlock is the block at height that carries payments on previousState, with the hashes of the
+// signing set and of the next one, and the digest of the state they result in: a block whose only fault
+// can be a rule about the payments themselves.
 func forgeBlock(previousState LedgerState, height int64, payments ...Payment) Block {
 	next := buildLedgerState(height, ProcessPayments(previousState.Accounts, payments, previousState.Parameters.TransactionCost), previousState.Parameters.TransactionCost)
-	return Block{Height: height, ValidatorsHash: signingSetHash(testChain(), previousState), Content: BlockContent{Payments: payments}, StateDigest: next.Digest()}
+	return Block{Height: height, ValidatorsHash: signingSetHash(testChain(), previousState), NextValidatorsHash: signingSetHash(testChain(), next),
+		Content: BlockContent{Payments: payments}, StateDigest: next.Digest()}
 }
 
 func TestProposeAndApplyBlockRoundTrip(t *testing.T) {
@@ -163,5 +165,59 @@ func TestApplyBlockRequiresTheSigningSetHash(t *testing.T) {
 	}
 	if _, err := ApplyBlock(testChain("bank-a"), previousState, zeroHash, block); err == nil {
 		t.Error("a block applied on a chain whose rule seats another set")
+	}
+}
+
+// A block names, by its hash, the set that signs the next block (Phase 4 spec §4.3): the set the state
+// it results in seats. So block h+1's ValidatorsHash is block h's NextValidatorsHash, in static and in
+// dynamic mode, across a block that changes the set too: a static freeze takes a seat away, and a
+// dynamic delegation seats a new name. The block hash covers it, so a block's commit is its set signing
+// off the next one, and ApplyBlock refuses a block that names any other next set.
+func TestEachBlockNamesTheNextSigningSet(t *testing.T) {
+	staticChain, staticState := requestFixture()
+	dynamicState := buildLedgerState(0, []Account{namedAccount("alice", "100"), namedAccount("bob", "0"), seatedAccount()}, rational("0.1"))
+	for _, testCase := range []struct {
+		mode     string
+		chain    Chain
+		state    LedgerState
+		contents []BlockContent // the second changes the set
+	}{
+		{"static", staticChain, staticState, []BlockContent{
+			{Payments: []Payment{signedPayment("alice", "bob", "1", requestBlock)}},
+			requests(freezeOf("bank-b", requestBlock+1)),
+			{},
+		}},
+		{"dynamic", testChain(), dynamicState, []BlockContent{
+			{Payments: []Payment{signedPayment("alice", "bob", "10", 1)}},
+			{AccountUpdates: []AccountUpdate{signedUpdate(AccountUpdate{Name: "alice", Delegate: "bob", BlockID: 2})}},
+			{},
+		}},
+	} {
+		t.Run(testCase.mode, func(t *testing.T) {
+			state := testCase.state
+			var blocks []Block
+			var statesBefore []LedgerState
+			for _, content := range testCase.contents {
+				statesBefore = append(statesBefore, state)
+				var block Block
+				block, state = nextBlock(t, testCase.chain, state, content)
+				blocks = append(blocks, block)
+			}
+			if blocks[1].NextValidatorsHash == blocks[1].ValidatorsHash || blocks[0].NextValidatorsHash != blocks[0].ValidatorsHash {
+				t.Fatal("premise: the second block, and only it, changes the set")
+			}
+			for i := 0; i+1 < len(blocks); i++ {
+				if blocks[i+1].ValidatorsHash != blocks[i].NextValidatorsHash {
+					t.Errorf("block %d is signed by another set than the one block %d named as the next", blocks[i+1].Height, blocks[i].Height)
+				}
+			}
+			for name, nextValidatorsHash := range map[string][32]byte{"the set before the change": blocks[1].ValidatorsHash, "no set": zeroHash} {
+				forged := blocks[1]
+				forged.NextValidatorsHash = nextValidatorsHash
+				if _, err := ApplyBlock(testCase.chain, statesBefore[1], zeroHash, forged); err == nil || !strings.Contains(err.Error(), "next signing set") {
+					t.Errorf("a block naming %s as the next applied, or was refused for another reason: %v", name, err)
+				}
+			}
+		})
 	}
 }

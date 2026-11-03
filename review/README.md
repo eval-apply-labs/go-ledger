@@ -1,8 +1,14 @@
 # The review folder
 
-The reviews of go-ledger, and the records of the Phase 2 and Phase 3 builds. One line per file and
-folder; start with the build records.
+The reviews of go-ledger, and the records of the Phase 2, Phase 3 and Phase 4 builds. One line per
+file and folder; start with the build records.
 
+- [`phase4_progress.md`](phase4_progress.md): the Phase 4 build record: where the branch stands,
+  how each slice was built and checked, the owner's decisions, the three independent reviews of
+  2026-11-03 and their recheck, what became of each finding, what is left, the owner's answer on the
+  zone's TLSA records, and how to resume.
+- [`phase4_spec.md`](phase4_spec.md): the Phase 4 spec, the signer, the name service and a joiner
+  that trusts no single peer, with its notes on what the build and the reviews' fixes changed.
 - [`phase3_progress.md`](phase3_progress.md): the Phase 3 build record: where the branch stands,
   how each slice was built and checked, the owner's decisions, the independent review of
   2026-11-01 and the fix of each finding, and how to resume.
@@ -40,12 +46,14 @@ folder; start with the build records.
 
 ## The commits these files cite
 
-The files here cite commits by hash. On `main`, the work they record is two commits:
+The files here cite commits by hash. On `main`, the work they record is three commits:
 
 - the post-eMudhra review of 2026-10-27 to the end of Phase 2 on 2026-10-31, the child of
   `9a60643`, squashing 430 commits;
 - the scheme drop-in, the owner's decisions on spec §12, Phase 3 and the currency's fee and taxes,
-  2026-10-31 to 2026-11-02, the child of the first, squashing 122 commits.
+  2026-10-31 to 2026-11-02, the child of the first, squashing 122 commits;
+- Phase 4, the signer, the name service and the joiner, 2026-11-02 to 2026-11-03, the child of the
+  second, squashing 86 commits.
 
 The hashes name commits of those development histories, which the maintainer keeps and which are
 not in this repository. Each squashed commit's tree is its history's last tree, file for file.

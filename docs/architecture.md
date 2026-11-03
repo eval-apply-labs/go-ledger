@@ -25,24 +25,50 @@ hard to test (timing, networking) is a thin shell with one concurrency model.
        └────────────── signing                     ML-DSA-65 and the domains (pure)
 ```
 
-Imports point down only. Two more commands sit beside them: `cmd/fetcher` imports only `ledger`,
-and `cmd/quickstart` only `ledger` and `signing`. `ledger` uses the consensus validator set, the ⅔
-certificate tally (`CertificateTally`) and the two evidence types, never the driver. `ledger`,
-`consensus` and `signing` do no I/O and read no clock: no file of theirs but a test imports `time`
-(`TestNoRuleReadsTheClock`).
+Imports point down only. Three more commands sit beside them: `cmd/fetcher` imports only
+`ledger`, `cmd/quickstart` only `ledger` and `signing`, and `cmd/signer` `ledger`, `consensus` and
+`signing`, never `node`. `ledger` uses the consensus validator set, the ⅔ certificate tally
+(`CertificateTally`) and the two evidence types, never the driver. `ledger` and `consensus` do no
+I/O and read no clock: no file of theirs but a test imports `time` (`TestNoRuleReadsTheClock`).
+Neither does `signing`, but for its key file and its remote signer (`signing/keyfile.go`,
+`signing/remote.go`), which read files and ask the signer over HTTP, with a deadline: they serve
+the engine, the signer and the wallet, never a rule.
 
 | Area | Code |
 |---|---|
-| signature ([signature.md](signature.md)) | `signing/`, `cmd/keygen/`, the sign log in `node/persist.go` |
+| signature ([signature.md](signature.md)) | `signing/`, `cmd/keygen/`, `cmd/signer/`, the sign log in `node/persist.go` |
 | node (this doc) | `ledger/`, `consensus/`, `node/` but its HTTP side |
-| API/CDN ([api.md](api.md)) | `node/httptransport.go` (the record, bundle and checkpoint routes too), `node/allowlist.go`, `node/relay.go`, `node/topology.go`, `node/peerdns.go`, the fetches in `node/sync.go`, `cmd/server/`, `cmd/fetcher/`, `cmd/demo/`, `cmd/quickstart/`, `deploy/` |
+| API/CDN ([api.md](api.md)) | `node/httptransport.go` (the record, bundle and checkpoint routes too), `node/allowlist.go`, `node/relay.go`, `node/topology.go`, `node/peerdns.go`, the fetches in `node/sync.go` and `node/frames.go`, `cmd/server/`, `cmd/fetcher/`, `cmd/demo/`, `cmd/quickstart/`, `deploy/` |
 | UI ([`ui/README.md`](../ui/README.md)) | `ui/` |
 
 `cmd/keygen` prints a fresh ML-DSA-65 key pair, the private key as the 32-byte seed it derives
-from. `cmd/server` runs one node, the engine, from a config file and a genesis file. `cmd/fetcher`
-serves a bank's public face from the files the engine writes. `cmd/demo` runs one node and one
-wallet on one machine, and `cmd/quickstart` writes a network of four banks for the compose file in
-`deploy/`.
+from; with `-encrypt` it writes a sealed key file, and with `-secret` it prints a signer client's
+secret. `cmd/server` runs one node, the engine, from a config file and a genesis file. `cmd/signer`
+holds a bank's key and signs for the bank's own programs. `cmd/fetcher` serves a bank's public face
+from the files the engine writes. `cmd/demo` runs one node and one wallet on one machine, and
+`cmd/quickstart` writes a network of four banks for the compose file in `deploy/`.
+
+**Where the key lives.** A bank has one key. The engine's config gives either `privateKey`, the key
+in the engine's own process, or `signer`, which names the signer program that holds it (`url`,
+`client` and `secretFile`), never both. A bank's wallet chooses the same way, by its flags. With the
+signer, the key is on a machine of its own, sealed at rest under a passphrase (a plaintext key file
+is for tests), and the signer takes connections only from the addresses in its `allowFrom` list,
+the bank's own programs':
+
+```
+  the internet                    the bank's own machines
+  wallets, joiners ── CDN ──────► fetcher ──► engine's operator port
+  other validators ─────────────────────────► engine's gossip port
+                                              engine ───── POST /sign ──► signer (the key)
+                                  the bank's wallet ────── POST /sign ──► signer
+                                  the bank's wallet ──► engine's operator port
+```
+
+The code signs through one interface either way, `signing.Signer`: a `LocalSigner` holds the key,
+and a `RemoteSigner` asks the signer and checks each answer under the bank's public key. At start
+the engine signs its key self-test, over its own name, and stops unless it verifies under its
+`publicKey`. What the signer allows each client, and what a break-in on each machine gets, are in
+[signature.md](signature.md); its route is in [api.md](api.md#the-signers-route).
 
 ## The state
 
@@ -55,8 +81,9 @@ order is refused before anything else (`LedgerState.NamesAscending`).
 `ledger.Account` holds one name: `Name`, `PublicKey` (the name's current key), `Amount`, `Bank`
 (its bank of record), `Delegate` (the name its balance backs as stake), `Description`,
 `PublicAddress` (its public face, such as a bank's CDN name), `IPAddresses` (at most 4; a
-validator's gossip addresses), `Frozen`, and at most one pending change: `PendingKey` or
-`PendingBank`, due at the end of block `PendingHeight`.
+validator's gossip addresses), `TLSKeys` (at most 2: the hashes of its web server's keys),
+`Frozen`, and at most one pending change: `PendingKey` or `PendingBank`, due at the end of block
+`PendingHeight`.
 
 - **Names.** 1 to 32 lowercase ASCII letters, digits and hyphens, starting and ending with a letter
   or a digit (`ledger.CanonicalName`). Nothing is normalised: `Alice` is not a name. A name is
@@ -77,10 +104,10 @@ validator's gossip addresses), `Frozen`, and at most one pending change: `Pendin
   burned. `ledger.ProcessPayments` moves value only for a payment of at least the cost between two
   existing names (audit B1, B2), applies identical content once, and bans a payer whose payments in
   one block overdraw it: its pre-block balance is destroyed. Honest intake never lets that happen.
-- **Account updates** (`ledger.AccountUpdate`): set `Delegate`, `Description`, `PublicAddress` and
-  `IPAddresses`. `""` leaves a field, `-` clears it. For `IPAddresses`, an empty list leaves them,
-  `["-"]` clears them, and any other list replaces the whole list. An update is free. It never
-  names or renames an account.
+- **Account updates** (`ledger.AccountUpdate`): set `Delegate`, `Description`, `PublicAddress`,
+  `IPAddresses` and `TLSKeys`. `""` leaves a field, `-` clears it. For `IPAddresses` and `TLSKeys`,
+  an empty list leaves them, `["-"]` clears them, and any other list replaces the whole list. An
+  update is free. It never names or renames an account.
 - **Name requests** (`ledger.NameRequest`), four kinds, all in one pool and one route:
   - a *registration* binds a free name to a new key. The requestor pays the fee and signs; a seated
     bank, which is the requestor itself or the requestor's bank of record, co-signs and becomes the
@@ -111,6 +138,7 @@ power floor(total), at most 2^40. A frozen name is never seated.
 ## The block and its hashes
 
 `ledger.Block` holds `Height`, `PreviousBlockHash`, `ValidatorsHash` (of the set that signs it),
+`NextValidatorsHash` (of the set that signs the next block: the one the resulting state seats),
 `Nonce` (32 random bytes the proposer draws), `Content` and `StateDigest` (of the resulting
 state). `ledger.BlockContent` holds payments, account updates, name requests, vote evidence,
 proposal evidence, and at most one governance action.
@@ -120,10 +148,12 @@ proposal evidence, and at most one governance action.
 | `ContentHash` | the content's JSON |
 | `SealedDigestOf` | the nonce, the state digest and the content hash |
 | `ValidatorsHash` | each member's name, key and power, in name order |
-| `BlockHashOf` | the height, the previous block hash, the validators hash and the sealed digest |
+| `BlockHashOf` | the height, the previous block hash, the validators hash, the next validators hash and the sealed digest |
 
-Votes, commits and proposals sign the block hash. So a signature covers the block's body and the
-set that signs it, and the nonce keeps the state digest out of the signature record.
+Votes, commits and proposals sign the block hash. So a signature covers the block's body, the set
+that signs it and the set that signs the next block, and the nonce keeps the state digest out of
+the signature record. Each commit so signs off the next set, which a node that walks the frames
+relies on (see [consensus.md](consensus.md#frames-and-the-walk)).
 
 `ledger.ApplyBlock(chain, previousState, previousBlockHash, block)` returns the next state or an
 error naming the broken rule. It checks, all against the pre-block state: the height is the next
@@ -135,7 +165,7 @@ nothing else in that block. It then applies, in order: payments, updates, name r
 freezes, freezes from every source, then the governance action (a parameter change, or the ⅔
 action's other parts), then the changes that fall due.
 The result must keep each risen balance within the pre-block cap, must seat at least one name,
-and must have the digest the block claims.
+and must have the digest and the next set the block claims.
 
 `ledger.ProposeBlock` builds a block that passes those checks from what the node's pools hold. It
 checks each entry's cheap rules first and its signatures only when it is about to add it. It stops
@@ -218,12 +248,12 @@ idles it lives only in memory until the next commit writes the snapshot, at most
 ## The signature record
 
 For each block it commits, a node with a `snapshotPath` writes a rolling entry
-(`node.RecordEntry`): the height, the previous block hash, the sealed digest, the proposal of the
-deciding round, the commit, the signing set (when it differs from the entry before, and in the
-first entry of each unit file), and `KeepUntilHeight`. From these anyone recomputes each block hash
-and checks the chain. For a block that carries a governance action or evidence it also writes a
-lifelong entry (`node.LifelongRecordEntry`), with the name, key and power of each signer. Payments,
-updates, name requests, nonces and state digests are never written.
+(`node.RecordEntry`): the height, the previous block hash, the next validators hash, the sealed
+digest, the proposal of the deciding round, the commit, the signing set (when it differs from the
+entry before, and in the first entry of each unit file), and `KeepUntilHeight`. From these anyone
+recomputes each block hash and checks the chain. For a block that carries a governance action or
+evidence it also writes a lifelong entry (`node.LifelongRecordEntry`), with the name, key and power
+of each signer. Payments, updates, name requests, nonces and state digests are never written.
 
 - Files, beside the snapshot, named by network (the genesis hash's first 16 hex digits):
   `<snapshotPath>.<network>.record/<first height, 20 digits>.jsonl`, one unit file per 100
@@ -254,6 +284,9 @@ With `publicPath` set, the engine writes the files its fetcher serves to the pub
 | `hdls/resolve/name/<name>` | the name's record | when a commit or catch-up changes the record |
 | `hdls/resolve/key/<SHA-256 of the key's bytes, in hex>` | the same record, found by key | as above; the old key's file goes when the key changes |
 | `hdls/bundle` | the public bundle: the consensus part of the node's bundle (below), at most 8 MiB | made with the files of a commit or catch-up, and at each re-gossip tick; written only when it changed |
+| `hdls/resolve/ip/<address>` | the names that list the IP address, a frozen one marked | when a commit or catch-up changes them; removed once no name lists the address |
+| `hdls/zone` | the zone file, with a `zone` setting only (see [governance.md](governance.md#names-as-a-name-service)) | with the files of a commit or catch-up, only when more than its serial changed |
+| `hdls/frames` | one line per frame, the index of the walk (see [consensus.md](consensus.md#frames-and-the-walk)) | when a commit starts a frame of other names or keys; read back as the node opens, its only copy |
 
 - **A name's record** (`Node.publishNameRecord`) has the fields `/hdls/resolve` answers, but the
   committed height and state digest, which change at every block: every file would be rewritten at
@@ -339,8 +372,9 @@ lines, that any carrier can move.
   at the first line that fails it, is no message, or is refused.
 - **A carried checkpoint** (`Node.ImportCheckpoint`, `POST /hdls/checkpoint` on the operator port)
   goes through the catch-up event: the loop verifies it as catch-up does, with the validators of
-  its last committed state as the anchor, and adopts it if it is ahead. Otherwise it gives the
-  reason: not ahead, does not verify, or the node is still starting.
+  its last committed state as the trusted frame and no walk of the frames, and adopts it if it is
+  ahead. Otherwise it gives the reason: not ahead, does not verify, diverges, the node is halted, or
+  it is still starting (see [consensus.md](consensus.md#catching-up)).
 - **The second path** (`Node.pullPublicBundles`). At each re-gossip tick, the loop checks whether
   the driver has run the height for 4 re-gossip intervals, the governed step timeouts, since
   `Node.startHeight` began it (`heightStartedAt`). If so, it fetches the public bundle of every

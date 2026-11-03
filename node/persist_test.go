@@ -181,7 +181,7 @@ func TestOpenRefusesSignLogThatDoesNotVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signerOn := func(network string) *signing.Signer { // one key, signing for the given network
+	signerOn := func(network string) signing.Signer { // one key, signing for the given network
 		signer, err := signing.NewSigner(signing.NetworkScheme(), network, privateKey)
 		if err != nil {
 			t.Fatal(err)
@@ -412,7 +412,7 @@ func TestSignLogLeftBehindIsEmptied(t *testing.T) {
 
 	caughtUp := signedAtHeightOne()
 	caughtUp.started = true
-	caughtUp.catchUp(checkpoint)
+	caughtUp.catchUp(checkpoint, nil)
 	if logged := loggedOnDisk(caughtUp); logged.Height != 6 || len(logged.Votes) != 0 || len(logged.Proposals) != 0 || logged.Locked != nil {
 		t.Errorf("after a catch-up to height 5 the sign log holds height %d, %d votes and %d proposals, want an empty log for height 6", logged.Height, len(logged.Votes), len(logged.Proposals))
 	}
@@ -422,7 +422,7 @@ func TestSignLogLeftBehindIsEmptied(t *testing.T) {
 	if err != nil || adopting.signLog.Height != 1 {
 		t.Fatalf("premise: the node opens with its log of height 1 (err %v)", err)
 	}
-	adopting.adopt(checkpoint)
+	adopting.adopt(checkpoint, nil)
 	if logged := loggedOnDisk(adopting); logged.Height != 1 || len(logged.Votes) != 0 || len(logged.Proposals) != 0 || logged.Locked != nil {
 		t.Errorf("after adopting a checkpoint of height 5 the sign log holds height %d, %d votes and %d proposals, want an empty log for height 1", logged.Height, len(logged.Votes), len(logged.Proposals))
 	}

@@ -99,6 +99,7 @@ func (node *Node) fastForward(checkpoint Checkpoint) {
 	node.heightVotes = map[string]consensus.Vote{}     // votes from the abandoned height no longer apply
 	node.heightProposals = map[int32]ProposalMessage{} // likewise its proposals
 	node.invalidProposals = map[int32]int{}
+	node.refusedBlocks = map[[32]byte]refusedBlock{}
 	node.blocks = map[[32]byte]ledger.Block{}
 	node.lastProposal = ProposalMessage{}
 	node.publishView()

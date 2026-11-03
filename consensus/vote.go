@@ -55,7 +55,7 @@ func (vote Vote) signFields() [][]byte {
 // SignVote returns a copy of vote signed by signer in the block-revision domain, bound to the
 // signer's network. (Height, round and type are all part of the signed bytes, so a vote for
 // one round can never be replayed as a vote for another.)
-func SignVote(signer *signing.Signer, vote Vote) (Vote, error) {
+func SignVote(signer signing.Signer, vote Vote) (Vote, error) {
 	signature, err := signer.SignBase64(signing.DomainBlockRevision, vote.signFields()...)
 	if err != nil {
 		return vote, err

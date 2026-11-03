@@ -299,7 +299,7 @@ func TestPublicFolderAtOpenAndAfterACatchUp(t *testing.T) {
 	withoutCarol := genesis
 	withoutCarol.Accounts = slices.DeleteFunc(slices.Clone(genesis.Accounts), func(account ledger.Account) bool { return account.Name == "carol" })
 	carol, _ := ledger.FindAccount(genesis.Accounts, "carol")
-	node.adopt(checkpointOf(t, 9, withoutCarol, validatorsOf([]string{"validator"}), nil))
+	node.adopt(checkpointOf(t, 9, withoutCarol, validatorsOf([]string{"validator"}), nil), nil)
 	if node.height() != 10 {
 		t.Fatalf("premise: the node adopted the checkpoint of height 9, it works on %d", node.height())
 	}
@@ -331,7 +331,7 @@ func TestTwoBanksPublishTheSameRecordFiles(t *testing.T) {
 		config.PublicPath = t.TempDir()
 		bank := New(config, &recordingTransport{})
 		defer bank.Stop()
-		bank.adopt(checkpointOf(t, height, changed, validatorsOf([]string{"validator"}), nil))
+		bank.adopt(checkpointOf(t, height, changed, validatorsOf([]string{"validator"}), nil), nil)
 		if bank.height() != height+1 {
 			t.Fatalf("premise: the bank adopted the checkpoint of height %d, it works on %d", height, bank.height())
 		}

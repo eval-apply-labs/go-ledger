@@ -844,7 +844,10 @@ func TestValidatorBackWithoutItsSignLogStillWaitsAfterAnotherRestart(t *testing.
 	const networkHeight = 3
 	self := network.proposer(networkHeight, 0)
 	genesis := testGenesis(network.genesis, network.timeout, time.Millisecond) // a wait of an hour, a block interval of 1 ms
-	checkpoint := checkpointOf(t, networkHeight-1, genesis, network.validatorSet.Validators(), nil)
+	// The network's last commit, of the height the node comes back at, builds on the block of the snapshot
+	// it comes back from (see olderSnapshotNode): one on another block is the divergence alarm (divergesFrom).
+	snapshotBlockHash := checkpointOf(t, 1, genesis, network.validatorSet.Validators(), nil).Commit.BlockHash
+	checkpoint := checkpointAfter(t, snapshotBlockHash, networkHeight-1, genesis, network.validatorSet.Validators(), nil)
 	earlier := network.sign(self, networkHeight, 0, ledger.ProposeBlock(network.chain, checkpoint.State, checkpoint.Commit.BlockHash, [32]byte{9}, ledger.BlockContent{}))
 	for _, noted := range []string{"during its wait", "once it signed"} {
 		for _, movedOn := range []string{"commit", "catch-up"} {

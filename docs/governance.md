@@ -3,7 +3,7 @@
 Area: **node**. Code: `ledger/parameters.go`, `ledger/governance.go` (`ParameterChange`),
 `ledger/reassignment.go` (the ⅔ name action), and the pools in `node/governance.go` and
 `node/reassignment.go`. The admin page that drafts and signs the votes is in `ui/admin.go`. The
-names as a name service: `ledger/account_update.go` and `ledger/address.go`.
+names as a name service: `ledger/account_update.go`, `ledger/address.go` and `node/zone.go`.
 
 Validators holding more than ⅔ of the power can do two things that no single holder can: change
 the network's parameters, and act on one name (its balance, its key, its bank of record, its frozen
@@ -150,29 +150,87 @@ it publishes.
 | its bank of record | a bank change, which the holder and the new bank sign; or the ⅔ name action |
 | its public address: `http(s)://host[:port]`, its public face, such as a bank's CDN name or any name's website | the name alone, by an account update its key signs |
 | its IP addresses: at most 4, IPv4 or IPv6, what DNS A and AAAA records would hold | the name alone, by an account update its key signs |
+| its TLS keys: at most 2, each the SHA-256 of a TLS key's SubjectPublicKeyInfo, as 64 lowercase hex digits, the hash DANE's TLSA records call "3 1 1" | the name alone, by an account update its key signs |
 | its description | the name alone, by an account update its key signs |
 
-The genesis sets each of them for the names it creates.
+The genesis sets each of them for the names it creates. In an update, the IP addresses and the TLS
+keys are each one list: an empty list leaves them, `["-"]` clears them, and any other list replaces
+the whole list. A third TLS key, a key in another form, or one given twice is refused.
 
-- **Only the name signs its addresses.** No bank co-signs them, and the ⅔ name action does not set
-  them. A frozen name sends no update, so its addresses stay as they were. A key change, a sale
-  included, keeps them: the new holder changes them.
+- **Only the name signs its addresses and its TLS keys.** No bank co-signs them, and the ⅔ name
+  action does not set them. A frozen name sends no update, so they stay as they were. A key change,
+  a sale included, keeps them: the new holder changes them.
+- **Two TLS keys** let a name roll its web server's key without a gap: the current one and the
+  next. A name's payment key should never be its TLS key: a web server's key sits on a machine
+  facing the internet, and a payment key must not. The TLS key's algorithm is the web server's
+  choice, not the chain's. A wallet takes a bank's web server, at the bank's `https://` public
+  address, only with one of the TLS keys the bank lists, and asks no certificate authority; only a
+  bank's record counts (see [ui/README.md](../ui/README.md)).
 - **A validator's IP addresses do two more jobs.** The other validators gossip to them, on the
   network's gossip port, and the gossip port's allow list lets in connections from them (see
   [api.md](api.md#two-ports-and-the-public-face)). So the chain is the network's routing table, and
   no node looks a name up in DNS.
+- **An address is a claim.** Nothing on chain checks that a name controls the IP addresses it
+  lists, and two names may list one. The lookup from an address to names tells who *claims* it, not
+  who uses it, and shows every claimant. A rule of one name per address would let the first claimant
+  squat on someone else's, so there is none. When an address floods a bank, its names are who to
+  call: the bank of record calls its customer, and if that fails the ⅔ freeze the name. Nothing bans
+  anyone on its own (see [operating-a-network.md](operating-a-network.md)).
 - **Where to read them.** `GET /hdls/resolve?name=` on a bank's operator port, or the files
-  `/hdls/resolve/name/<name>` and `/hdls/resolve/key/<SHA-256 of the key's bytes, in hex>` on any
-  bank's public face (see [api.md](api.md#the-public-face)). Each answer is a bank's word: a reader
-  that trusts no single bank asks several, or checks the record against a checkpoint, which carries
-  its ⅔ commit.
+  `/hdls/resolve/name/<name>`, `/hdls/resolve/key/<SHA-256 of the key's bytes, in hex>` and
+  `/hdls/resolve/ip/<address>` on any bank's public face, and its zone file, `/hdls/zone` (see
+  [api.md](api.md#the-public-face)). Each answer is a bank's word: a reader that trusts no single
+  bank asks several, or checks the record against a checkpoint, which carries its ⅔ commit.
 - **Public for good.** What a name publishes is in every node's state, every checkpoint and every
   account list. An update replaces it on chain, but does not take back what anyone copied
   meanwhile.
-- **What comes later.** A gateway that answers DNS queries from the chain's records, so ordinary
-  resolvers can use them, and a TLS key record that the name's key signs, as DANE's TLSA records do
-  in DNS. A name's payment key should not become its TLS key: a web server's key sits on a machine
-  facing the internet, and a payment key must not. Both are in [TODO.md](../TODO.md).
+
+**The zone.** An engine whose config sets `zone`, such as `hdls.example.org`, writes the names'
+records into its public folder as a zone file, `hdls/zone`, in the standard text format of DNS (RFC
+1035) that any DNS server (NSD, Knot, BIND, CoreDNS) loads as an authoritative zone. A DNS operator
+fetches it from any bank's public face, or from several and compares them. It holds:
+
+- the SOA record, whose serial is the height at which the engine last wrote the file, modulo 2³²,
+  and an NS record for each of the config's `zoneNameServers`;
+- for each name that is not frozen, in name order: an A or AAAA record for each IP address it lists;
+  a TXT record `"hdls-public-address=<its public address>"`; and, when its public address is an
+  `https://` one, a TLSA record `3 1 1 <hash>` for each TLS key, under `_<port>._tcp.<name>`, the
+  port of that address, 443 without one;
+- `validators-of-the-height-in-progress`: an A or AAAA record for each IP address of each validator
+  of the height in progress, once each, loopback addresses left out. It is the IP filter: a firewall
+  that takes DNS names in its rules, or a script that resolves the name every minute, keeps an allow
+  list without reading the chain. The label is 36 characters, more than a name may have, so no name
+  can take it;
+- `<hex>._ip`: for each IP address a name lists, frozen names included, one TXT record with the
+  names that list it, one string each, in name order, a frozen one as `"<name> (frozen)"`. The label
+  is the address's bytes in hex, 8 digits for IPv4 and 32 for IPv6: a name cannot publish real
+  reverse DNS for an address it does not own, so the lookup lives in the zone. Past 100 names, a
+  last string says how many more there are and names the `hdls/resolve/ip/<address>` file that lists
+  them all.
+
+```
+$ORIGIN hdls.example.org.
+$TTL 60
+@ SOA ns1.example.org. hostmaster.example.org. 1043 300 60 86400 60
+@ NS ns1.example.org.
+bank-a A 203.0.113.10
+bank-a TXT "hdls-public-address=https://bank-a.example.org"
+_443._tcp.bank-a TLSA 3 1 1 a1a1…a1
+validators-of-the-height-in-progress A 203.0.113.10
+cb00710a._ip TXT "bank-a"
+```
+
+- **Anyone can check it.** The file follows from the committed accounts, the validator set and the
+  zone settings, so anyone can rebuild it from the public `hdls/accounts` and compare. Two banks
+  with the same zone settings write files of one state that match but for the serial. A commit that
+  changes no record leaves the file and its serial as they are, so a DNS server reloads the zone
+  only when it changed.
+- **What it is not.** The engine runs no DNS server and signs no zone: an operator signs the file
+  with their own DNS tools if they want DNSSEC. A TLSA record counts for a DANE client only in a
+  zone signed so. A TLSA record under `_443._tcp.bank-a` speaks for the host `bank-a.<zone>`, whose
+  A and AAAA records are the name's IP addresses, its gossip addresses for a validator, which need
+  not be its web server's. Running the zone, the DNS server's settings and where to delegate it are
+  in [operating-a-network.md](operating-a-network.md).
 
 ## Extending it
 

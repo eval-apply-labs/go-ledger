@@ -16,7 +16,7 @@ import (
 type handNet struct {
 	t            *testing.T
 	names        []string
-	signers      []*signing.Signer
+	signers      []signing.Signer
 	chain        ledger.Chain
 	validatorSet *consensus.ValidatorSet
 	genesis      []ledger.Account

@@ -81,14 +81,14 @@ func NameRequestID(request NameRequest) string {
 
 // SignAsRequestor returns a copy of request with the requestor's signature, made by signer in the
 // domain of the request's kind.
-func SignAsRequestor(signer *signing.Signer, request NameRequest) (NameRequest, error) {
+func SignAsRequestor(signer signing.Signer, request NameRequest) (NameRequest, error) {
 	signature, err := signer.SignBase64(requestorDomains[request.Kind], request.signFields()...)
 	request.RequestorSignature = signature
 	return request, err
 }
 
 // SignAsBank returns a copy of request with the co-signing bank's signature, made by signer.
-func SignAsBank(signer *signing.Signer, request NameRequest) (NameRequest, error) {
+func SignAsBank(signer signing.Signer, request NameRequest) (NameRequest, error) {
 	signature, err := signer.SignBase64(signing.DomainNameRequestBank, request.signFields()...)
 	request.BankSignature = signature
 	return request, err
@@ -96,7 +96,7 @@ func SignAsBank(signer *signing.Signer, request NameRequest) (NameRequest, error
 
 // SignAsNewKey returns a copy of request with the new key's proof of possession, made by signer, which
 // holds the new key.
-func SignAsNewKey(signer *signing.Signer, request NameRequest) (NameRequest, error) {
+func SignAsNewKey(signer signing.Signer, request NameRequest) (NameRequest, error) {
 	signature, err := signer.SignBase64(signing.DomainNameRequestNewKey, request.signFields()...)
 	request.NewKeySignature = signature
 	return request, err

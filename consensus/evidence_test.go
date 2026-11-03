@@ -36,7 +36,7 @@ func TestDriverSurfacesEquivocationEvidence(t *testing.T) {
 func TestADifferentValidRoundIsNotEvidence(t *testing.T) {
 	signers, _ := makeValidators(t, 2)
 	proposer, other := signers[0], signers[1]
-	sign := func(signer *signing.Signer, name string, height int64, round, validRound int32, blockHash [32]byte) SignedProposal {
+	sign := func(signer signing.Signer, name string, height int64, round, validRound int32, blockHash [32]byte) SignedProposal {
 		t.Helper()
 		signed, err := SignProposal(signer, SignedProposal{Height: height, Round: round, ValidRound: validRound, BlockHash: blockHash, Proposer: name})
 		if err != nil {

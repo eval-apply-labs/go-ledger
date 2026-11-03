@@ -19,8 +19,8 @@ func (driver *Driver) Step() Step { return driver.step }
 
 // byName returns the signers indexed by their validator names, for picking the proposer /
 // specific validators deterministically.
-func byName(signers []*signing.Signer) map[string]*signing.Signer {
-	signerByName := make(map[string]*signing.Signer, len(signers))
+func byName(signers []signing.Signer) map[string]signing.Signer {
+	signerByName := make(map[string]signing.Signer, len(signers))
 	for _, signer := range signers {
 		signerByName[nameOf(signer)] = signer
 	}
@@ -78,7 +78,7 @@ func TestDriverSkipsToHigherRoundOnFPlusOne(t *testing.T) {
 		t.Fatalf("should start at round 0, got %d", driver.Round())
 	}
 
-	var others []*signing.Signer
+	var others []signing.Signer
 	for _, signer := range signers {
 		if signer.PublicKeyBase64() != me.PublicKeyBase64() {
 			others = append(others, signer)
@@ -96,7 +96,7 @@ func TestDriverSkipsToHigherRoundOnFPlusOne(t *testing.T) {
 }
 
 // nonProposer returns a signer that is NOT the proposer for any of the given rounds at height.
-func nonProposer(validatorSet *ValidatorSet, signerByName map[string]*signing.Signer, height int64, rounds ...int32) *signing.Signer {
+func nonProposer(validatorSet *ValidatorSet, signerByName map[string]signing.Signer, height int64, rounds ...int32) signing.Signer {
 	excluded := map[string]bool{}
 	for _, round := range rounds {
 		excluded[validatorSet.ProposerAt(height, round)] = true
@@ -117,7 +117,7 @@ func TestDriverHappyPathDecides(t *testing.T) {
 
 	proposerName := validatorSet.ProposerAt(height, 0)
 	me := signerByName[proposerName]
-	var peers []*signing.Signer
+	var peers []signing.Signer
 	for _, signer := range signers {
 		if nameOf(signer) != proposerName {
 			peers = append(peers, signer)
@@ -158,7 +158,7 @@ func TestDriverTimeoutAdvancesRound(t *testing.T) {
 	const height = int64(1)
 
 	me := nonProposer(validatorSet, signerByName, height, 0) // must not be the round-0 proposer, so it arms the timeout
-	var peers []*signing.Signer
+	var peers []signing.Signer
 	for _, signer := range signers {
 		if signer.PublicKeyBase64() != me.PublicKeyBase64() {
 			peers = append(peers, signer)
@@ -203,7 +203,7 @@ func TestDriverRejectsFarFutureAndNegativeRounds(t *testing.T) {
 	signerByName := byName(signers)
 	const height = int64(1)
 	me := nonProposer(validatorSet, signerByName, height, 0)
-	var peer *signing.Signer
+	var peer signing.Signer
 	for _, signer := range signers {
 		if signer.PublicKeyBase64() != me.PublicKeyBase64() {
 			peer = signer
@@ -270,7 +270,7 @@ func TestDriverBrokenSignerDropsVoteQuietly(t *testing.T) {
 	signers, validatorSet := makeValidators(t, 4)
 	signerByName := byName(signers)
 	const height = int64(1)
-	broken := func(signer *signing.Signer) *Driver {
+	broken := func(signer signing.Signer) *Driver {
 		brokenSigner, err := signing.NewSigner(brokenScheme{signing.NetworkScheme()}, network, signer.PublicKey())
 		if err != nil {
 			t.Fatal(err)
@@ -318,7 +318,7 @@ func TestDriverRetriesVoteAfterSignLogFailure(t *testing.T) {
 	signerByName := byName(signers)
 	const height = int64(1)
 	me := nonProposer(validatorSet, signerByName, height, 0)
-	var peer *signing.Signer
+	var peer signing.Signer
 	for _, signer := range signers {
 		if signer.PublicKeyBase64() != me.PublicKeyBase64() {
 			peer = signer
@@ -358,7 +358,7 @@ func TestDriverRetriesNilPrecommitAfterSignLogFailure(t *testing.T) {
 	signerByName := byName(signers)
 	const height = int64(1)
 	me := nonProposer(validatorSet, signerByName, height, 0)
-	var peers []*signing.Signer
+	var peers []signing.Signer
 	for _, signer := range signers {
 		if signer.PublicKeyBase64() != me.PublicKeyBase64() {
 			peers = append(peers, signer)
@@ -400,7 +400,7 @@ func TestDriverRetriesLockedPrecommitAfterSignLogFailure(t *testing.T) {
 	signerByName := byName(signers)
 	const height = int64(1)
 	me := nonProposer(validatorSet, signerByName, height, 0)
-	var peers []*signing.Signer
+	var peers []signing.Signer
 	for _, signer := range signers {
 		if signer.PublicKeyBase64() != me.PublicKeyBase64() {
 			peers = append(peers, signer)
@@ -479,7 +479,7 @@ func TestDriverCountsItsOwnReGossipedVoteAsCast(t *testing.T) {
 	signerByName := byName(signers)
 	const height = int64(1)
 	me := nonProposer(validatorSet, signerByName, height, 0, 1)
-	var peers []*signing.Signer
+	var peers []signing.Signer
 	for _, signer := range signers {
 		if signer != me {
 			peers = append(peers, signer)
@@ -522,7 +522,7 @@ func TestDriverResendsTheProposalItHolds(t *testing.T) {
 	signerByName := byName(signers)
 	const height = int64(1)
 	me := signerByName[validatorSet.ProposerAt(height, 1)]
-	var peers []*signing.Signer
+	var peers []signing.Signer
 	for _, signer := range signers {
 		if signer != me {
 			peers = append(peers, signer)
@@ -554,7 +554,7 @@ func TestDriverPOLUnlockReleasesLock(t *testing.T) {
 	signerByName := byName(signers)
 	const height = int64(1)
 	me := nonProposer(validatorSet, signerByName, height, 0, 1, 2) // receives injected proposals in rounds 0..2
-	var peers []*signing.Signer
+	var peers []signing.Signer
 	for _, signer := range signers {
 		if signer.PublicKeyBase64() != me.PublicKeyBase64() {
 			peers = append(peers, signer)
@@ -612,7 +612,7 @@ func TestDriverLockingPreventsConflictingPrevote(t *testing.T) {
 	const height = int64(1)
 
 	me := nonProposer(validatorSet, signerByName, height, 0, 1) // must not propose in round 0 or 1 (it receives injected proposals)
-	var peers []*signing.Signer
+	var peers []signing.Signer
 	for _, signer := range signers {
 		if signer.PublicKeyBase64() != me.PublicKeyBase64() {
 			peers = append(peers, signer)
@@ -659,8 +659,8 @@ func TestDriverLockingPreventsConflictingPrevote(t *testing.T) {
 func TestDriverPrecommitsTheBlockItDecides(t *testing.T) {
 	signers, validatorSet := makeValidators(t, 5) // quorum 4 of 5: with the double-signer counted out, all 4 honest
 	const height = int64(1)
-	var byzantine, decider, other *signing.Signer
-	var honest []*signing.Signer
+	var byzantine, decider, other signing.Signer
+	var honest []signing.Signer
 	for _, signer := range signers {
 		switch {
 		case nameOf(signer) != validatorSet.ProposerAt(height, 0) && byzantine == nil:
@@ -674,7 +674,7 @@ func TestDriverPrecommitsTheBlockItDecides(t *testing.T) {
 		honest = append(honest, signer)
 	}
 	block := digest(0x42)
-	startDriver := func(signer *signing.Signer) *Driver {
+	startDriver := func(signer signing.Signer) *Driver {
 		driver := NewDriver(signer, nameOf(signer), validatorSet, scheme, network, height, digest(0x01))
 		driver.Start()
 		driver.ReceiveProposal(Proposal{Round: 0, BlockHash: block, ValidRound: -1})
@@ -683,7 +683,7 @@ func TestDriverPrecommitsTheBlockItDecides(t *testing.T) {
 
 	deciderDriver := startDriver(decider) // it has prevoted the block, and holds no prevote quorum
 	var sent []Vote
-	for _, signer := range append([]*signing.Signer{byzantine}, honest...) {
+	for _, signer := range append([]signing.Signer{byzantine}, honest...) {
 		if signer == decider {
 			continue
 		}
@@ -717,7 +717,7 @@ func TestDriverWithoutSignerNeverSigns(t *testing.T) {
 	signers, validatorSet := makeValidators(t, 4)
 	const height = int64(1)
 	self := validatorSet.ProposerAt(height, 0)
-	var others []*signing.Signer
+	var others []signing.Signer
 	for _, signer := range signers {
 		if nameOf(signer) != self {
 			others = append(others, signer)

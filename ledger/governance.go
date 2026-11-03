@@ -44,7 +44,7 @@ func VerifyParameterVote(scheme signing.Scheme, networkID, publicKey string, new
 // SignParameterVote is the approval, by the validator named validatorName whose key signer holds, of
 // `newParameters` replacing the parameters that hash to `previousParametersDigest`, at governance
 // `sequence`.
-func SignParameterVote(signer *signing.Signer, validatorName string, newParameters LedgerParameters, previousParametersDigest [32]byte, sequence int64) (ParameterVote, error) {
+func SignParameterVote(signer signing.Signer, validatorName string, newParameters LedgerParameters, previousParametersDigest [32]byte, sequence int64) (ParameterVote, error) {
 	signature, err := signer.SignBase64(signing.DomainParameterVote, parameterVoteFields(newParameters, previousParametersDigest, sequence)...)
 	if err != nil {
 		return ParameterVote{}, err

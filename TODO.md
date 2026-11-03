@@ -4,9 +4,10 @@ The port is complete (names, pay-by-name, the self-describing peer DNS, ⅔ gove
 of the post-eMudhra review is built: ML-DSA-65, names as the identity, registration at a bank, key
 and bank changes, the freeze, the ⅔ name action, the signature record and the idle chain (see
 [`findings_20261027.md`](findings_20261027.md)). Phase 3, the network split and pigeon mode, is
-built too, but for the signer. The owner's decisions are in `review/phase2_spec.md` §12 and
-`review/phase3_spec.md` §13. None of the below blocks a testnet; it is the honest remaining work,
-roughly by priority.
+built too, and so is Phase 4: the signer, the name service's zone file and TLS keys, and a joiner
+that trusts no single peer. The owner's decisions are in `review/phase2_spec.md` §12,
+`review/phase3_spec.md` §13 and `review/phase4_spec.md` §9. None of the below blocks a testnet; it
+is the honest remaining work, roughly by priority.
 
 ## Build
 
@@ -45,21 +46,38 @@ roughly by priority.
       - the images and the compose file (`deploy/`), and the quickstart (below).
 
       See [`docs/operating-a-network.md`](docs/operating-a-network.md).
-- [ ] **The signer.** The fourth container: it holds the key, refuses a second, different signature
-      for the same height, round and type, and writes that to disk before it signs. A bank's desk
-      co-signs through the signer, which serves it only `registration`, `name-request-bank` and
-      `freeze`. Not built: the engine still holds the key.
+- [x] **Phase 4: the signer, the name service and the joiner.** Built on 2026-11-02 and
+      2026-11-03, as a new genesis ([`review/phase4_spec.md`](review/phase4_spec.md)):
+      - the **signer** (`cmd/signer`), the fourth container: it holds the bank's one key, sealed at
+        rest, and signs for the bank's own programs, each a client with its own secret and its own
+        list of domains, over `POST /sign` with an HMAC. It gives each slot (a vote's height, round
+        and type, a proposal's height and round) one signature, written and fsynced to its sign log
+        before it signs, refuses a second, different one, and writes every signature and refusal to
+        an audit log. Each bank lists its clients' domains; the spec's layout gives a desk only
+        `registration`, `name-request-bank` and `freeze`, so a stolen desk terminal can co-sign but
+        never vote. The engine and a bank's wallet sign through it, or with a key of their own;
+      - the **name service**: TLS key records on chain, a zone file any DNS server loads
+        (`hdls/zone`), the lookup from an IP address to the names that list it, the flood's senders
+        named in the fetcher's log, and a wallet that takes a bank's web server only with one of the
+        bank's TLS keys;
+      - the **joiner**: every checkpoint needs more than ⅔ of the frame the node trusts; each block
+        names the next set (`NextValidatorsHash`), so a node walks from frame to frame; catch-up
+        asks every validator; the fork alarm and the divergence alarm halt the node; and a seated
+        node is confirmed by its own precommit in a commit.
 
-      A cheaper tier inside one process: keep the key encrypted in memory and decrypt it only into
-      a locked buffer at signing time, zeroed after. Go's garbage collector does not move objects,
-      so a key in a `[]byte` can be zeroed in place. `crypto/mldsa` still holds the expanded key in
-      memory while it signs, so keeping the key off the machine needs hardware (a TPM, an HSM, a
-      smartcard) or the remote signer.
+      See [`docs/signature.md`](docs/signature.md), [`docs/consensus.md`](docs/consensus.md) and
+      [`docs/governance.md`](docs/governance.md#names-as-a-name-service).
+- [ ] **Hardware for the key.** The signer keeps the key off the engine and the wallet, sealed at
+      rest, but `crypto/mldsa` holds the expanded key in the signer's memory while it runs. Keeping
+      it off a running machine needs a TPM, an HSM or a smartcard, and libraries outside the
+      standard library. The signer is where one would plug in.
 - [ ] **Known limits**, listed in
-      [`findings_20261027.md`](findings_20261027.md#not-fixed-or-not-covered): catch-up prefers a
-      live bootstrap peer, even one behind the gossip peers, and the start-time sync asks only the
-      bootstrap peers; heavy message loss can strand a node until it catches up; losing the sign log
-      is only partly covered; a joiner trusts the snapshot it is seeded with.
+      [`findings_20261027.md`](findings_20261027.md#not-fixed-or-not-covered): heavy message loss
+      can strand a node until it catches up; losing the sign log is only partly covered; a joiner
+      trusts its first frame, the genesis or the snapshot its bank seeds it with, though no single
+      peer after it, and a fork two or more heights ahead can go unseen on a busy chain; a walk can
+      stop at a large drift of power with no change of names or keys; the signer's slot memory and
+      its audit log; the zone file's limits in BIND and in DANE.
 - [ ] **Ledger archive, a history node off the lean validators.** A node keeps no payments: only the
       current state, the last block's header and commit, and the signature record (who signed each
       block for `retainBlocks` heights, and every governance certificate and double-sign proof for
@@ -75,16 +93,20 @@ roughly by priority.
       block and which certificates were voted; the archive adds the payments.
     - The tension: an archive rebuilds the permanent record of payments the design avoids. So it
       stays opt-in and off to the side.
-- [ ] **The rest of the name service.** Names publish a public address and IP addresses, which
-      their own keys sign ([`docs/governance.md`](docs/governance.md#names-as-a-name-service)). Two
-      pieces are for later (`review/phase3_spec.md`, R7 and the notes for later in §13):
-    - A DNS gateway: a small program that answers DNS queries for a zone from the chain's name
-      records. Then ordinary resolvers, and the DNS operators who adopt it, can use them.
-    - TLS key records: a name publishes a TLS key, or its hash, signed by the name's key, as DANE's
-      TLSA records do in DNS. TLS then works with no certificate authority wherever the client
-      reads the chain: between banks, and in wallets. The payment key stays off the web server, and
-      the chain's own scheme does not limit the TLS key's algorithm. Browsers accept neither DANE
-      nor such certificates for websites today, so this serves custom clients first.
+- [x] **The rest of the name service.** Built in Phase 4
+      ([`docs/governance.md`](docs/governance.md#names-as-a-name-service)):
+    - In place of a DNS gateway, the engine writes a zone file, `hdls/zone`, that any DNS server
+      loads: no DNS code in Go, and the DNS servers are run by people who run DNS.
+    - TLS key records: a name lists up to two hashes of its web server's keys, signed by its own
+      key, published in the zone as TLSA records. A wallet takes a bank's web server only with one
+      of them. The payment key stays off the web server. Browsers accept neither DANE nor such
+      records for websites today, so this serves custom clients first.
+- [ ] **What the name service leaves out.** DNSSEC: the engine does not sign the zone, and a TLSA
+      record counts for a DANE client only in a signed zone; an operator signs it with their own
+      tools. TLS on the gossip port: TLS key records make it possible later. Whether to keep the
+      TLSA records in the zone at all is an open question for the owner: a record under
+      `_443._tcp.<name>.<zone>` speaks for that host name, whose address records are the name's IP
+      addresses, a validator's gossip addresses, not necessarily its web server's.
 
 ## Follow-ups from the external review (2026-08-02, see `review/` and `findings.md`)
 

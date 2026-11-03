@@ -38,7 +38,8 @@ func TestStragglerCatchUp(t *testing.T) {
 
 // A node whose bootstrap peers are all down must still catch up, from its gossip peers: a checkpoint
 // is verified against the node's own last committed accounts, so any peer is a safe source. While a
-// bootstrap peer answers, the gossip peers are not asked.
+// bootstrap peer serves the checkpoint, a gossip peer that reports its block is asked only its status,
+// not for the checkpoint again.
 func TestCatchUpFallsBackToGossipPeers(t *testing.T) {
 	names := []string{"founder", "straggler"} // quorum 2: the straggler cannot decide alone
 	genesis := testGenesis([]ledger.Account{testAccount("founder", "1000"), testAccount("straggler", "0")}, 30*time.Second, 0)
@@ -66,8 +67,8 @@ func TestCatchUpFallsBackToGossipPeers(t *testing.T) {
 	config.Bootstrap = []string{bootstrap.URL}
 	straggler := New(config, NewHTTPTransport([]string{gossip.URL}))
 	bootstrapUp.Store(true)
-	if _, found := straggler.catchUpCheckpoint(); !found || gossipAsked.Load() != 0 {
-		t.Fatalf("with its bootstrap peer answering, the node must take its checkpoint and ask no gossip peer (found %v, gossip peer asked %d times)", found, gossipAsked.Load())
+	if _, _, found := straggler.catchUpCheckpoint(); !found || gossipAsked.Load() != 0 {
+		t.Fatalf("with its bootstrap peer answering, the node must take its checkpoint and ask no gossip peer for it again (found %v, gossip peer asked %d times)", found, gossipAsked.Load())
 	}
 
 	bootstrapUp.Store(false)
@@ -85,7 +86,7 @@ func TestCatchUpFallsBackToGossipPeers(t *testing.T) {
 func TestCarriedCheckpointIsAdoptedOnlyWhenAheadAndVerified(t *testing.T) {
 	names := []string{"founder", "straggler"} // quorum 2: the straggler cannot decide alone
 	scheme := signing.NetworkScheme()
-	signersOn := map[string]map[string]*signing.Signer{testNetworkID: {}, "elsewhere": {}} // by network id, then name
+	signersOn := map[string]map[string]signing.Signer{testNetworkID: {}, "elsewhere": {}} // by network id, then name
 	var validators []consensus.Validator
 	var accounts []ledger.Account
 	for _, name := range names {
@@ -298,10 +299,10 @@ func TestDynamicStragglerCatchesUpAfterFounderPayout(t *testing.T) {
 
 	server := httptest.NewServer(NewServer(successorNode).Handler())
 	defer server.Close()
-	checkpoint, found, _ := founderNode.bestCheckpoint(NewHTTPClient(5*time.Second), [][]string{{server.URL}}) // what its catch-up loop does on every tick
+	checkpoint, trustedFrame, found := founderNode.bestCheckpoint([]catchUpPeer{{urls: []string{server.URL}, client: NewHTTPClient(5 * time.Second)}}) // what its catch-up loop does on every tick
 	if !found {
 		t.Fatal("the straggler rejected the network's checkpoint: it trusts only genesis, and the founder no longer signs")
 	}
-	founderNode.enqueue(event{kind: eventCatchUp, checkpoint: &checkpoint})
+	founderNode.enqueue(event{kind: eventCatchUp, checkpoint: &checkpoint, trustedFrame: trustedFrame})
 	waitFor(t, 5*time.Second, func() bool { return founderNode.Snapshot().Height > checkpoint.Commit.Height }, "the straggler did not catch up")
 }

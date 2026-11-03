@@ -1,11 +1,14 @@
 # Signatures
 
-Area: **signature**, the part that is to move into a signer container of its own. Phase 3 built the
-other containers, but not the signer: the engine still holds the key. Code: `signing/`,
-`cmd/keygen/`, and the sign log, which lives in `node/persist.go` today.
+Area: **signature**: the key, and the programs that sign with it. Since Phase 4 a bank's key can
+live in the signer (`cmd/signer`), a program of its own on the bank's private network, and the
+engine and the bank's wallet ask it for every signature. Code: `signing/`, `cmd/keygen/`,
+`cmd/signer/`, and the engine's sign log, which lives in `node/persist.go`.
 
-This doc covers the signature scheme, what every signature binds, keys and `keygen`, the sign log
-that keeps a node from signing twice, and what a double-sign costs.
+This doc covers the signature scheme, what every signature binds, keys and `keygen`, the engine's
+sign log that keeps a node from signing twice, what a double-sign costs, and the signer: its
+clients, its rules, its two logs, and what a break-in on each machine gets. How to run a signer is
+in [operating-a-network.md](operating-a-network.md#running-a-signer).
 
 ## The scheme: ML-DSA-65
 
@@ -87,10 +90,11 @@ one genesis only.
 | `receipt` | a node | a payment receipt |
 
 `cmd/server` also signs once at start, in the `key-self-test` domain, to prove its key pair works.
-That signature is never sent. The requestor signs in the domain of its request's kind, so a signer
-that sees only the domain can tell a bank paying for a customer's registration from a holder
-changing its own key. The signer, still to come, is to serve a bank's desk only `registration`,
-`name-request-bank` and `freeze`.
+Its one field is the node's name. That signature is never sent. The requestor signs in the domain of
+its request's kind, so a signer that sees only the domain can tell a bank paying for a customer's
+registration from a holder changing its own key. That is how the signer serves a bank's desk
+`registration`, `name-request-bank` and `freeze`, and never `key-change` or `bank-change` (see
+[The signer](#the-signer)).
 
 A message's id hashes its signed fields, never its signature (`ledger.PaymentID`,
 `ledger.UpdateID`, `ledger.NameRequestID`, `ledger.ReassignmentID`). Pools and relays key on it.
@@ -117,7 +121,22 @@ or holds a pair from `keygen` written into its key file before its first start
 ([operating-a-network.md](operating-a-network.md#generate-keys)). A private key that is not a
 32-byte seed, such as an earlier network's 64-byte key, is refused.
 
+Two more forms serve the signer:
+
+- **`keygen -encrypt <key file> -passphrase-file <file>`** writes a fresh pair into a new key file,
+  sealed under the passphrase that file holds, and prints the public key only. The key file has the
+  wallet's format (`signing.KeyFile`): the public key, and the seed sealed with AES-256-GCM under a
+  key that PBKDF2-HMAC-SHA256 derives from the passphrase in 600,000 iterations. It never replaces a
+  file that is there, and refuses an empty passphrase file. The signer and the wallet both read it.
+- **`keygen -secret`** prints a new client secret for the signer: 32 random bytes, as 64 lowercase
+  hex digits, and nothing else.
+
+With a signer, the key file is on the signer's machine only. The engine's config and the bank's
+wallet file hold the public key alone.
+
 ## The sign log
+
+This is the engine's sign log. A signer keeps one more, its own (see [Its two logs](#its-two-logs)).
 
 A validator writes what it signs at the height in progress to its sign log,
 `<snapshotPath>.votes`, before the vote is counted or sent, and before its proposal is sent. The
@@ -179,7 +198,10 @@ at a time: no hot standby, and no copy of its data folder running elsewhere. Two
 sooner or later sign two different votes or blocks for one slot, and that double-sign freezes the
 name. `cmd/server` opens its port before it opens the node, so a second start of the same config on
 the same machine, while the first runs, stops before it signs. That catches only this one mistake:
-another machine, or another `listen` address, is not caught.
+another machine, or another `listen` address, is not caught. A signer catches more: two engines
+that ask one signer get one signature per slot between them, and the other is refused as a
+conflict. Nothing catches two signers that hold one key: run each key in one signer, on one sign
+log.
 
 The operator's rules for the log (never delete it, never restart from an old backup) are in
 [operating-a-network.md](operating-a-network.md#rejoining-after-a-restart).
@@ -202,12 +224,172 @@ For a bank, the freeze costs more than its seat:
 - Freezing a bank clears every pending change it co-signed: its customers' key changes, and bank
   changes to it. Those customers file again, and their fees are not refunded.
 - After the ⅔ re-key, the node signs votes and proposals again only once its config holds the new
-  pair (see [operating-a-network.md](operating-a-network.md#a-bank-whose-key-leaked)).
+  pair, or the new public key with a signer that holds the new key (see
+  [operating-a-network.md](operating-a-network.md#a-bank-whose-key-leaked)).
 
 Only consensus votes and proposals have a conflict slot. Two different payments, updates, name
 requests or governance votes from one key are not evidence: wallets keep no sign log, and an honest
 retry must never freeze a name. A stolen key is stopped by its holder's freeze instead.
 
-Still to come is the signer: a container of its own that holds the key, refuses a second, different
-signature for the same height, round and type, and writes that to disk before it signs (see
-[TODO.md](../TODO.md)). Until then the engine holds the key, and its sign log does this job.
+## The signer
+
+The signer, `cmd/signer`, holds a bank's one key, and is the only program that does. It runs on a
+machine, or in a container, on the bank's private network, and accepts nothing from the internet.
+The engine and the bank's wallet hold the public key only, and ask the signer for each signature.
+Before Phase 4 the key was in two places, the engine's config and the bank operator's wallet, and a
+break-in on either took it. An engine can still hold its key itself (`privateKey` in its config),
+as `cmd/demo`'s node and the tests do, and a wallet in its key file.
+
+### Its clients and their domains
+
+A client is a program the signer answers. Its config lists each one: a name, a secret file of its
+own, and the domains it may ask for. A domain not in the client's list is refused.
+
+| Client | Domains | Why |
+|---|---|---|
+| `engine` | `block-revision` (votes), `proposal`, `receipt` | the engine signs nothing else |
+| `desk` | `registration`, `name-request-bank`, `freeze` | the bank paying, as requestor, for its customer's registration; its co-signature as the bank; and its own freeze |
+| `admin` | `parameter-vote`, `reassignment-vote`, `payment`, `account-update`, `freeze` | governance, and the bank's own money and records |
+
+That is the layout of the Phase 4 spec (`review/phase4_spec.md`, §2.3). The signer takes any layout
+its config writes, but for the new-key domains, and three points hold:
+
+- **`key-change` and `bank-change` are in no list.** Their requestor is the name itself, so the bank
+  signs one only to change its own key or its own bank, which no terminal should do. A bank's key
+  changes by the ⅔ name action. The signer would take them in a list; no list should give them.
+- **`name-request-new-key` and `reassignment-new-key` are never the bank's.** The new key signs
+  them, as proof that its holder has it. The signer refuses a client list that names them.
+- **`freeze` is in two lists on purpose.** A bank whose key may be exposed freezes its own name at
+  once, from whichever terminal it reaches first.
+
+Every client may also ask for `key-self-test`, the engine's signature at start (above). It has one
+field, the bank's name, and the signer signs it for no other name: an engine whose config names
+another bank stops at start, not at its first vote.
+
+The quickstart and the compose file run one wallet per bank, the desk and the admin page in one, so
+each signer there has two clients: `engine`, and `wallet` with the desk's domains and the admin
+page's together (see
+[operating-a-network.md](operating-a-network.md#four-banks-on-one-machine-the-quickstart)). A bank may
+run them on two terminals, with two clients, to keep a desk terminal from paying or voting.
+
+### How a client reaches it
+
+The signer serves one route, `POST /sign`, on one address (`listen`). It refuses, before it reads a
+byte, every connection from an IP address that is not in its `allowFrom` list, as the engine's
+gossip port does. Each request carries the domain and the fields, and the header
+`Authorization: HDLS-HMAC <client> <hex of HMAC-SHA256(client secret, body)>`. The route, its
+body and its answers are in [api.md](api.md).
+
+- **No TLS.** Nothing on the link is secret: the requests are messages the bank will publish, and the
+  answers are signatures it will publish. The link needs to know who asks, which the HMAC tells, from
+  the standard library, and safe against a quantum computer.
+- **No replay guard.** Signing is deterministic, so a replayed request gets the signature its first
+  answer carried, and nothing new comes out.
+- **The client checks every answer.** The engine and the wallet verify each signature under the
+  bank's public key before they use it (`signing.RemoteSigner`). A signer that holds another key, or
+  another program that answers, is caught.
+- **One request at a time.** The signer decides and signs one request, then the next, whichever
+  client sends it. So the wallet's requests and the engine's votes wait for each other: a client that
+  sends request after request can delay the bank's votes.
+
+### Its rules
+
+1. **It never signs raw bytes.** A request is a domain and the fields the ledger signs in it. The
+   signer checks their number and form against the domain's layout (`cmd/signer/layout.go`), then
+   builds the preimage itself, for the network its genesis file makes. A client cannot make it sign
+   for another network, or outside a domain.
+2. **It signs only in its own name.** Where the fields name who signs (the validator of a vote, the
+   proposer, the node of a receipt, the requestor or the bank of a name request, the name of a
+   freeze, the payer, the name of an account update), that name must be the bank's, the config's
+   `name`. A governance vote names no voter, so for those the client's list is the only gate.
+3. **One signature per slot.** A slot is a vote's height, round and type, or a proposal's height and
+   round. The same request again gets the same signature. A request with other fields is refused,
+   and written to the audit log with both requests, marked `REFUSED CONFLICT`: the engine is broken,
+   or someone else drives it.
+4. **Never below its own height.** A vote or a proposal below the highest height it signed is
+   refused, but for a repeat of a slot its log holds.
+5. **Log, then fsync, then sign.** It appends the slot and the fields to its sign log and fsyncs it,
+   and only then signs and answers. The engine does it the other way round, sign then log, which is
+   safe only because the engine's key never leaves its process.
+6. **No slot for the rest.** Receipts, name requests, freezes, governance votes, payments and
+   updates have no slot: two different ones are never evidence (above). The signer checks rules 1
+   and 2 for them, and writes each to the audit log.
+
+It does not check its key against the chain, which it does not read. The engine's key self-test
+does, and every client checks every answer.
+
+### Its two logs
+
+- **The sign log** (`signLogPath`): one JSON line naming the network, then one per vote or proposal
+  signed, with its slot and its fields. It keeps the slots of its highest height and the one below,
+  and is rewritten at each start. Rules 3 and 4 read it. A signer with no sign log refuses every vote
+  and proposal until it is started once with `-resume-above <height>`, which writes a new log that
+  refuses every slot at or below that height
+  ([operating-a-network.md](operating-a-network.md#running-a-signer) says when and with what height).
+- **The audit log** (`auditLogPath`): one JSON line per answer, signature or refusal: the time, the
+  client, the domain, a summary a person can read, such as `precommit at height 1, round 0, for block
+  948fe493`, and the reason of a refusal. Nothing reads it but people. It is how a bank finds out,
+  after the fact, what a stolen desk signed. A signature whose line can't be written is not given.
+
+The engine keeps its own sign log as before ([The sign log](#the-sign-log)), with its lock and its
+restore. The two guard different things: the engine's guards the lock, the signer's guards the key.
+So the signer does not stop a fork on its own. A guard on the slot alone still forked in testing
+(`review/post_emudhra_review_2026-10-27.md`, E2, pass 3), because a node can vote unlocked in a later
+round. The engine and the signer can each lose their log without the other.
+
+### The engine and the wallet through it
+
+The engine names its signer in its config, in place of `privateKey`
+([operating-a-network.md](operating-a-network.md#the-node-config)). It signs on its event loop as
+before, through `signing.RemoteSigner`:
+
+- **At start** it makes the key self-test through the signer and checks it under `publicKey`, so a
+  signer that is down, holds another key, or serves another bank stops the engine before it joins.
+  The engine needs its signer up when it starts.
+- **Each request** gives up after a second. After a failure, every request fails at once for the
+  next second, so a signer that is down does not slow the loop at every step. A vote that fails is
+  dropped and cast again later, as after a failed sign-log write. A bank whose signer is down is a
+  validator that does not vote: the chain goes on while the others hold more than ⅔.
+- **The slot memory.** The engine remembers the fields it first sent in each slot, and sends those
+  again rather than other fields: a request that timed out may have been signed. It is in memory
+  only. After a restart, an engine that had a request time out may send other fields in that slot,
+  and the signer refuses them as a conflict. That costs the vote, never a second signature.
+- **One receipt at a time.** A payment that comes while another receipt is out gets `202` and no
+  receipt, so a burst of payments never queues ahead of a vote. Its wallet then says "payment
+  submitted" without the ✓.
+- **No proxy.** The requests go straight to the signer, whatever `HTTP_PROXY` says.
+
+A bank's wallet signs through the signer the same way, with `-signer-url`, `-signer-client` and
+`-signer-secret-file`, and its wallet file holds the bank's public key only (see
+[ui/README.md](../ui/README.md#a-banks-wallet-through-its-signer)). A customer's wallet keeps its
+own key.
+
+### The key at rest
+
+The signer reads a key file that `keygen -encrypt` wrote, sealed, and the passphrase from a file of
+its own (`passphraseFile`), never from its config. It reads both only at start. A plaintext key
+file still works, for tests, and the signer logs that it is fine for a test, not for a bank. While
+the signer runs, `crypto/mldsa` holds the key in its memory: keeping it off a running machine needs
+hardware, a TPM or an HSM, which needs libraries outside the standard library.
+
+### What a break-in on each machine gets
+
+- **The engine**: votes and proposals, at most one per slot, and receipts. It cannot make the key
+  sign two conflicting votes, so it cannot get the bank's name frozen for a double-sign. It can keep
+  the bank from voting, as any broken engine can, and it can have votes signed for heights the chain
+  has not reached: the signer then refuses every vote below them. The operator keeps the sign log
+  and re-keys the bank through the ⅔
+  ([operating-a-network.md](operating-a-network.md#a-break-in-on-the-engine)). Its receipts are the
+  bank's word that it holds a payment, so a stolen engine can lie in receipts.
+- **The desk**: co-signatures as the bank, registrations the bank pays the fee for, and a freeze of
+  the bank's own name, never a vote, a payment or a governance vote. A co-signature alone changes no
+  key: a key change also needs its holder and its new key. The freeze is the thief's to pull too:
+  it takes the bank out of the set until the ⅔ re-key it.
+- **The admin page**: what its domains allow, which is much: payments of the bank's money, updates
+  of the bank's account (its public address, the IP addresses the others gossip to, its TLS keys),
+  the bank's governance votes, which count toward a ⅔ certificate, and the freeze. Keep it on a
+  terminal of its own, or in the same wallet as the desk only where one person holds both.
+- **The signer itself**: the key, once its passphrase is read. That is why it accepts nothing from
+  the internet, and why its passphrase stays off its disk in production.
+
+The audit log shows, after the fact, what each client had signed.

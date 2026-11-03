@@ -5,10 +5,10 @@
 A Byzantine-fault-tolerant ledger in which **names are the accounts**: you register a name at your
 bank, pay people by name, and look names up on-chain. Validators are the banks, each with the
 voting power the genesis gives it (or, in the optional dynamic mode, the stake delegated to it).
-Everything, the validator node, its public face and the wallet, builds with `go build`, with **no
-runtime and no third-party dependencies**: Tendermint-style ⅔ commit safety, post-quantum ML-DSA-65
-signatures, exact decimal money, ⅔ governance, and a browser wallet, in a codebase small enough to
-read. It descends from the original Hypernode ledger (see [Origins](#origins)).
+Everything, the validator node, its public face, its signer and the wallet, builds with
+`go build`, with **no runtime and no third-party dependencies**: Tendermint-style ⅔ commit safety,
+post-quantum ML-DSA-65 signatures, exact decimal money, ⅔ governance, and a browser wallet, in a
+codebase small enough to read. It descends from the original Hypernode ledger (see [Origins](#origins)).
 
 ## Try it in one command
 
@@ -28,10 +28,13 @@ Ctrl-C stops it.
     make quickstart
 
 This builds the container images, writes a new network of four banks into `deploy/quickstart/`
-(their keys, the genesis and their node configs), and starts it with Docker Compose: each bank is
-an engine and a fetcher, its public face. The public faces are on this machine at
-`http://127.0.0.1:18081` to `http://127.0.0.1:18084`. To pay as `alice`, one of the two funded
-customers the quickstart makes:
+(their keys, sealed, the genesis, and the configs and secrets of their engines and signers), and
+starts it with Docker Compose: each bank is an engine, a signer that holds its key, a fetcher, its
+public face, and the bank's own wallet. The public faces are on this machine at
+`http://127.0.0.1:18081` to `http://127.0.0.1:18084`, and the banks' wallets at
+`http://127.0.0.1:18091` to `http://127.0.0.1:18094`, under any user name and the password the
+quickstart wrote for each, such as `deploy/quickstart/bank-a.wallet.password`. To pay as `alice`, one
+of the two funded customers the quickstart makes:
 
     make build
     bin/go_ledger_ui -node http://127.0.0.1:18081 -network quickstart -wallet deploy/quickstart/alice.wallet.json -listen 127.0.0.1:8090
@@ -102,9 +105,26 @@ network going when the internet does not:
 - **Containers and the quickstart.** Images for the engine and the fetcher, and for the wallet, and
   a compose file that runs four banks on one machine (`make quickstart`).
 
-The fourth container, the signer, which takes the key off the networked machine, is still to come.
 The Phase 3 spec is [`review/phase3_spec.md`](review/phase3_spec.md), and its build record
-[`review/phase3_progress.md`](review/phase3_progress.md). What is left to do is in
+[`review/phase3_progress.md`](review/phase3_progress.md).
+
+Phase 4, built by 2026-11-03, is another new genesis. It takes the key off the networked machines,
+lets DNS and firewalls read the names, and lets a joining node trust no single peer:
+
+- **The signer.** A bank's one key lives in the signer (`cmd/signer`), sealed at rest, on the bank's
+  private network. The engine and the bank's wallet hold the public key only, and ask it for each
+  signature, each as a client with its own secret and its own list of domains. It gives each vote
+  and proposal slot one signature, written to disk before it signs, and keeps an audit log.
+- **The name service.** The engine writes the names as a DNS zone file, with the validators'
+  addresses as an IP filter, and a lookup from an IP address to the names that list it, so a bank
+  can tell whom to call about a flood. A name may list its web server's TLS keys, and a wallet takes
+  from a bank's web server only a key the bank lists.
+- **The joiner.** A node takes a checkpoint only when more than ⅔ of the validator set it trusts
+  signed it, walks from set to set where the set changed (each block names the set that signs the
+  next), asks every validator, and stops with an alarm when two valid commits disagree.
+
+The Phase 4 spec is [`review/phase4_spec.md`](review/phase4_spec.md), and its build record
+[`review/phase4_progress.md`](review/phase4_progress.md). What is left to do is in
 [`TODO.md`](TODO.md). The words and the finding ids (A1, C1, E1, Q1, R1 and the rest) are explained
 in [`docs/glossary.md`](docs/glossary.md).
 
@@ -122,7 +142,8 @@ network's work, and its honest limits.
 | Package | Area | What it holds |
 |---|---|---|
 | `signing/` | signature | ML-DSA-65, the signing domains, and the preimage every signature binds |
-| `cmd/keygen/` | signature | prints a fresh key pair |
+| `cmd/keygen/` | signature | prints a fresh key pair, writes one into a sealed key file, or prints a client secret for the signer |
+| `cmd/signer/` | signature | holds a bank's key, and signs for the bank's engine and wallet, by its rules |
 | `consensus/` | node | the validator set, votes, the commit, signed proposals, double-sign evidence, the round driver |
 | `ledger/` | node | the state, the messages, the ⅔ certificates, the genesis, `ProposeBlock` and `ApplyBlock`; no I/O |
 | `node/` | node, API/CDN | the running node: event loop, pools, snapshot and sign log, catch-up, the signature record; its HTTP routes, relay and peers |
@@ -135,8 +156,8 @@ network's work, and its honest limits.
 | `docs/` | | the docs, in the four areas |
 
 The imports run `signing` → `consensus` → `ledger` → `node` → `cmd/server`, `cmd/demo` and `ui`;
-`cmd/keygen` imports only `signing`, `cmd/fetcher` only `ledger`, and `cmd/quickstart` only `ledger`
-and `signing`. To read the code in that order, one step at a time with each
+`cmd/keygen` imports only `signing`, `cmd/signer` only `signing`, `consensus` and `ledger`,
+`cmd/fetcher` only `ledger`, and `cmd/quickstart` only `ledger` and `signing`. To read the code in that order, one step at a time with each
 step's tests, follow [`docs/reading-the-code.md`](docs/reading-the-code.md).
 
 ## Audit invariants enforced in `ledger`
@@ -164,7 +185,10 @@ that out by construction:
   domains (C1) or networks (C6). The network id is made from the genesis hash.
 - The scheme is **ML-DSA-65** (FIPS 204), from Go's standard library `crypto/mldsa`: 1952-byte
   public keys, 3309-byte signatures, keys stored as their 32-byte seed. Signing is deterministic.
-  `keygen` prints a fresh pair.
+  `keygen` prints a fresh pair, or writes it into a key file sealed with a passphrase.
+- A bank's key can live in the **signer** (`cmd/signer`): it signs only the domains each client's
+  list allows, only in the bank's own name, and never two different votes for one height, round and
+  type.
 
 The tests check that the replays fail: a `receipt` signature does not verify as a `payment`, a
 `testnet` signature does not verify on `mainnet`, and re-splitting a field's bytes does not verify.
@@ -225,7 +249,7 @@ See [`docs/consensus.md`](docs/consensus.md) and [`docs/architecture.md`](docs/a
     go test -short ./...            # fast: skips the chaos scenarios, runs fewer simulator seeds
     go test -race ./...             # full, as CI runs it
     go test -C ui -race ./...       # the wallet module
-    make build                      # the five programs into bin/, static (CGO_ENABLED=0)
+    make build                      # the six programs into bin/, static (CGO_ENABLED=0)
     make images                     # the container images (CONTAINER=podman for Podman)
 
 Requires Go 1.27 or later. A chaos run prints a `GOLEDGER_CHAOS_SEED` that replays its fault

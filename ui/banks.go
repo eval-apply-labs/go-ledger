@@ -76,6 +76,7 @@ type bankCheck struct {
 func (wallet *Wallet) checkOtherBanks(pageContext context.Context, checkpoint node.Checkpoint) bankCheck {
 	networkID := wallet.pinnedNetworkID()
 	client := node.NewHTTPClient(otherBanksTimeout)           // follows no redirect
+	client.Transport = wallet.client.Transport                // pins a bank's web server by the chain (tlspin.go)
 	answers := make([]bankHeight, len(checkpoint.Validators)) // left at zero power: no answer
 	var waitGroup sync.WaitGroup
 	for i, validator := range checkpoint.Validators {

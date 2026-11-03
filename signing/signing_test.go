@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func mustSigner(t *testing.T, network string) *Signer {
+func mustSigner(t *testing.T, network string) Signer {
 	t.Helper()
 	signer, err := Generate(NetworkScheme(), network)
 	if err != nil {

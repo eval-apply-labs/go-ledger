@@ -25,7 +25,7 @@ func requestFixture() (Chain, LedgerState) {
 
 // signedAs is request signed by the test name signerName in one role (SignAsRequestor, SignAsBank or
 // SignAsNewKey).
-func signedAs(sign func(*signing.Signer, NameRequest) (NameRequest, error), signerName string, request NameRequest) NameRequest {
+func signedAs(sign func(signing.Signer, NameRequest) (NameRequest, error), signerName string, request NameRequest) NameRequest {
 	signed, err := sign(testSigner(signerName), request)
 	if err != nil {
 		panic(err)
@@ -88,11 +88,13 @@ func nextBlock(t *testing.T, chain Chain, state LedgerState, content BlockConten
 }
 
 // forgedBlock is the block on state that carries content just as it is, with the digest of the state
-// that content results in: a block only a rule about its content can refuse.
+// that content results in and the hash of the set it seats: a block only a rule about its content can
+// refuse.
 func forgedBlock(chain Chain, state LedgerState, content BlockContent) Block {
 	validators := chain.ValidatorRule.SetFor(state)
-	return Block{Height: state.Height + 1, ValidatorsHash: ValidatorsHash(validators.Validators()), Content: content,
-		StateDigest: applyContent(state, validators, content).Digest()}
+	next := applyContent(state, validators, content)
+	return Block{Height: state.Height + 1, ValidatorsHash: ValidatorsHash(validators.Validators()), NextValidatorsHash: signingSetHash(chain, next),
+		Content: content, StateDigest: next.Digest()}
 }
 
 // refuses checks that ApplyBlock refuses the forged block carrying content on state, with an error

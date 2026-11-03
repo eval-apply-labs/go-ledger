@@ -3,18 +3,26 @@
 Area: **general**. The words the docs use, in one place, and the ids the review records use. Each
 entry says where to read more. "The spec" is [`review/phase2_spec.md`](../review/phase2_spec.md),
 the Phase 2 design spec; "spec §5.3" is its section 5.3, and "today" in the spec means Phase 1. The
-Phase 3 spec is [`review/phase3_spec.md`](../review/phase3_spec.md); the table at the end lists its
-ids too.
+Phase 3 spec is [`review/phase3_spec.md`](../review/phase3_spec.md), and the Phase 4 spec
+[`review/phase4_spec.md`](../review/phase4_spec.md); the table at the end lists their ids too.
 
 ## Names, money and governance
 
 - **Name, account.** An account is a name: 1 to 32 characters of `a` to `z`, `0` to `9` and `-`,
   not starting or ending with `-`. It holds a key, a balance, a bank of record, a delegate, a
-  description, a public address, IP addresses, a frozen mark and any pending change. Payments go to
-  names, never to keys. See [architecture.md](architecture.md#the-state).
+  description, a public address, IP addresses, TLS keys, a frozen mark and any pending change.
+  Payments go to names, never to keys. See [architecture.md](architecture.md#the-state).
 - **Name service.** The names on chain, read as a directory: each name publishes its key, a public
-  address and up to 4 IP addresses, and only its own key signs the addresses. See
-  [governance.md](governance.md#names-as-a-name-service).
+  address, up to 4 IP addresses and up to 2 TLS keys, and only its own key signs the addresses and
+  the TLS keys. See [governance.md](governance.md#names-as-a-name-service).
+- **Zone file.** `hdls/zone`: the names' records as a DNS zone, in the standard text format of DNS
+  (RFC 1035), which an engine whose config sets `zone` writes into its public folder, and which any
+  DNS server can load. It holds each name's addresses, public address and TLS keys, the addresses of
+  the validators of the height in progress (the IP filter), and the lookup from an IP address to the
+  names that list it. See [governance.md](governance.md#names-as-a-name-service).
+- **TLS keys.** Up to 2 per name: each the SHA-256 of a web server key's SubjectPublicKeyInfo, in
+  hex, what DNS TLSA records hold. Two let a name roll its key without a gap. A wallet takes a
+  bank's web server only with one of the bank's TLS keys, when the bank lists any.
 - **Bank, bank of record.** A bank is a name that co-signs other names' registrations and changes.
   A name's bank of record is the bank that co-signed it; a genesis name, or one the ⅔ create, may
   have none. The validators are the banks.
@@ -84,9 +92,9 @@ ids too.
   rewritten at each commit and catch-up. A restart starts from it.
 - **Checkpoint.** The committed state with the last block's header and its commit: what
   `GET /hdls/checkpoint` serves, and what a joining node or a wallet verifies.
-- **Sign log.** The node's file of its own votes and proposals at the height in progress
-  (`<snapshotPath>.votes`), written to disk before any is sent, so a restart never signs twice.
-  Run each validator key on one node only.
+- **Sign log.** The engine's file of its own votes and proposals at the height in progress, and
+  its lock (`<snapshotPath>.votes`), written to disk before any is sent, so a restart never signs
+  twice. Run each validator key on one node only. A signer keeps a sign log of its own (below).
 - **Signature record.** Who signed each block, kept for `retainBlocks` heights in files of 100
   heights, and every governance certificate and double-sign proof for the life of the chain. It
   keeps no payment. See [api.md](api.md).
@@ -98,18 +106,71 @@ ids too.
   certificates, waiting for a block.
 - **Relay, re-gossip.** A node passes each new message on to its own peers once (relay). While a
   height runs, it sends its votes and the current proposal again every `stepTimeoutMs` (re-gossip).
-- **Catch-up, anchor.** A node that falls behind fetches a checkpoint from a peer and jumps to it.
-  Its anchor is the validator set of its own last committed state: it trusts a checkpoint only if
-  anchor names holding more than a third of the anchor's power signed its commit, under the keys the
-  anchor holds. See [consensus.md](consensus.md#catching-up).
-- **Bootstrap peers.** The peers a node asks first for a checkpoint, at start and at each catch-up.
-  A bank's public address will do: it serves the status and the checkpoint as files. A running node
-  then asks its gossip peers, then the other validators' public addresses: all of them when no peer
-  answers or it is stuck, and otherwise one a tick, in turn.
-- **Observer.** A node without a validator seat. It follows the chain and signs receipts.
+- **Catch-up.** A node that falls behind asks every peer it knows of for its status, and fetches
+  a checkpoint from one that is ahead, and jumps to it. It trusts a checkpoint only if names of its
+  trusted frame holding more than two thirds of its power signed its commit, under the keys the
+  frame holds, or a walk reaches such a frame. See [consensus.md](consensus.md#catching-up).
+- **Frame, trusted frame, anchor.** A frame is a validator set and the height from which it signs:
+  the set between two changes of its names or keys. A node's trusted frame is the newest frame it
+  already trusts: the set its last committed state seats, or a later one a walk reached. Before
+  Phase 4 the docs called the node's own set its anchor, and a third of it was enough. See
+  [consensus.md](consensus.md#frames-and-the-walk).
+- **Next validators hash.** `NextValidatorsHash` in a block's header: the hash of the set that
+  signs the next height. The block hash covers it, so each commit signs off the set that comes next.
+- **Walk.** How a node that was away while the set changed catches up without trusting one peer.
+  From its trusted frame it takes each later frame that more than two thirds of the frame it holds
+  signed off, by the commit of the height before, until more than two thirds of the frame it holds
+  signed the newest checkpoint. It reads the frames file, `hdls/frames`, and the record, from the
+  other validators' public faces. See [consensus.md](consensus.md#frames-and-the-walk).
+- **Fork alarm.** Two checkpoints that both pass commit different blocks at one height ahead of the
+  node: more than a third of a set signed twice. The node adopts neither, logs both, and halts.
+- **Divergence alarm.** The network's commit and the node's own state disagree: a checkpoint of the
+  node's committed height, checked against the set that signed it, passes and commits another block
+  there (any node); or, for a seated node, a checkpoint of its height in progress does not build on
+  its last block, or more than two thirds of the set precommit a block it refused. The node logs
+  what the network committed, and halts. See
+  [consensus.md](consensus.md#the-alarms-and-the-confirmation).
+- **Halted.** What a node is after an alarm: it signs nothing, adopts no checkpoint, and asks for
+  none, until its operator restarts it. Its status's `halted` gives the alarm.
+- **Confirmed.** A node is confirmed once a commit holds its own precommit, while it is seated:
+  more than two thirds of the set then agree with its state, whoever seeded it. Its status's
+  `confirmed` gives that height, or `null`. It is kept in memory only, and an observer is never
+  confirmed.
+- **Bootstrap peers.** Peers the node's config names. The node asks them for a checkpoint before
+  its first height, and, with its gossip peers and every other validator's public address, at each
+  catch-up. A bank's public address will do: it serves the status and the checkpoint as files.
+- **Observer.** A node without a validator seat. It follows the chain and signs receipts. It is
+  never confirmed.
 - **Network name, network id, genesis.** The genesis file starts a network. The network id is the
   network name, a slash and the genesis hash in hex; every signature binds it, so a signature counts
   on one network only. A new genesis (a re-genesis) takes a new network name.
+
+## The signer
+
+- **Signer.** `cmd/signer`: the program that holds a bank's one key, on a machine of its own, and
+  signs for the bank's own programs, its clients, on the bank's private network (`POST /sign`). It
+  never signs raw bytes: a client sends a domain and the fields the ledger signs in it, and the
+  signer signs only in its bank's name. The engine and a bank's wallet sign through it, or with a
+  key in their own process. See [signature.md](signature.md) and [api.md](api.md#the-signers-route).
+- **Client** (of the signer). A program the signer answers: the engine, the bank's desk, its admin
+  page. Each has a name, a secret of its own, by whose HMAC each request proves who asks, and a list
+  of the domains it may ask for.
+- **Domain.** The first field of everything the ledger signs (`signing.Domain`): what kind of
+  message a signature is for, such as `block-revision` for votes, `proposal`, `receipt` or
+  `registration`. A signature in one domain never verifies in another.
+- **Slot.** What the signer signs at most once: a vote's height, round and type, or a proposal's
+  height and round. A request for a signed slot with the same fields gets the same signature again;
+  with other fields it is refused, and the refusal is marked `REFUSED CONFLICT`.
+- **The signer's sign log, audit log.** The signer's sign log holds each slot it signed, written to
+  disk before it signs; its rules read it. A signer that lost it refuses every vote and proposal
+  until it is started with `-resume-above <height>`. The audit log holds a line for every signature
+  and every refusal, of any domain: the time, the client, the domain and a summary a person can
+  read. Nothing reads it but people: it is how a bank finds out what a stolen terminal signed. The
+  engine keeps a sign log of its own, which guards the lock (see
+  [consensus.md](consensus.md#signing-only-while-seated)).
+- **Key self-test.** The signature, in the domain `key-self-test`, that the engine makes at start
+  over its own name and checks under its `publicKey`: a signer that holds another key, or signs for
+  another bank, stops the engine before it joins.
 
 ## The wallet
 
@@ -117,8 +178,8 @@ ids too.
   `<keyfile>.trust`. It shows a state only if pinned names holding more than ⅔ of the pinned power
   signed it under their pinned keys. It follows the chain: such a state's validator set, when its
   commit is a quorum of that set too, becomes the pin. The network id never changes. (2) A payment's pin: its optional `PreviousStateDigest`, which
-  binds it to the state its block builds on (the fork-binding pin). (3) A node's anchor (above) is
-  the node's own pin of the validators it trusts.
+  binds it to the state its block builds on (the fork-binding pin). (3) A node's trusted frame
+  (above) is the node's own pin of the validators it trusts.
 - **First use.** With no `<keyfile>.trust`, the wallet pins the validators that signed the first
   state its node serves. An operator's list in that file is safer. The wallet reads the file only
   at start.
@@ -136,7 +197,7 @@ ids too.
 ## Deployment and pigeon mode
 
 - **Engine.** `cmd/server`: the node, with the ledger, consensus, the pools, the snapshot, the sign
-  log and the record. Until the signer is split out, it also holds the key.
+  log and the record. Its config names its signer, which holds the key, or holds the key itself.
 - **Gossip port.** The engine's port that the other validators reach, `gossipListen` in its config,
   usually 8070: the network's `gossipPort`, fixed in the genesis. It serves only the routes
   validators use, behind the allow list. See [api.md](api.md#two-ports-and-the-public-face).
@@ -153,7 +214,8 @@ ids too.
 - **IP addresses.** Up to 4 per name, IPv4 or IPv6, what DNS A and AAAA records would hold. A
   validator's are where the others gossip to, and where its gossip may come from.
 - **Public folder.** The files the engine writes for the public (`publicPath`): status, checkpoint,
-  accounts, governance, a record per name and per key, and the public bundle. See
+  accounts, governance, a record per name and per key, the names that list each IP address, the
+  public bundle, the frames file, and, with a zone setting, the zone file. See
   [architecture.md](architecture.md#the-public-folder).
 - **Fetcher, public face.** `cmd/fetcher`: a small program with no key and no state, which serves
   the public folder and the record files, read-only, and passes customers' payments, updates and
@@ -194,11 +256,12 @@ go_ledger is a Go port of the Hypernode ledger, written in Java (README.md, "Ori
 
 ## The build and its records
 
-- **Phase 1, 2 and 3.** Phase 1 fixed what needed no new genesis; Phase 2 is the one new genesis
+- **Phase 1 to 4.** Phase 1 fixed what needed no new genesis; Phase 2 is the one new genesis
   (ML-DSA-65, names as the identity, and the rest); Phase 3, built on 2026-11-01 with a new genesis
   of its own, split the deployment: the engine's two ports, the public face, the name service's
-  addresses, pigeon mode and the quickstart. The signer, the last of the four containers, is still
-  to come. See [TODO.md](../TODO.md).
+  addresses, pigeon mode and the quickstart. Phase 4, built on 2026-11-02 and 2026-11-03 with a new
+  genesis of its own, added the signer, the last of the four containers; the zone file and TLS keys;
+  and a joiner that trusts no single peer. See [TODO.md](../TODO.md).
 - **Owner, orchestrator, builder, checker, fixer.** The owner is the person who owns the project
   and decides. The rest are Claude agents that built and checked the code under the owner's
   direction: the orchestrator ran builders, independent checkers and fixers, slice by slice. See
@@ -224,3 +287,7 @@ document you are reading says which.
 | P1, P2, P3a, P3b, P4 to P8 | The slices Phase 3 was built in | the Phase 3 spec, §11 |
 | N1 to N15, B1 to B8, W1 to W10, R2-1 to R2-4, R3-1 to R3-3 | The findings of the independent review of Phase 3, 2026-11-01, and of its recheck: the network surfaces (N), bundles and the public folder (B, and R2- in the recheck), the wallet (W, and R3-) | [review/_evidence_phase3/](../review/_evidence_phase3/README.md), and what became of each in [review/phase3_progress.md](../review/phase3_progress.md#the-independent-review-2026-11-01) |
 | SIG-, LED-, CON-, NODE-, UI-, GEN- and a number | The hand-off review of 2026-10-31, cited in its commits | [review/phase2_progress.md](../review/phase2_progress.md) |
+| D1, D2 | The owner's decisions for Phase 4 | [review/phase4_spec.md](../review/phase4_spec.md) §0.2 |
+| R1 to R5 | The Phase 4 spec's readings of those decisions | the Phase 4 spec, §0.3 |
+| Q1 to Q15 | The Phase 4 spec's questions, all decided on 2026-11-02: the owner took every default | the Phase 4 spec, §9 |
+| L1, K1, S1, N1, S2, J1, S3, N2, D1 | The slices Phase 4 was built in; D1 is the docs slice, not the decision | the Phase 4 spec, §7 |

@@ -117,6 +117,37 @@ func TestAllowListLetsInOnlyListedAddresses(t *testing.T) {
 	}
 }
 
+// The refusal line names who claims the address refused the most (spec §3.4): each name that lists it in
+// the committed state, marked a validator or not, or no name. The counts start again at each report.
+func TestAllowListRefusalLineNamesTheClaimants(t *testing.T) {
+	bankA, bankB, carol, dave := testAccount("bank-a", "100"), testAccount("bank-b", "100"), testAccount("carol", "10"), testAccount("dave", "10")
+	bankA.IPAddresses, bankB.IPAddresses = []string{"203.0.113.1"}, []string{"203.0.113.2"}
+	carol.IPAddresses, dave.IPAddresses = []string{"198.51.100.7"}, []string{"192.0.2.9", "198.51.100.7"}
+	node := New(testConfig(staticChain("bank-a", "bank-b"), "bank-a", testGenesis([]ledger.Account{bankA, bankB, carol, dave}, time.Second, 0)), NewHTTPTransport(nil))
+	listener := NewAllowListListener(&fakeListener{}, node).(*allowListListener)
+	logged := captureLog(t)
+	for _, test := range []struct {
+		refused  []string
+		wantLine string
+	}{
+		{[]string{"198.51.100.7", "203.0.113.9", "::ffff:198.51.100.7"},
+			"refused 3 connections in the last minute from addresses not on the allow list, 2 of them from 198.51.100.7: listed by carol (not a validator), dave (not a validator)"},
+		{[]string{"203.0.113.9"}, "refused 1 connections in the last minute from addresses not on the allow list, 1 of them from 203.0.113.9: listed by no name"},
+		{[]string{"203.0.113.1", "203.0.113.9"}, "refused 2 connections in the last minute from addresses not on the allow list, 1 of them from 203.0.113.1: listed by bank-a (a validator)"},
+	} {
+		for _, address := range test.refused {
+			listener.Listener = &fakeListener{connections: []net.Conn{connectionFrom(address)}}
+			if _, err := listener.Accept(); err != net.ErrClosed {
+				t.Fatalf("a connection from %s was let in: %v", address, err)
+			}
+		}
+		listener.reportRefusals()
+		if !strings.Contains(logged.String(), test.wantLine) {
+			t.Errorf("refusals from %v: the log does not hold %q:\n%s", test.refused, test.wantLine, logged)
+		}
+	}
+}
+
 // The list leaves out the node's own addresses, and loopback addresses, from the chain (review N1): a
 // front that rewrites every caller to the engine's own address, or to loopback, then lets nobody in,
 // and the refusal report shows it, instead of letting everybody in. The node's own address stays out

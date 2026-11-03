@@ -25,6 +25,7 @@ type Account struct { // implements json.Marshaler and json.Unmarshaler, in amou
 	Description   string
 	PublicAddress string   // the name's public face, "" or CanonicalAddress (e.g. "https://bank-a.example"): a bank's, which wallets read from, or a website
 	IPAddresses   []string // at most MaxIPAddresses, each CanonicalIPAddress: what DNS A and AAAA records hold, and a validator's gossip addresses (the on-chain peer DNS)
+	TLSKeys       []string // at most MaxTLSKeys, each CanonicalTLSKey: the hashes of its web server's keys, what DNS TLSA records hold
 	Frozen        bool     // a frozen name neither pays nor is paid, and is never seated
 	PendingKey    string   // a key change waiting for PendingHeight; "" for none
 	PendingBank   string   // a bank change waiting for PendingHeight; "" for none

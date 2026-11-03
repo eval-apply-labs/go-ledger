@@ -23,11 +23,11 @@ const testNetworkID = "testnet"
 // costs about a millisecond to generate.
 var (
 	testSignersMutex sync.Mutex
-	testSigners      = map[string]*signing.Signer{}
+	testSigners      = map[string]signing.Signer{}
 )
 
 // testSigner returns the signer that holds the key of the test name, the same one each time.
-func testSigner(name string) *signing.Signer {
+func testSigner(name string) signing.Signer {
 	testSignersMutex.Lock()
 	defer testSignersMutex.Unlock()
 	if signer, found := testSigners[name]; found {
@@ -112,7 +112,7 @@ func signedPayment(from, to, amount string, blockID int64) ledger.Payment {
 
 // proposalOf is block proposed afresh (valid round -1) for (height, round), signed by signer under the
 // name proposerName.
-func proposalOf(signer *signing.Signer, proposerName string, height int64, round int32, block ledger.Block) ProposalMessage {
+func proposalOf(signer signing.Signer, proposerName string, height int64, round int32, block ledger.Block) ProposalMessage {
 	signed, err := consensus.SignProposal(signer, consensus.SignedProposal{Height: height, Round: round, ValidRound: -1, BlockHash: ledger.BlockHash(block), Proposer: proposerName})
 	if err != nil {
 		panic(err)

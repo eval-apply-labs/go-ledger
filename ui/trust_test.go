@@ -32,7 +32,7 @@ func TestWalletBelievesOnlyPinnedValidators(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	honest.setState([]*signing.Signer{testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)},
+	honest.setState([]signing.Signer{testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)},
 		ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
 	if balance, err := balanceOf(wallet); err != nil || balance.Cmp(big.NewRat(5, 1)) != 0 {
 		t.Fatalf("first read: balance %v, err %v; want 5", balance, err)
@@ -43,7 +43,7 @@ func TestWalletBelievesOnlyPinnedValidators(t *testing.T) {
 
 	impostor := testNodeSigner(t)
 	forged := newGovernanceNode(t)
-	forged.setState([]*signing.Signer{impostor}, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5000, 1)})
+	forged.setState([]signing.Signer{impostor}, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5000, 1)})
 	restarted, err := LoadOrCreateWallet(keyfile, "testnet", forged.baseURL, 3)
 	if err != nil {
 		t.Fatal(err)
@@ -70,11 +70,11 @@ func TestOperatorPinIsHonouredFromTheFirstRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testNode.setState([]*signing.Signer{testNodeSigner(t)}, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5000, 1)})
+	testNode.setState([]signing.Signer{testNodeSigner(t)}, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5000, 1)})
 	if _, err := balanceOf(wallet); err == nil {
 		t.Fatal("believed a state signed by a validator the operator's list does not name")
 	}
-	testNode.setState([]*signing.Signer{validator}, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
+	testNode.setState([]signing.Signer{validator}, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
 	if balance, err := balanceOf(wallet); err != nil || balance.Cmp(big.NewRat(5, 1)) != 0 {
 		t.Fatalf("balance %v, err %v; want 5 from the pinned validator's state", balance, err)
 	}
@@ -95,7 +95,7 @@ func TestWalletRefusesAFailedCheckpointAnswer(t *testing.T) {
 			return
 		}
 		responseWriter.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(responseWriter).Encode(signedCheckpoint([]*signing.Signer{validator}, nil))
+		_ = json.NewEncoder(responseWriter).Encode(signedCheckpoint([]signing.Signer{validator}, nil))
 	}))
 	defer server.Close()
 	if _, err := newTestWallet(t, server.URL).verifiedState(); err == nil || !strings.Contains(err.Error(), "503") {
@@ -115,12 +115,12 @@ func TestOperatorPinIsReadOnlyAtStart(t *testing.T) {
 		}
 		return wallet
 	}
-	handOver := func(validator *signing.Signer) { // the operator's list replaces the file, and the node's validators are those
+	handOver := func(validator signing.Signer) { // the operator's list replaces the file, and the node's validators are those
 		list := fmt.Sprintf(`{"networkId": %q, "validators": [{"Name": %q, "PublicKey": %q, "Power": 1}]}`, testNetworkID, nameOf(validator), validator.PublicKeyBase64())
 		if err := os.WriteFile(keyfile+".trust", []byte(list), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		testNode.setState([]*signing.Signer{validator})
+		testNode.setState([]signing.Signer{validator})
 	}
 	for _, pinnedBefore := range []bool{false, true} {
 		wallet := start()
@@ -139,14 +139,14 @@ func TestOperatorPinIsReadOnlyAtStart(t *testing.T) {
 // it up.
 func TestPinnedQuorumIgnoresOtherKeys(t *testing.T) {
 	firstPinned, secondPinned, thirdPinned, firstNewcomer, secondNewcomer, thirdNewcomer := testNodeSigner(t), testNodeSigner(t), testNodeSigner(t), testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)
-	pinned := consensus.NewValidatorSet(signedCheckpoint([]*signing.Signer{firstPinned, secondPinned, thirdPinned}, nil).Validators)
+	pinned := consensus.NewValidatorSet(signedCheckpoint([]signing.Signer{firstPinned, secondPinned, thirdPinned}, nil).Validators)
 	for i, testCase := range []struct {
-		signers []*signing.Signer
+		signers []signing.Signer
 		want    bool
 	}{
-		{[]*signing.Signer{firstPinned, secondPinned, thirdPinned, firstNewcomer}, true},                    // all pinned, plus a newcomer
-		{[]*signing.Signer{firstPinned, secondPinned, firstNewcomer, secondNewcomer, thirdNewcomer}, false}, // two of three pinned, newcomers the majority
-		{[]*signing.Signer{firstPinned, secondPinned}, false},                                               // two of three pinned is not more than ⅔
+		{[]signing.Signer{firstPinned, secondPinned, thirdPinned, firstNewcomer}, true},                    // all pinned, plus a newcomer
+		{[]signing.Signer{firstPinned, secondPinned, firstNewcomer, secondNewcomer, thirdNewcomer}, false}, // two of three pinned, newcomers the majority
+		{[]signing.Signer{firstPinned, secondPinned}, false},                                               // two of three pinned is not more than ⅔
 	} {
 		if signed := signedByPinned(signedCheckpoint(testCase.signers, nil).Commit, pinned, testNetworkID); signed != testCase.want {
 			t.Errorf("case %d: got %v, want %v", i, signed, testCase.want)
@@ -158,7 +158,7 @@ func TestPinnedQuorumIgnoresOtherKeys(t *testing.T) {
 // quorum, not refused (spec 7.2, Q17): the pin holds while the other pinned names hold more than ⅔ of
 // the pinned power, and fails once they hold less.
 func TestPinnedQuorumLeavesOutARekeyedPinnedName(t *testing.T) {
-	validators := []*signing.Signer{testNodeSigner(t), testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)}
+	validators := []signing.Signer{testNodeSigner(t), testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)}
 	checkpoint := signedCheckpoint(validators, nil)
 	pinned := consensus.NewValidatorSet(checkpoint.Validators) // four of power 1: the quorum is 3
 	votes := checkpoint.Commit.Votes
@@ -189,7 +189,7 @@ func TestPinnedQuorumLeavesOutARekeyedPinnedName(t *testing.T) {
 // another name than the one the wallet was started for.
 func TestWalletPinHoldsNameKeyAndPower(t *testing.T) {
 	keyfile := filepath.Join(t.TempDir(), "wallet.json")
-	validators := []*signing.Signer{testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)}
+	validators := []signing.Signer{testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)}
 	honest := newGovernanceNode(t)
 	wallet, err := LoadOrCreateWallet(keyfile, "testnet", honest.baseURL, 3)
 	if err != nil {
@@ -216,7 +216,7 @@ func TestWalletPinHoldsNameKeyAndPower(t *testing.T) {
 	// The same names, but every vote signed under another key, which the set the checkpoint carries gives
 	// the name, so that the checkpoint is consistent: the names alone vouch for nothing.
 	forgedCheckpoint := signedCheckpoint(validators, []ledger.Account{{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5000, 1)}})
-	impostors := map[string]*signing.Signer{}
+	impostors := map[string]signing.Signer{}
 	for i := range forgedCheckpoint.Validators {
 		impostor := testNodeSigner(t)
 		impostors[forgedCheckpoint.Validators[i].Name] = impostor
@@ -263,13 +263,13 @@ func TestWalletPinHoldsNameKeyAndPower(t *testing.T) {
 // order before its digest or any signature is checked, even with a commit its validators signed over it.
 func TestWalletRefusesAStateOutOfNameOrder(t *testing.T) {
 	validator := testNodeSigner(t)
-	accounts := withValidatorAccounts([]*signing.Signer{validator}, []ledger.Account{
+	accounts := withValidatorAccounts([]signing.Signer{validator}, []ledger.Account{
 		{Name: "alice", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(5, 1)},
 		{Name: "bob", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(6, 1)},
 	})
 	accounts[0], accounts[1] = accounts[1], accounts[0] // bob before alice
 	checkpoint := signedBy(node.Checkpoint{State: ledger.LedgerState{Accounts: accounts, Parameters: governanceParameters, GovernanceSequence: governanceSequence, Height: 9},
-		Validators: []consensus.Validator{{Name: nameOf(validator), PublicKey: validator.PublicKeyBase64(), Power: 1}}}, []*signing.Signer{validator})
+		Validators: []consensus.Validator{{Name: nameOf(validator), PublicKey: validator.PublicKeyBase64(), Power: 1}}}, []signing.Signer{validator})
 	server := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		_ = json.NewEncoder(responseWriter).Encode(checkpoint)
 	}))
@@ -317,13 +317,13 @@ func TestWalletPinsTheNetworkIdOnFirstUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	anotherNetwork.setState([]*signing.Signer{anotherValidator})
+	anotherNetwork.setState([]signing.Signer{anotherValidator})
 	anotherGenesis := newGovernanceNode(t) // its validators sign for testNetworkID
 	anotherGenesis.mutex.Lock()
 	anotherGenesis.networkID = ledger.NetworkID("testnet", [32]byte{2})
 	anotherGenesis.mutex.Unlock()
 	validator := testNodeSigner(t)
-	unhashed := signedCheckpoint([]*signing.Signer{validator}, nil)
+	unhashed := signedCheckpoint([]signing.Signer{validator}, nil)
 	unhashed.Validators[0].Power = 2 // a set the commit is a quorum of, but not the one the block's hash covers
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/hdls/status", func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -400,7 +400,7 @@ func TestFirstUseAsksForTheNetworkIdWithoutTheMutex(t *testing.T) {
 		_ = json.NewEncoder(responseWriter).Encode(map[string]any{"heightInProgress": 10, "networkId": testNetworkID})
 	})
 	serveMux.HandleFunc("/hdls/checkpoint", func(responseWriter http.ResponseWriter, request *http.Request) {
-		_ = json.NewEncoder(responseWriter).Encode(signedCheckpoint([]*signing.Signer{validator}, nil))
+		_ = json.NewEncoder(responseWriter).Encode(signedCheckpoint([]signing.Signer{validator}, nil))
 	})
 	server := httptest.NewServer(serveMux)
 	defer server.Close()
@@ -426,7 +426,7 @@ func TestWalletBuildsItsSignerOnce(t *testing.T) {
 // seat is a validator's name and the signer its node signs with: a re-key gives the name a new signer.
 type seat struct {
 	name   string
-	signer *signing.Signer
+	signer signing.Signer
 }
 
 // seatedCheckpoint is a checkpoint at height whose state gives each carried seat an account under its
@@ -601,7 +601,7 @@ func TestBanksChangedSaysHowToTakeANewList(t *testing.T) {
 	alice := ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)}
 	testNode.setState(nil, alice)
 	verified(t, wallet)
-	testNode.setState([]*signing.Signer{testNodeSigner(t), testNodeSigner(t)}, alice) // other banks now sign
+	testNode.setState([]signing.Signer{testNodeSigner(t), testNodeSigner(t)}, alice) // other banks now sign
 	for _, path := range []string{"/", "/requests", "/admin"} {
 		body := page(t, wallet, path)
 		for _, want := range []string{"the banks that sign have changed since this wallet last checked", "Get the current list of banks from any bank",
@@ -616,7 +616,7 @@ func TestBanksChangedSaysHowToTakeANewList(t *testing.T) {
 		t.Error("the main page does not say that no state verifies, or no longer offers to freeze alice")
 	}
 
-	unsigned := signedCheckpoint([]*signing.Signer{testNodeSigner(t)}, []ledger.Account{alice})
+	unsigned := signedCheckpoint([]signing.Signer{testNodeSigner(t)}, []ledger.Account{alice})
 	unsigned.Commit.Votes = nil // a quorum of no set
 	server := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		_ = json.NewEncoder(responseWriter).Encode(unsigned)
@@ -774,10 +774,10 @@ func TestCarriedCheckpointDoesNotHideTheNodesRefusal(t *testing.T) {
 	impostor := testNodeSigner(t)
 	for _, refusal := range []struct {
 		reason     string
-		validators []*signing.Signer // the set that signs the node's state of block 40
+		validators []signing.Signer // the set that signs the node's state of block 40
 		forge      func(checkpoint *node.Checkpoint)
 	}{
-		{errBanksChanged.Error(), []*signing.Signer{impostor}, nil},
+		{errBanksChanged.Error(), []signing.Signer{impostor}, nil},
 		{"not signed by the validators pinned in " + wallet.pinPath + ", nor by the validators it lists", validators,
 			func(checkpoint *node.Checkpoint) { checkpoint.Commit.Votes = nil }},
 		{"the node's state is not in name order, or does not match its commit", validators,
@@ -792,7 +792,7 @@ func TestCarriedCheckpointDoesNotHideTheNodesRefusal(t *testing.T) {
 		if _, _, err := wallet.Send(nameOf(shop), "1"); err == nil || !strings.Contains(err.Error(), refusal.reason) {
 			t.Errorf("a payment, with the node refused because %q: %v", refusal.reason, err)
 		}
-		if _, err := wallet.UpdateAccount("hello", "", "", ""); err == nil || !strings.Contains(err.Error(), refusal.reason) {
+		if _, err := wallet.UpdateAccount("hello", "", "", "", ""); err == nil || !strings.Contains(err.Error(), refusal.reason) {
 			t.Errorf("an account update, with the node refused because %q: %v", refusal.reason, err)
 		}
 		if posts := testNode.posted(); len(posts) != postsBefore {
@@ -832,7 +832,7 @@ func TestUnreadableNodeGetsNoPaymentOrUpdate(t *testing.T) {
 		!strings.Contains(err.Error(), "save the payment as text") {
 		t.Errorf("a payment to the node whose checkpoint can't be read: %v; want it refused, saying to save it as text", err)
 	}
-	if _, err := wallet.UpdateAccount("hello", "", "", ""); err == nil || !strings.Contains(err.Error(), "your bank's node can't be read") {
+	if _, err := wallet.UpdateAccount("hello", "", "", "", ""); err == nil || !strings.Contains(err.Error(), "your bank's node can't be read") {
 		t.Errorf("an account update to the node whose checkpoint can't be read: %v; want it refused", err)
 	}
 	if posts := testNode.posted(); len(posts) != 0 {
@@ -944,7 +944,7 @@ func TestLargeCheckpointFileIsTakenByTheForm(t *testing.T) {
 	request.Header.Set("Origin", "http://127.0.0.1:8090")
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	recorder := httptest.NewRecorder()
-	routes(wallet, "127.0.0.1:8090").ServeHTTP(recorder, request)
+	routes(wallet, "127.0.0.1:8090", "").ServeHTTP(recorder, request)
 	if refusal := redirectError(recorder); !strings.Contains(refusal, "unreadable") || strings.Contains(refusal, "paste the whole file") {
 		t.Errorf("a form the parser can't read: %q; want it refused as unreadable", refusal)
 	}

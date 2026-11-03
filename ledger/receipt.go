@@ -33,7 +33,7 @@ func (receipt Receipt) signFields() [][]byte {
 // domain. The payment is identified by its content id (PaymentID), not its signature bytes — a
 // malleated signature is a different byte string for the same payment, so signature bytes are not a
 // stable id.
-func SignReceipt(nodeSigner *signing.Signer, nodeName string, payment Payment) (Receipt, error) {
+func SignReceipt(nodeSigner signing.Signer, nodeName string, payment Payment) (Receipt, error) {
 	receipt := Receipt{Node: nodeName, PaymentID: PaymentID(payment), BlockID: payment.BlockID}
 	signature, err := nodeSigner.SignBase64(signing.DomainReceipt, receipt.signFields()...)
 	if err != nil {

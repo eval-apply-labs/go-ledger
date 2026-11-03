@@ -13,10 +13,10 @@ const testNetwork = "testnet"
 
 // testSigners holds the signer of each test account, made on first use: generating a key costs about
 // a millisecond, so the tests share a few. The ledger tests do not run in parallel.
-var testSigners = map[string]*signing.Signer{}
+var testSigners = map[string]signing.Signer{}
 
 // testSigner returns the signer that holds the key of the test account `name`, the same one each time.
-func testSigner(name string) *signing.Signer {
+func testSigner(name string) signing.Signer {
 	if signer, found := testSigners[name]; found {
 		return signer
 	}

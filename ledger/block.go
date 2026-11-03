@@ -126,29 +126,35 @@ func paymentSigned(chain Chain, previousState LedgerState, payment Payment) bool
 // UpdateFitsState checks an account update against a state, the pre-block state in a block or the
 // committed state at intake (spec 5.3 rule 20, 4.2): it changes a field, its JSON fits the message
 // bound, a public address it sets is in the one plain form (CanonicalAddress), IP addresses it sets
-// are at most MaxIPAddresses, each in its one plain form (CanonicalIPAddress) and none twice, its
-// account exists and is not frozen, and a delegate it names exists and is not frozen. It returns an
-// error naming the first rule the update breaks. The block it names and its signature are the
-// caller's to check. Intake, blocks (updateError) and the wallet all check an update here, so no
-// address of another form enters the state by an update.
+// are at most MaxIPAddresses, each in its one plain form (CanonicalIPAddress) and none twice, TLS keys
+// it sets are at most MaxTLSKeys, each in its one form (CanonicalTLSKey) and none twice, its account
+// exists and is not frozen, and a delegate it names exists and is not frozen. It returns an error
+// naming the first rule the update breaks. The block it names and its signature are the caller's to
+// check. Intake, blocks (updateError) and the wallet all check an update here, so no address or key
+// of another form enters the state by an update.
 func UpdateFitsState(state LedgerState, update AccountUpdate) error {
 	account, accountFound := FindAccount(state.Accounts, update.Name)
 	delegate, delegateFound := FindAccount(state.Accounts, update.Delegate)
 	setsDelegate := update.Delegate != "" && update.Delegate != ClearField
 	setsPublicAddress := update.PublicAddress != "" && update.PublicAddress != ClearField
-	var ipAddressesRefusal error
+	var ipAddressesRefusal, tlsKeysRefusal error
 	if !clearsList(update.IPAddresses) {
 		ipAddressesRefusal = ipAddressesError(update.IPAddresses) // nil for an empty list, which leaves them
 	}
+	if !clearsList(update.TLSKeys) {
+		tlsKeysRefusal = tlsKeysError(update.TLSKeys) // nil for an empty list, which leaves them
+	}
 	switch {
-	case update.Delegate == "" && update.Description == "" && update.PublicAddress == "" && len(update.IPAddresses) == 0:
-		return errors.New("the update changes nothing: it sets no delegate, description, public address or IP addresses")
+	case update.Delegate == "" && update.Description == "" && update.PublicAddress == "" && len(update.IPAddresses) == 0 && len(update.TLSKeys) == 0:
+		return errors.New("the update changes nothing: it sets no delegate, description, public address, IP addresses or TLS keys")
 	case !WithinMessageBound(state.Parameters.MaxMessageBytes, update):
 		return errors.New("update too large: its serialized form exceeds the governed message bound")
 	case setsPublicAddress && !CanonicalAddress(update.PublicAddress):
 		return fmt.Errorf("the public address %q is not an address: %s", update.PublicAddress, addressRule)
 	case ipAddressesRefusal != nil:
 		return ipAddressesRefusal
+	case tlsKeysRefusal != nil:
+		return tlsKeysRefusal
 	case !accountFound:
 		return fmt.Errorf("no account is named %q", update.Name)
 	case account.Frozen:
@@ -199,15 +205,16 @@ func nameRequestSigned(chain Chain, previousState LedgerState, request NameReque
 
 // Block is a batch of changes applied atomically to move the committed state from one to the next
 // (spec 5.1). Its hash (BlockHash, hash.go) covers every field, and is what the consensus layer
-// commits: agreement on it is agreement on the exact block, the set that signs it, and the state it
-// results in (A2).
+// commits: agreement on it is agreement on the exact block, the set that signs it, the set that signs
+// the next block, and the state it results in (A2).
 type Block struct {
-	Height            int64
-	PreviousBlockHash [32]byte // the hash of the block before; the genesis hash for block 1
-	ValidatorsHash    [32]byte // ValidatorsHash of the set that signs this block: the one the pre-block state seats
-	Nonce             [32]byte // random, drawn by the proposer; it keeps the state digest out of the record
-	Content           BlockContent
-	StateDigest       [32]byte // the digest of the resulting LedgerState
+	Height             int64
+	PreviousBlockHash  [32]byte // the hash of the block before; the genesis hash for block 1
+	ValidatorsHash     [32]byte // ValidatorsHash of the set that signs this block: the one the pre-block state seats
+	NextValidatorsHash [32]byte // ValidatorsHash of the set that signs the next block: the one the resulting state seats
+	Nonce              [32]byte // random, drawn by the proposer; it keeps the state digest out of the record
+	Content            BlockContent
+	StateDigest        [32]byte // the digest of the resulting LedgerState
 }
 
 // BlockContent is what a block carries: payments to settle, account updates (re-delegation,
@@ -377,7 +384,8 @@ func withoutLastItem(content *BlockContent) bool {
 // payments and updates stop at maxBlockContentBytes, so every peer can decode the proposal. If the
 // resulting state would seat no name (rule 24, R9), items come out, the last added first, until it
 // seats one; they lapse or wait. The transaction cost, the fees and the caps are the committed
-// parameters', not chosen per block, and StateDigest is the digest of the state the block results in.
+// parameters', not chosen per block. StateDigest is the digest of the state the block results in, and
+// NextValidatorsHash the hash of the set that state seats, the one that signs the next block.
 func ProposeBlock(chain Chain, previousState LedgerState, previousBlockHash, nonce [32]byte, content BlockContent) Block {
 	validators := chain.ValidatorRule.SetFor(previousState)
 	height := previousState.Height + 1
@@ -513,6 +521,7 @@ func ProposeBlock(chain Chain, previousState LedgerState, previousBlockHash, non
 		nextState = applyContent(previousState, validators, block.Content)
 	}
 	block.StateDigest = nextState.Digest()
+	block.NextValidatorsHash = ValidatorsHash(chain.ValidatorRule.SetFor(nextState).Validators())
 	return block
 }
 
@@ -667,9 +676,10 @@ func contentError(chain Chain, previousState LedgerState, validators *consensus.
 // previousState's plus one), build on the block whose hash is previousBlockHash, and name, by its hash,
 // the validator set chain.ValidatorRule derives from previousState, the set that signs it. Its content
 // must pass contentError. The state it results in must keep every balance that rose within the largest
-// balance (rule 23), seat at least one name (rule 24, R9), and have the digest the block claims. This
-// is the check every node runs, so a node only accepts a block whose applied state is exactly what it
-// recomputes (audit A2).
+// balance (rule 23), seat at least one name (rule 24, R9), have the digest the block claims, and seat
+// the set the block names, by its hash, as the next one (Phase 4 spec §4.3), so the block's commit is
+// its set signing off the set that signs the next block. This is the check every node runs, so a node
+// only accepts a block whose applied state is exactly what it recomputes (audit A2).
 func ApplyBlock(chain Chain, previousState LedgerState, previousBlockHash [32]byte, block Block) (LedgerState, error) {
 	height := previousState.Height + 1
 	if block.Height != height {
@@ -693,6 +703,8 @@ func ApplyBlock(chain Chain, previousState LedgerState, previousBlockHash [32]by
 		return LedgerState{}, errors.New("the block leaves no name seated, and then no block could ever commit again (rule 24)")
 	case nextState.Digest() != block.StateDigest:
 		return LedgerState{}, errors.New("the block's state digest is not the digest of the state it results in")
+	case block.NextValidatorsHash != ValidatorsHash(chain.ValidatorRule.SetFor(nextState).Validators()):
+		return LedgerState{}, errors.New("the block names another next signing set: its next validators hash is not the hash of the set the state it results in seats")
 	}
 	return nextState, nil
 }

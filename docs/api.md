@@ -4,13 +4,14 @@ Area: **API/CDN**: the engine's two ports, and the public face in front of them,
 serves. Code: `node/httptransport.go` (`Server`, whose `Handler` serves the operator port and
 `GossipHandler` the gossip port, with the record routes `handleRecord` and `handleLifelongRecord`,
 the bundle and checkpoint routes, and `HTTPTransport`), `node/allowlist.go`, `node/relay.go`,
-`node/peerdns.go`, `node/topology.go`, the fetches in `node/sync.go`, `cmd/server` and
-`cmd/fetcher`.
+`node/peerdns.go`, `node/topology.go`, the fetches in `node/sync.go` and `node/frames.go`, the name
+service's files in `node/zone.go`, `cmd/server` and `cmd/fetcher`. The signer's route is in
+`cmd/signer/service.go`.
 
 This doc lists the two ports and the public face, every route, what it answers and what it costs a
-node, then how messages travel between nodes. Running the engine and the fetcher is in
-[operating-a-network.md](operating-a-network.md). The files the engine writes for the public are in
-[architecture.md](architecture.md#the-public-folder), and the bundle's format in
+node, then the signer's one route, then how messages travel between nodes. Running the engine and
+the fetcher is in [operating-a-network.md](operating-a-network.md). The files the engine writes for
+the public are in [architecture.md](architecture.md#the-public-folder), and the bundle's format in
 [architecture.md](architecture.md#bundles).
 
 ## Two ports and the public face
@@ -46,6 +47,7 @@ the gossip routes are open to anyone.
 | `GET /hdls/record`, `/hdls/lifelong-record` | no | yes, with `?from=` | the record files |
 | `GET /hdls/bundle` | no | yes: the full bundle | a file: the public bundle |
 | `POST /hdls/bundle`, `POST /hdls/checkpoint` | no | yes | no |
+| `GET /hdls/zone`, `/hdls/frames`, `/hdls/resolve/ip/<address>` | no | no | a file |
 
 Four routes do two jobs: an update, a name request and the two certificates. The port tells them
 apart, not the name. On the gossip port they are gossip from other validators. On the operator
@@ -74,7 +76,9 @@ The list is enforced in the engine's own process, in two places:
   published other addresses), the connection is closed, and what was read is dropped unparsed.
 
 Refused connections are counted, and the count goes in one log line a minute while it is above
-zero. How a bank chooses the addresses it publishes is in
+zero, with the address refused the most and the names that list it, each marked a validator or
+not: `listed by carol (not a validator)`, or `listed by no name`. A listed address is a claim:
+nothing checks that the name controls it. How a bank chooses the addresses it publishes is in
 [operating-a-network.md](operating-a-network.md#network-exposure). What the list does and does not
 protect is in [security.md](security.md#the-two-ports-and-the-public-face).
 
@@ -124,7 +128,7 @@ those delays consensus on that node.
 
 | Route | Body | Answer | Cost to the node |
 |---|---|---|---|
-| `/hdls/pay` | a signed `Payment` | the node's signed `Receipt` when it newly pools the payment; `202` and no receipt for a payment it already holds; `409` with the reason when it refuses | checks against the committed view, then one signature check, off the loop; the cheap checks again on the loop; one receipt signature (about 0.9 ms) per new payment |
+| `/hdls/pay` | a signed `Payment` | the node's signed `Receipt` when it newly pools the payment; `202` and no receipt for a payment it already holds, or when the receipt could not be signed (through a signer, while another receipt is out, or after the signer failed); `409` with the reason when it refuses | checks against the committed view, then one signature check, off the loop; the cheap checks again on the loop; one receipt signature (about 0.9 ms) per new payment |
 | `/hdls/payment` | a payment a peer relays | `202`, or `409` with the reason | as `/hdls/pay`, without the receipt |
 | `/hdls/update` | a signed `AccountUpdate` | `202`, or `409` with the reason | as a payment: one signature check off the loop |
 | `/hdls/name-request` | a signed `NameRequest` (registration, key change, bank change or freeze) | `202`, or `409` with the reason | off the loop, the shape and the cheap checks first, then the signatures: three for a registration or a key change, two for a bank change, one for a freeze; the cheap checks again on the loop |
@@ -132,6 +136,11 @@ those delays consensus on that node.
 | `/hdls/reassignment-vote` | a complete ⅔ name action (`Reassignment`) | `202` once the node pools it, now or before, or `409` with the reason | as a parameter change, plus the new key's proof |
 | `/hdls/proposal` | a `ProposalMessage`: the signed proposal and its block | `202` | on the loop: the cheap checks, one signature check, the block hash, then `ApplyBlock`; after two authentic proposals of one round fail to apply, none more for that round |
 | `/hdls/vote` | a signed consensus `Vote` | `202` | on the loop: a byte-identical copy of a vote the node holds is dropped before any check; a new vote costs two checks |
+
+An update sets any of a name's delegate, description, public address, IP addresses and TLS keys
+(`TLSKeys`: at most 2, each the SHA-256 of a TLS key's SubjectPublicKeyInfo in lowercase hex). For
+the two lists, an empty list leaves them, `["-"]` clears them, and any other list replaces the whole
+list (see [governance.md](governance.md#names-as-a-name-service)).
 
 A payment or an update must name a block from the height in progress to 64 blocks past it. A name
 request may name a block up to 3,600 blocks past it, except a freeze, which gets the 64 blocks of a
@@ -142,16 +151,16 @@ name and block. The intake rules are in [architecture.md](architecture.md#intake
 
 | Route | Answer | Cost to the node |
 |---|---|---|
-| `/hdls/status` | `heightInProgress` (one above the committed height), `accounts`, and `networkId`, the effective network id a wallet pins; wallets ask every bank's public address for it, to check their own bank's height | off the loop, from the committed view |
-| `/hdls/accounts` | every account (`Name`, `PublicKey`, `Amount`, `Bank`, `Delegate`, `Description`, `PublicAddress`, `IPAddresses`, `Frozen`, `PendingKey`, `PendingBank`, `PendingHeight`) | an event on the loop; the answer is about 2.9 KB per account |
+| `/hdls/status` | `heightInProgress` (one above the committed height); `accounts`; `networkId`, the effective network id a wallet pins; `lastBlockHash`, the hash of the last committed block in hex, by which catch-up tells a peer on its own block from one on another; `confirmed`, the height of the first commit that held the node's own precommit, or `null` before; and `halted`, the alarm that halted the node, or `null` while it runs (see [consensus.md](consensus.md#the-alarms-and-the-confirmation)). Wallets ask every bank's public address for it, to check their own bank's height | off the loop, from the committed view and two flags the loop sets |
+| `/hdls/accounts` | every account (`Name`, `PublicKey`, `Amount`, `Bank`, `Delegate`, `Description`, `PublicAddress`, `IPAddresses`, `TLSKeys`, `Frozen`, `PendingKey`, `PendingBank`, `PendingHeight`) | an event on the loop; the answer is about 2.9 KB per account |
 | `/hdls/checkpoint` | the committed state, the last block's header, its commit and the set that signed it (see [consensus.md](consensus.md#onboarding-and-the-checkpoint)) | as `/hdls/accounts`, plus the commit and the set |
 | `/hdls/governance` | the ten parameters, the governance sequence, the validators by name, total power, quorum, and the pooled certificates with their voters' power | an event on the loop |
-| `/hdls/resolve?name=N` or `?key=K` | always the account's `name` (the answer to `?key=`), `publicKey`, `bank`, `frozen`, `pendingKey`, `pendingBank`, `pendingHeight`, the committed `height` and `stateDigest`, and, only when set, `publicAddress`, `ipAddresses` and `description`; `400` unless exactly one of `name` and `key` is given; `404` if no account matches | off the loop, from the committed view |
+| `/hdls/resolve?name=N` or `?key=K` | always the account's `name` (the answer to `?key=`), `publicKey`, `bank`, `frozen`, `pendingKey`, `pendingBank`, `pendingHeight`, the committed `height` and `stateDigest`, and, only when set, `publicAddress`, `ipAddresses`, `tlsKeys` and `description`; `400` unless exactly one of `name` and `key` is given; `404` if no account matches | off the loop, from the committed view |
 | `/hdls/record` | rolling record entries (below) | off the loop: at most two unit files |
 | `/hdls/lifelong-record` | lifelong record entries (below) | off the loop: a scan of the lifelong file |
 
-`/hdls/status` gives the height in progress as `heightInProgress`; `height` in `/hdls/resolve` is the
-committed height.
+`/hdls/status` gives the height in progress as `heightInProgress`; `height` in `/hdls/resolve` is
+the committed height.
 
 `/hdls/resolve` is the on-chain name server. Its answer is the serving node's word, not a proof: a
 dishonest node can pair a forged record with the honest digest. A client that trusts no single node
@@ -170,7 +179,7 @@ the operator port serves these three routes.
 |---|---|---|---|
 | `GET /hdls/bundle` | | a bundle of everything the node would gossip now, at most 64 MiB, as `application/x-ndjson` | an event on the loop, which marshals every message it holds |
 | `POST /hdls/bundle` | a bundle, at most 64 MiB | `200` with the counts `{"queued":…,"taken":…,"refused":…,"unreadable":…}`; `409` with the reason when its first line is not a bundle header, or names another network; `400` when it is larger than 64 MiB or its upload was cut short | each line goes through the intake of its gossip route, with the same checks and signatures as gossip |
-| `POST /hdls/checkpoint` | a checkpoint, as `/hdls/checkpoint` answers it, at most 64 MiB | `202` once the node has adopted it; `409` with the reason when it has not: not ahead, does not verify (another network's checkpoint, or a damaged one), or the node is still starting | an event on the loop, which verifies it as catch-up verifies a checkpoint (see [consensus.md](consensus.md#onboarding-and-the-checkpoint)): signature checks for the names of the node's last committed set, then for the commit |
+| `POST /hdls/checkpoint` | a checkpoint, as `/hdls/checkpoint` answers it, at most 64 MiB | `202` once the node has adopted it; `409` with the reason when it has not: not ahead, does not verify (another network's checkpoint, or a damaged one, or one that more than ⅔ of the node's own set did not sign), diverges (the node then halts), the node is halted, or it is still starting | an event on the loop, which verifies it as catch-up verifies a checkpoint (see [consensus.md](consensus.md#onboarding-and-the-checkpoint)), but walks no frames: signature checks for the names of the node's last committed set, then for the commit |
 
 What the import's counts mean:
 
@@ -197,6 +206,9 @@ how long a CDN may keep it.
 | `/hdls/accounts`, `/hdls/governance` | the public folder | GET, HEAD | `max-age=5`: they change at most once a block |
 | `/hdls/resolve/name/<name>`, `/hdls/resolve/key/<64 hex digits>` | the public folder | GET, HEAD | `max-age=5` |
 | `/hdls/bundle` | the public folder | GET, HEAD | `max-age=1`: the second path needs it fresh |
+| `/hdls/frames` | the public folder | GET, HEAD | `max-age=1`: a node that walks the frames reads it |
+| `/hdls/zone` | the public folder | GET, HEAD | `max-age=5`: it changes at most once a block |
+| `/hdls/resolve/ip/<address>` | the public folder | GET, HEAD | `max-age=5` |
 | `/hdls/record/<first height, 20 digits>.jsonl` | the engine's record folder (`-record`) | GET, HEAD | `max-age=31536000, immutable` once the unit is complete, when its first height + 100 ≤ the height in progress; `max-age=5` until then |
 | `/hdls/lifelong-record.jsonl` | the engine's lifelong record file (`-lifelong`) | GET, HEAD | `max-age=5`: it is still growing |
 | `/hdls/pay`, `/hdls/update`, `/hdls/name-request` | passed on to the engine's operator port (`-engine`) | POST | `no-store` |
@@ -204,7 +216,8 @@ how long a CDN may keep it.
 - **Anything else is refused.** Another path gets `404`, and another method on a listed path
   `405`. These get `404` too: a path not in its one clean form (with a `.` or `..` segment, or a
   doubled or trailing slash), a name outside the name grammar, a key that is not 64 lowercase hex
-  digits, a directory, and the engine's temporary files in `.incoming`.
+  digits, an IP address not in its one plain form (`ledger.CanonicalIPAddress`), a directory, and
+  the engine's temporary files in `.incoming`.
 - **A missing file** at a listed path gets `404` with `max-age=1`. The file can appear at any
   commit: a new name, the next record unit. Without the header, a CDN would keep the `404` for its
   own default, minutes on some. The other `404`s, for paths no file can ever be at, carry no
@@ -213,9 +226,10 @@ how long a CDN may keep it.
   carries an `ETag`: its size and its modification time to the nanosecond, in hex. A cache
   revalidates a file by its `ETag` alone (`If-None-Match`). The fetcher sends no `Last-Modified`,
   which counts whole seconds: by it, a file rewritten within the second a cache fetched it would
-  pass as unchanged. The type is `application/json`, and `application/x-ndjson` (one JSON value per
-  line) for the record files and the bundle. The status file, under 200 bytes, tells the fetcher the
-  height in progress, and so whether a record unit is complete.
+  pass as unchanged. The type is `application/json`; `application/x-ndjson` (one JSON value per
+  line) for the record files, the bundle and the frames; and `text/plain; charset=utf-8` for the
+  zone. The status file, a few hundred bytes, tells the fetcher the height in progress, and so
+  whether a record unit is complete.
 - **Submissions** are read whole first, at most 1 MiB, and then passed on. The engine's answer
   comes back unchanged: a receipt, `202` or `409`. A body over 1 MiB gets `413` from the fetcher
   (the engine would answer `400`), and `502` means the engine did not answer.
@@ -223,6 +237,16 @@ how long a CDN may keep it.
   (100 by default, each bank's own setting). Above it the answer is `429` with `Retry-After: 1`. The
   count starts again at each second of the clock, so up to twice the cap can pass around a second's
   boundary. The cap only keeps a flood off the engine: limits per client are the CDN's job.
+- **Who sent the most.** Once a minute in which the cap answered `429`, the fetcher logs the five
+  addresses that sent the most submissions, each with the names that list it, as its
+  `hdls/resolve/ip` file has them, so people can resolve a flood by name. Behind a CDN, every
+  connection comes from the CDN's addresses: with `-client-address-header` (such as
+  `X-Forwarded-For`) and `-cdn-addresses`, the fetcher takes the client's address from the last
+  entry of that header, and only on a connection from one of those addresses, since anyone else
+  could write any address there. Senders whose header held no address are counted together, as
+  "senders the CDN's header gave no address for". It counts exact addresses, so a flooder with many
+  IPv6 addresses can spread its count below the top five. What people do with the names is in
+  [operating-a-network.md](operating-a-network.md).
 
 **The record at the edge.** On the operator port `GET /hdls/record?from=H` answers a JSON array.
 The fetcher serves each unit file as it is on disk instead: one entry per line, named by its first
@@ -234,6 +258,32 @@ not the committed `height` and `stateDigest`: those change at every block, and a
 from the status file or the checkpoint. It holds nothing else, so every bank of one chain serves
 the same bytes for a name. `/hdls/resolve/key/<…>` holds the same record, found by key: the file's
 name is the SHA-256 of the key's bytes (the base64 key decoded), in lowercase hex.
+
+**The frames at the edge.** `/hdls/frames` holds one JSON line per frame (see
+[consensus.md](consensus.md#frames-and-the-walk)), the oldest first:
+
+```
+{"Height":12,"ValidatorsHash":"<64 hex digits>","Validators":[{"Name":"bank-a","PublicKey":"<base64>","Power":1},…]}
+```
+
+`Height` is the first height the set signs. `ValidatorsHash` is the set's hash, as the block before
+names it in `NextValidatorsHash`, in lowercase hex. `Validators` is the set, in name order, with
+each member's key and its power at that height. A line is listed only when the names or keys change.
+It is an index: a walker checks each line against the record entries, so a wrong line costs it a
+fetch. With ML-DSA-65 a line is about 2.7 KB per validator: about 56 KB with 21 banks, and at most
+100 lines, about 5.6 MB, which the engine writes again only when a frame starts. Only the public
+face serves it, with the record unit files the walk reads beside it. The gossip port serves
+neither, and the operator port no frames, and the record only as `/hdls/record?from=`, which the
+walk does not read.
+
+**The name service at the edge.** `/hdls/resolve/ip/<address>` holds the names that list an IP
+address, as a JSON list in name order, a frozen one as `"<name> (frozen)"`, such as
+`["carol (frozen)","dave"]`. The address is in its one plain form, as the chain holds it. The
+engine writes the file when a commit or a catch-up changes it, and removes it once no name lists the
+address. A name may list an address it does not control, so the file says who claims an address,
+not who uses it. `/hdls/zone` is the zone file, in the standard text format of DNS (RFC 1035), that
+an engine with `zone` in its config writes; its records are in
+[governance.md](governance.md#names-as-a-name-service).
 
 **What a cache can and cannot do.** The checkpoint verifies by its ⅔ signatures, so a cache or a
 CDN can hand out an old one, but never a false one. The other files are the bank's word, as the
@@ -317,24 +367,17 @@ fetcher serves it as a static file that a CDN may keep for good.
   of a network, keep their configured `peers`. Once validators take their peers from the chain,
   they push nothing to a node that is not a validator, and such a node is not on their allow lists
   either: it follows the chain by checkpoint catch-up from the banks' public addresses.
-- **Catch-up.** A running node that falls behind asks three kinds of peer, in this order, and stops
-  at the first kind that gives a checkpoint that verifies:
-  1. its bootstrap peers;
-  2. its gossip peers;
-  3. the public addresses of the other current validators. It asks every one of them when no
-     bootstrap or gossip peer answered at all, as when gossip is blocked or the others' allow
-     lists no longer let the node in, and while the node is stuck on its height (the second path,
-     below). Otherwise it asks one of them a tick, each in turn: one small request a tick. So a
-     node whose peers lag with it, as on its side of a split, still finds within about as many
-     ticks as there are validators that other banks are ahead. An idle node runs no round, so it is
-     never stuck, and would otherwise not find out before its heartbeat, minutes later.
-
-  It asks each peer at the first of its URLs that answers, and at no other. It asks each peer's
-  `/hdls/status` first, and fetches `/hdls/checkpoint` only from a peer whose height is ahead
-  (`Node.bestCheckpoint`). A connection gives up after 2 s, and a request after 5 s. It tries every
-  3 s, or every 5 block intervals if that is longer. At start, before its first height, it asks its
-  bootstrap peers only. The public face serves both files at the same paths, so a bootstrap peer
-  can be a bank's public address.
+- **Catch-up.** Every 3 s, or every 5 block intervals if that is longer, a running node asks the
+  status of three kinds of peer, all at once: its bootstrap peers, its gossip peers, and the public
+  addresses of every other validator of its trusted frame. It asks each peer at the first of its
+  URLs that answers, and at no other. It fetches `/hdls/checkpoint`, the highest first, only from a
+  peer at its height or ahead of it whose `lastBlockHash` it does not know (`Node.bestCheckpoint`),
+  and adopts the highest that passes. A connection gives up after 2 s, and a request after 5 s. A
+  node with bootstrap peers asks the same peers once before its first height. The public face serves
+  both files at the same paths, so a bootstrap peer can be a bank's public address. A checkpoint
+  that more than ⅔ of the trusted frame did not sign, but is sound on its own, makes the node read
+  the other validators' `/hdls/frames` and record units from their public faces, and walk. Why each
+  step, and the fork and divergence alarms, are in [consensus.md](consensus.md#catching-up).
 - **The second path.** A validator whose height has run for 4 step timeouts without a commit
   fetches the public bundle, `<public address>/hdls/bundle`, of every other current validator that
   publishes a public address, once each re-gossip interval, and imports each, until it commits. The
@@ -348,15 +391,63 @@ fetcher serves it as a static file that a CDN may keep for good.
   is a certificate the node refuses; certificates come last, so the import loses only what follows
   it. The pull goes out, so the allow list plays no part in it. See
   [operating-a-network.md](operating-a-network.md#the-second-path-public-bundles).
-- **Fetches from a public address**, the pull's and catch-up's, refuse to connect to the node's own
-  machine: to a loopback address, or to `0.0.0.0` or `::`, which reach it too, checked on the
-  address the connection goes to, once a name is resolved; and to any of its other addresses, a
+- **Fetches from a public address**, the pull's, catch-up's and the walk's, refuse to connect to the
+  node's own machine: to a loopback address, or to `0.0.0.0` or `::`, which reach it too, checked on
+  the address the connection goes to, once a name is resolved; and to any of its other addresses, a
   connection whose two ends are one address, dropped before a request is sent. No proxy is used. A
   public address is on chain, so each validator chooses its own: one that published
   `http://127.0.0.1:8080`, or an address every bank has, such as rootless Podman's `10.0.2.100`,
   would otherwise make every stuck bank fetch its own operator port's export. Another private
   address works, as the quickstart's do. Two engines on one machine, sharing its address, can't use
   each other's public faces through that address.
+
+## The signer's route
+
+The signer, `cmd/signer`, holds a bank's key (see [signature.md](signature.md)). It listens on
+`listen` in its config, on the bank's private network, and closes any connection whose IP address is
+not in its `allowFrom` list before it reads a byte; it logs those once a minute. Its port is never
+published. It serves one route, `POST /sign`: another path gets `404`, and another method `405`.
+
+```
+POST /sign
+Authorization: HDLS-HMAC <client> <lowercase hex of HMAC-SHA256(client secret, body)>
+
+{"domain": "<domain>", "fields": ["<base64>", ...]}
+```
+
+- **The header** names the client, as the signer's config names it, and carries the HMAC-SHA256 of
+  the body's exact bytes under the client's secret: the 32 bytes its secret file holds as 64
+  lowercase hex digits, as `keygen -secret` prints them. The signer compares the HMAC in constant
+  time.
+- **The body** is a domain and the fields the ledger signs in it, in order, each in standard base64:
+  a message's signed fields, never raw bytes. The signer checks them against the domain's layout,
+  then builds the preimage itself, for its own network, and signs it. It reads at most 2 MiB.
+- **The answer** is `200` with `{"signature": "<base64>"}`. A request for a slot already signed with
+  the same fields gets the same signature again: ML-DSA-65 signs deterministically. Every client
+  checks the signature under the bank's public key before it uses it, as the engine and the wallet
+  do.
+- **A refusal** is plain text, the reason:
+
+| Status | When |
+|---|---|
+| `400` | the body is not `{"domain": …, "fields": […]}`, or its fields do not fit the domain's layout, such as a `key-self-test` with no field |
+| `401` | no `Authorization` header of that form, an unknown client, or an HMAC that does not match the body |
+| `403` | a domain not in the client's list; or a field that names who signs, and names another than the bank: `the <role> is "<name>", not this bank, "<bank>": the signer signs only in its own name` |
+| `409` | a vote or a proposal its slot rules refuse: `REFUSED CONFLICT: this slot is signed already, with other fields`; a height below the highest it signed; a height at or below the one its sign log was resumed above; or no sign log at all, until it is started with `-resume-above` |
+| `413` | a body over 2 MiB, or one that could not be read |
+| `500` | the signer failed: its audit log could not be written, and it withholds the signature, or its key failed. Its own log says why |
+
+- **The audit log first.** Every answer, a signature or a refusal, is written to the signer's audit
+  log before it goes out, and a signature whose line cannot be written is not given.
+- **No answer** comes in two cases. The signer signs one request at a time, and a request whose
+  client gave up while it waited its turn, as the engine does after a second, is dropped unsigned,
+  with no answer and no audit line, so a backlog never holds later requests past their deadlines.
+  And a sign log write that fails stops the signer, before it signs.
+- **`key-self-test`.** Every client may ask for it. Its one field is a name, which must be the
+  bank's: the engine makes it at start with its own name, so an engine configured for another bank
+  stops there.
+
+The clients, their domains, the rules and the two logs are in [signature.md](signature.md).
 
 ## A payment, as a direct API client builds it
 

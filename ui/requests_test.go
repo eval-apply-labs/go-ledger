@@ -27,7 +27,7 @@ func TestRegistrationCollectsThreeSignatures(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	bank, customer := newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL)
 	bankName := nameOf(walletSigner(t, bank))
-	testNode.setState([]*signing.Signer{walletSigner(t, bank)}, accountOf(walletSigner(t, bank), "10"))
+	testNode.setState([]signing.Signer{walletSigner(t, bank)}, accountOf(walletSigner(t, bank), "10"))
 
 	draftPage := html.UnescapeString(submitForm(customer, "/requests", url.Values{"kind": {"registration"}, "name": {" Alice "}, "requestor": {bankName}}).Body.String())
 	for _, want := range []string{"Draft: nothing is signed yet", "name: alice", "requestor, who pays the fee: " + bankName, "co-signing bank: " + bankName,
@@ -76,7 +76,7 @@ func TestSignStepSignsOnlyTheRolesThisWalletHolds(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	bank, payer, customer, stranger := newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL)
 	bankName := nameOf(walletSigner(t, bank))
-	testNode.setState([]*signing.Signer{walletSigner(t, bank)},
+	testNode.setState([]signing.Signer{walletSigner(t, bank)},
 		ledger.Account{Name: "payer", PublicKey: payer.PublicKey(), Amount: big.NewRat(10, 1), Bank: bankName},
 		ledger.Account{Name: "stranger", PublicKey: stranger.PublicKey(), Amount: big.NewRat(10, 1), Bank: bankName})
 	draft, err := customer.DraftNameRequest(verified(t, customer), requestForm{Kind: ledger.RegistrationKind, Name: "alice", Requestor: "payer"})
@@ -124,7 +124,7 @@ func TestSignStepRefusesABlockOutsideTheIntakeWindow(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	bank, customer := newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL)
 	bankName := nameOf(walletSigner(t, bank))
-	testNode.setState([]*signing.Signer{walletSigner(t, bank)}, accountOf(walletSigner(t, bank), "10"))
+	testNode.setState([]signing.Signer{walletSigner(t, bank)}, accountOf(walletSigner(t, bank), "10"))
 	registration := func(blockID int64) string {
 		text, _ := json.Marshal(ledger.NameRequest{Kind: ledger.RegistrationKind, Name: "alice", Requestor: bankName, NewKey: customer.PublicKey(), Bank: bankName,
 			Fee: governanceParameters.NewKeyFee, BlockID: blockID})
@@ -155,7 +155,7 @@ func TestRequestsLeaveThePaymentCounterAlone(t *testing.T) {
 	}
 	customer := newTestWallet(t, testNode.baseURL)
 	bankName := nameOf(walletSigner(t, bank))
-	testNode.setState([]*signing.Signer{walletSigner(t, bank)}, accountOf(walletSigner(t, bank), "10"))
+	testNode.setState([]signing.Signer{walletSigner(t, bank)}, accountOf(walletSigner(t, bank), "10"))
 	draft, err := customer.DraftNameRequest(verified(t, customer), requestForm{Kind: ledger.RegistrationKind, Name: "alice", Requestor: bankName, Lead: "4"})
 	if err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestHashNameConvention(t *testing.T) {
 
 	testNode := newGovernanceNode(t)
 	bank, customer := newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, bank)}, accountOf(walletSigner(t, bank), "10"))
+	testNode.setState([]signing.Signer{walletSigner(t, bank)}, accountOf(walletSigner(t, bank), "10"))
 	rawKey, _ := base64.StdEncoding.DecodeString(customer.PublicKey())
 	keyHash := sha256.Sum256(rawKey)
 	want := "k-" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(keyHash[:15]))
@@ -247,7 +247,7 @@ func TestDeskListsThePendingChangesOnItsCustomers(t *testing.T) {
 		return ledger.Account{Name: name, PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: new(big.Rat), Bank: bankOfRecord,
 			PendingKey: pendingKey, PendingBank: pendingBank, PendingHeight: pendingHeight}
 	}
-	testNode.setState([]*signing.Signer{walletSigner(t, bank)},
+	testNode.setState([]signing.Signer{walletSigner(t, bank)},
 		account("carol", bankName, newKey, "", 50), account("dave", "other", "", bankName, 60), account("erin", bankName, "", "other", 70),
 		account("frank", bankName, "", "", 0), account("gina", "other", newKey, "", 80), account("other", "", "", "", 0))
 	body := page(t, bank, "/requests")

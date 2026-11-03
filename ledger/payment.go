@@ -79,7 +79,7 @@ func (payment Payment) signFields() [][]byte {
 
 // SignPayment returns a copy of payment with its Signature set to the payer's signature over the
 // canonical payment fields, in the "payment" domain and bound to the signer's network.
-func SignPayment(signer *signing.Signer, payment Payment) (Payment, error) {
+func SignPayment(signer signing.Signer, payment Payment) (Payment, error) {
 	signature, err := signer.SignBase64(signing.DomainPayment, payment.signFields()...)
 	if err != nil {
 		return payment, err

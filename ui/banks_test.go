@@ -43,7 +43,7 @@ func threeBanks(t *testing.T, otherAddresses ...string) (*Wallet, *governanceNod
 	t.Helper()
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
-	banks := []*signing.Signer{testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)}
+	banks := []signing.Signer{testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)}
 	accounts := []ledger.Account{{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)}}
 	for i, address := range append([]string{testNode.baseURL}, otherAddresses...) {
 		account := accountOf(banks[i], "0")
@@ -213,7 +213,7 @@ func TestNoSelfLoopThroughTheWalletsOwnAddress(t *testing.T) {
 			var requests atomic.Int64
 			walletServer := &httptest.Server{Listener: listener, Config: &http.Server{Handler: http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 				requests.Add(1)
-				routes(wallet, walletAddress).ServeHTTP(responseWriter, request)
+				routes(wallet, walletAddress, "").ServeHTTP(responseWriter, request)
 			})}}
 			walletServer.Start()
 			defer walletServer.Close()
@@ -260,7 +260,7 @@ func TestOtherBanksAreAskedOnlyWhileThePageIsOpen(t *testing.T) {
 	served := make(chan struct{})
 	go func() {
 		defer close(served)
-		routes(wallet, "127.0.0.1:8090").ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(pageContext, "GET", "http://127.0.0.1:8090/", nil))
+		routes(wallet, "127.0.0.1:8090", "").ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(pageContext, "GET", "http://127.0.0.1:8090/", nil))
 	}()
 	<-asked
 	leftAt := time.Now()

@@ -1,7 +1,9 @@
 package node
 
 import (
+	"cmp"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -18,56 +21,55 @@ import (
 	"github.com/eval-apply-labs/go-ledger/ledger"
 )
 
-// syncThenStart runs in a goroutine at Start when Bootstrap peers are configured. It fetches the
-// best verified checkpoint from those peers, hands it to the loop to adopt, then starts consensus.
-// If nothing valid is found (peers down, or the network is still at genesis) consensus simply
-// starts at the configured height. Ordering is guaranteed by the single event channel: the adopt
-// event is enqueued before the start event.
+// syncThenStart runs in a goroutine at Start when Bootstrap peers are configured. It finds the best
+// checkpoint as catch-up does (catchUpCheckpoint), hands it to the loop to adopt, then starts consensus.
+// If nothing valid is found (peers down, or the network is still at genesis) consensus simply starts at
+// the configured height. Ordering is guaranteed by the single event channel: the adopt event is enqueued
+// before the start event.
 func (node *Node) syncThenStart() {
-	if best, found, _ := node.bestCheckpoint(catchUpClient(), eachItsOwnPeer(node.config.Bootstrap)); found {
-		node.enqueue(event{kind: eventAdopt, checkpoint: &best})
+	if best, trustedFrame, found := node.catchUpCheckpoint(); found {
+		node.enqueue(event{kind: eventAdopt, checkpoint: &best, trustedFrame: trustedFrame})
 	}
 	node.enqueue(event{kind: eventStart})
 }
 
-// catchUpCheckpoint is the best verified checkpoint a running node can catch up to if it falls
-// behind: its bootstrap peers'; when none of them yields one (none is configured, all are down, or
-// none verifies), its current GOSSIP peers'; and when none of those does either, the public faces' of
-// the other validators of the committed view, at their public addresses, where the fetcher serves
-// hdls/status and hdls/checkpoint (spec §6.1). So any networked node can self-recover from a peer that
-// is ahead, even while gossip is blocked, as on the second path (spec §7.7), or while the other
-// validators' gossip ports refuse it, as they refuse a validator dropped while it was away; and while a
-// source yields a checkpoint, the ones after it are not asked. Every public face is asked only when no
-// bootstrap or gossip peer answered at all, or while the node is stuck on its height (see
-// pullPublicBundles): on a healthy network the gossip peers answer, at the node's own height, and every
-// node asking every other bank's public face at each tick would cost them for nothing. Otherwise one
-// public face is asked a tick, each in turn (publicFaceTurn): one small request a tick, which finds
-// within about as many ticks as there are validators that the node lags behind banks its gossip peers
-// are not among, as when the network splits. An idle node runs no driver, so it is never stuck, and
-// without that it would not find out until its heartbeat starts a driver, minutes later (review R2-2).
-// Any peer is a safe source: bestCheckpoint verifies a checkpoint against the validators of the node's
-// own last committed state.
+// catchUpCheckpoint is the best checkpoint a node can catch up to, at its start (syncThenStart) or once it
+// falls behind (catchUpLoop), with the frame it passed against (see bestCheckpoint). It asks every node it
+// knows of (Phase 4 spec §4.4): its bootstrap peers; its current GOSSIP peers; and every other validator of
+// its trusted frame, the committed view's set, at its public address, where the fetcher serves hdls/status
+// and hdls/checkpoint (spec §6.1). So a peer that withholds the newest checkpoint is outvoted by the
+// others, and any networked node can self-recover from a peer that is ahead, even while gossip is blocked,
+// as on the second path (spec §7.7), or while the other validators' gossip ports refuse it, as they refuse
+// a validator dropped while it was away. Every one is asked at every tick: a status is a small file the
+// fetcher serves from the public folder, behind a CDN, and a checkpoint is fetched only from a node ahead
+// or on another block (review R2-2 asked one public face a tick; the Phase 4 spec asks them all, Q14).
 // The gossip peers come from the transport's Peers method, which HTTPTransport has (and, in tests,
 // peeredRecorder).
-func (node *Node) catchUpCheckpoint() (Checkpoint, bool) {
-	client := catchUpClient()
-	checkpoint, found, bootstrapPeerAnswered := node.bestCheckpoint(client, eachItsOwnPeer(node.config.Bootstrap))
-	if found {
-		return checkpoint, true
+func (node *Node) catchUpCheckpoint() (Checkpoint, *consensus.ValidatorSet, bool) {
+	var peers []catchUpPeer
+	client, publicAddressClient := catchUpClient(), node.publicAddressClient()
+	for _, bootstrapURL := range node.config.Bootstrap {
+		peers = append(peers, catchUpPeer{urls: []string{bootstrapURL}, client: client})
 	}
-	gossipPeerAnswered := false
 	if peerProvider, isPeerProvider := node.transport.(interface{ Peers() [][]string }); isPeerProvider {
-		if checkpoint, found, gossipPeerAnswered = node.bestCheckpoint(client, peerProvider.Peers()); found {
-			return checkpoint, true
+		for _, gossipURLs := range peerProvider.Peers() {
+			peers = append(peers, catchUpPeer{urls: gossipURLs, client: client})
 		}
 	}
-	publicAddresses := node.otherValidatorsPublicAddresses()
-	if (bootstrapPeerAnswered || gossipPeerAnswered) && !node.stuckOnItsHeight.Load() && len(publicAddresses) > 0 {
-		turn := node.publicFaceTurn.Add(1) % uint64(len(publicAddresses))
-		publicAddresses = publicAddresses[turn : turn+1]
+	for _, publicAddress := range node.otherValidatorsPublicAddresses() {
+		peers = append(peers, catchUpPeer{urls: []string{publicAddress}, client: publicAddressClient})
 	}
-	checkpoint, found, _ = node.bestCheckpoint(node.publicAddressClient(), eachItsOwnPeer(publicAddresses))
-	return checkpoint, found
+	return node.bestCheckpoint(peers)
+}
+
+// catchUpPeer is one node catch-up asks: the base URLs it is reached at, in the order they are tried, and
+// the client it is asked through. A bootstrap peer has one URL, the operator's, and a gossip peer one made
+// of each IP address the validator publishes, which the ledger takes only in its one plain form, and the
+// gossip port, as for HTTPTransport.Broadcast; both are asked through catchUpClient's client. A public
+// face has its public address, asked through publicAddressClient's.
+type catchUpPeer struct {
+	urls   []string
+	client *http.Client
 }
 
 // catchUpClient is the client of the fetches from the bootstrap and gossip peers, at the start
@@ -84,19 +86,10 @@ func catchUpClient() *http.Client {
 // catchUpTransport is catchUpClient's transport.
 var catchUpTransport = peerRoundTripper()
 
-// eachItsOwnPeer is a peer list (see bestCheckpoint) in which each of urls is the one URL of a peer of
-// its own: a bootstrap peer, or a validator's public address.
-func eachItsOwnPeer(urls []string) [][]string {
-	peers := make([][]string, len(urls))
-	for i, url := range urls {
-		peers[i] = []string{url}
-	}
-	return peers
-}
-
 // otherValidatorsPublicAddresses is the public address of each validator of the committed view, but the
-// node itself, that publishes one: where the node pulls public bundles (pullPublicBundles), and the last
-// source of a catch-up (catchUpCheckpoint), each through publicAddressClient. It reads only the committed
+// node itself, that publishes one: where the node pulls public bundles (pullPublicBundles), asks for a
+// checkpoint to catch up to (catchUpCheckpoint) and reads the frames it walks (walkFrames), each through
+// publicAddressClient. It reads only the committed
 // view, so it is safe to call from a goroutine.
 func (node *Node) otherValidatorsPublicAddresses() []string {
 	view := node.view.Load()
@@ -168,12 +161,16 @@ func refuseLoopback(network, address string, _ syscall.RawConn) error {
 
 // catchUpLoop runs alongside the started node and periodically fetches catchUpCheckpoint, every
 // catchUpInterval. If it is ahead of us — we missed a commit window — it is handed to the loop to
-// fast-forward. bestCheckpoint is anchored on the committed view the loop last published (race-free in
-// this goroutine); the loop re-verifies against the view it holds before adopting.
+// fast-forward, with the frame it passed against. bestCheckpoint starts from the committed view the loop
+// last published (race-free in this goroutine); the loop re-verifies against that frame before adopting.
+// A halted node asks nothing: it adopts nothing (see halt).
 func (node *Node) catchUpLoop() {
 	node.everyInterval(node.catchUpInterval, func() {
-		if checkpoint, found := node.catchUpCheckpoint(); found {
-			node.enqueue(event{kind: eventCatchUp, checkpoint: &checkpoint})
+		if node.haltedBecause.Load() != nil {
+			return
+		}
+		if checkpoint, trustedFrame, found := node.catchUpCheckpoint(); found {
+			node.enqueue(event{kind: eventCatchUp, checkpoint: &checkpoint, trustedFrame: trustedFrame})
 		}
 	})
 }
@@ -260,7 +257,6 @@ func (node *Node) pullPublicBundles() {
 	stuck := node.driver != nil && time.Since(node.heightStartedAt) >= 4*node.reGossipInterval()
 	if stuck != node.pullingPublicBundles {
 		node.pullingPublicBundles = stuck
-		node.stuckOnItsHeight.Store(stuck)
 		if stuck {
 			log.Printf("public bundles: height %d has run for 4 step timeouts without a commit: the node pulls the other validators' public bundles until it commits", node.height())
 		} else {
@@ -363,42 +359,123 @@ func (memory *verifiedVotes) verifiedOnce(committedHeight int64, vote consensus.
 	return memory.votes[vote]
 }
 
-// bestCheckpoint fetches a checkpoint from each peer that is ahead of the node, keeps only those that
-// verifyCheckpoint accepts with the validators of the node's last committed state as the trust anchor,
-// and returns the one at the highest committed height. It asks each peer's height first, and fetches a
-// checkpoint, about 2.9 KB per account with ML-DSA-65, only from a peer whose height is ahead (spec
-// 6.6): on an idle chain every peer is at the node's height, tick after tick. A peer is the list of base
-// URLs one node is reached at, as for HTTPTransport.Broadcast: the operator's, one made of a validator's
-// IP address, which the ledger takes only in its one plain form, and the gossip port, or a validator's
-// public address. The node asks a peer at the first of its URLs that answers its status, and at no
-// other: they reach one node, so a peer ahead sends its checkpoint once. The client is the caller's,
-// and follows no redirect (NewHTTPClient).
-// It also reports whether any peer answered its status at all, ahead or not. It reads only immutable
-// config and the committed view the loop publishes (see publishView), so it is safe to call from a
-// goroutine.
-func (node *Node) bestCheckpoint(client *http.Client, peers [][]string) (best Checkpoint, found bool, anyPeerAnswered bool) {
+// bestCheckpoint asks each peer its status, all at once (askStatuses), and fetches a checkpoint, about 2.9
+// KB per account with ML-DSA-65, only from a peer at the node's height or ahead of it, the highest first,
+// that reports a block it does not know (spec 6.6). It keeps a checkpoint only when it passes against the
+// node's trusted frame, directly or by a walk of the frames, or, at the node's own height, against the set
+// that signed the node's block there (trustedFrameOf). Of those, it returns the highest one ahead of the
+// node, with the frame it passed against. It knows the node's own last block from the start: on an idle
+// chain every peer is at the node's height, on that block, tick after tick, and none is fetched. Once a
+// checkpoint has passed, a peer that reports its block is not fetched, nor is a peer below it, but for
+// one at the node's height, so the honest peers at the network's height cost one fetch. A peer that
+// reports another block at a height whose block it knows is fetched and checked: if that one passes too,
+// the two are the fork alarm (raiseForkAlarm), or, at the node's own height, the divergence alarm
+// (raiseDivergenceAlarmAt), and none is returned. A peer that serves another height than it reports, or a
+// checkpoint that does not pass, costs its fetch, and the next one is asked, so a peer that lies about
+// its height holds up no other. The client is each peer's, and follows no redirect (NewHTTPClient). It
+// reads only immutable config and the committed view the loop publishes (see publishView), so it is safe
+// to call from a goroutine.
+func (node *Node) bestCheckpoint(peers []catchUpPeer) (best Checkpoint, trustedFrame *consensus.ValidatorSet, found bool) {
 	view := node.view.Load()
-	anchor := view.validators
-	for _, peerURLs := range peers {
-		for _, peerURL := range peerURLs {
-			peerHeight, err := fetchHeight(client, peerURL)
-			if err != nil {
-				continue // no answer: the peer's next URL
+	// The node's own block, and the commit of each height a checkpoint that passed is of.
+	passed := map[int64]consensus.Commit{view.state.Height: {Height: view.state.Height, BlockHash: view.lastBlockHash}}
+	for _, status := range askStatuses(peers) {
+		if status.heightInProgress <= view.state.Height {
+			break // behind the node: nor is any peer after it
+		}
+		if found && status.heightInProgress <= best.Commit.Height && status.heightInProgress != view.state.Height+1 {
+			continue // below the best, and not at the node's height
+		}
+		if commit, seen := passed[status.heightInProgress-1]; seen && hex.EncodeToString(commit.BlockHash[:]) == status.lastBlockHash {
+			continue // the node's own block, or the block of a checkpoint that passed
+		}
+		checkpoint, err := fetchCheckpoint(status.client, status.url, MaxCheckpointBytes)
+		if err != nil {
+			continue
+		}
+		// The frame must be checked here even though adopt/catchUp check it again on the loop: without it a
+		// forged checkpoint at a higher height would win the pick.
+		frame := node.trustedFrameOf(checkpoint, view)
+		if frame == nil {
+			continue
+		}
+		if other, seen := passed[checkpoint.Commit.Height]; seen && other.BlockHash != checkpoint.Commit.BlockHash {
+			if checkpoint.Commit.Height == view.state.Height {
+				node.raiseDivergenceAlarmAt(checkpoint.Commit, view.lastBlockHash)
+			} else {
+				node.raiseForkAlarm(other, checkpoint.Commit)
 			}
-			anyPeerAnswered = true
-			if peerHeight > view.state.Height+1 { // ahead of the height in progress
-				checkpoint, err := fetchCheckpoint(client, peerURL, MaxCheckpointBytes)
-				// The anchor filter must stay even though adopt/catchUp re-verify against the live state in
-				// the loop: without it a forged checkpoint at a higher height would win the pick. It refuses an
-				// invalid quorum, a block hash mismatch, or a set no trusted validator vouches for.
-				if err == nil && node.verifyCheckpoint(checkpoint, anchor) && (!found || checkpoint.Commit.Height > best.Commit.Height) {
-					best, found = checkpoint, true
-				}
-			}
-			break // the peer answered: its other URLs reach the same node
+			return Checkpoint{}, nil, false
+		}
+		passed[checkpoint.Commit.Height] = checkpoint.Commit
+		if checkpoint.Commit.Height > view.state.Height && (!found || checkpoint.Commit.Height > best.Commit.Height) {
+			best, trustedFrame, found = checkpoint, frame, true
 		}
 	}
-	return best, found, anyPeerAnswered
+	return best, trustedFrame, found
+}
+
+// peerStatus is a peer's answer to its status: the URL it answered at, its height in progress, and the
+// hash of its last block, in hex.
+type peerStatus struct {
+	catchUpPeer
+	url              string
+	heightInProgress int64
+	lastBlockHash    string
+}
+
+// askStatuses asks each peer its status, each in a goroutine of its own, so a peer that does not answer
+// holds up no other, and returns the answers, the highest height first, and in the order of peers among
+// equal heights. A peer is asked at the first of its URLs that answers its status, and at no other: they
+// reach one node, so a peer ahead sends its checkpoint once.
+func askStatuses(peers []catchUpPeer) []peerStatus {
+	answers := make([]*peerStatus, len(peers))
+	var asks sync.WaitGroup
+	for i, peer := range peers {
+		asks.Go(func() {
+			for _, peerURL := range peer.urls {
+				if heightInProgress, lastBlockHash, err := fetchStatus(peer.client, peerURL); err == nil {
+					answers[i] = &peerStatus{catchUpPeer: peer, url: peerURL, heightInProgress: heightInProgress, lastBlockHash: lastBlockHash}
+					return // the peer answered: its other URLs reach the same node
+				}
+			}
+		})
+	}
+	asks.Wait()
+	var statuses []peerStatus
+	for _, answer := range answers {
+		if answer != nil {
+			statuses = append(statuses, *answer)
+		}
+	}
+	slices.SortStableFunc(statuses, func(first, second peerStatus) int {
+		return cmp.Compare(second.heightInProgress, first.heightInProgress)
+	})
+	return statuses
+}
+
+// trustedFrameOf is the frame checkpoint passes against (Phase 4 spec §4.2, §4.3), or nil: the committed
+// view's set, the frame the node trusts, when more than ⅔ of it signed the checkpoint; otherwise, when the
+// checkpoint is sound on its own (selfConsistent), the frame a walk from it reaches (walkFrames). A
+// checkpoint of the committed height passes against the set that signed the node's own block there, and
+// no other: the committed view's set signs the next height, and is another set when the node's block
+// changed it, so the network's commit of another block there would fail against it, and raise no
+// divergence alarm (see bestCheckpoint). It reads only immutable config and the committed view, so it is
+// safe to call from a goroutine.
+func (node *Node) trustedFrameOf(checkpoint Checkpoint, view *committedView) *consensus.ValidatorSet {
+	if checkpoint.Commit.Height == view.state.Height {
+		if view.lastCommitValidators == nil || !node.verifyCheckpoint(checkpoint, view.lastCommitValidators) {
+			return nil // no set signed the genesis
+		}
+		return view.lastCommitValidators
+	}
+	if node.verifyCheckpoint(checkpoint, view.validators) {
+		return view.validators
+	}
+	if !node.selfConsistent(checkpoint) {
+		return nil
+	}
+	return node.walkFrames(checkpoint, view)
 }
 
 // MaxCheckpointBytes bounds a fetched checkpoint. It is generous, because an honest checkpoint holds
@@ -407,21 +484,23 @@ func (node *Node) bestCheckpoint(client *http.Client, peers [][]string) (best Ch
 // this node read and decode without limit.
 const MaxCheckpointBytes = 64 << 20
 
-// fetchHeight GETs the height in progress a peer's /hdls/status reports: one above its committed height.
-func fetchHeight(client *http.Client, peer string) (int64, error) {
+// fetchStatus GETs what a peer's /hdls/status reports: its height in progress, one above its committed
+// height, and the hash of its last block, in hex.
+func fetchStatus(client *http.Client, peer string) (int64, string, error) {
 	response, err := client.Get(peer + "/hdls/status")
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return 0, errors.New("status fetch: " + response.Status)
+		return 0, "", errors.New("status fetch: " + response.Status)
 	}
 	var status struct {
-		HeightInProgress int64 `json:"heightInProgress"`
+		HeightInProgress int64  `json:"heightInProgress"`
+		LastBlockHash    string `json:"lastBlockHash"`
 	}
 	err = json.NewDecoder(io.LimitReader(response.Body, maxBodyBytes)).Decode(&status)
-	return status.HeightInProgress, err
+	return status.HeightInProgress, status.LastBlockHash, err
 }
 
 // fetchCheckpoint GETs a peer's committed checkpoint. A non-200 answer is refused, and only maxBytes of
@@ -464,23 +543,30 @@ func fetchPublicBundle(client *http.Client, publicAddress string) []byte {
 }
 
 // adopt fast-forwards to a verified checkpoint if it is ahead of us and consensus has not started
-// yet (a fresh or rebooting node). The certificate is verified against the set it carries, which the
-// node's own validators must vouch for, and must be for the block hash the header and the digest of the
-// supplied state give, so we trust the ⅔ quorum, not the node that served it.
+// yet (a fresh or rebooting node). The certificate is verified against the set it carries, more than ⅔
+// of the frame the node trusts must have signed it, and it must be for the block hash the header and
+// the digest of the supplied state give, so we trust the ⅔ quorum, not the node that served it. The
+// frame is trustedFrame, the one catch-up found the checkpoint passes against, its own validators' or one
+// a walk of the frames reached from them (see trustedFrameOf), or, when it is nil, its own validators'.
+// A halted node adopts none (see halt), and a seated one whose height in progress the checkpoint commits a
+// block of that does not build on its last block raises the divergence alarm (divergesFrom).
 // The checkpoint is saved as the node's snapshot before the node votes on top of it, as after catchUp:
 // otherwise its sign log would run ahead of a snapshot of an older height, and Open would refuse to
 // restart it (see loadSignLog). Once it is on disk, the sign log of the height the node opened at is
 // emptied in place, at that height: a log for the height the node now starts at would end the wait of
 // a node back without one (startFirstHeight), and a log restored with an older snapshot cannot vouch
 // for the heights above it.
-func (node *Node) adopt(checkpoint Checkpoint) {
-	if node.started {
+func (node *Node) adopt(checkpoint Checkpoint, trustedFrame *consensus.ValidatorSet) {
+	if node.started || node.haltedBecause.Load() != nil {
 		return
 	}
 	if checkpoint.Commit.Height+1 <= node.height() {
 		return // not ahead of our configured/current height
 	}
-	if !node.verifyCheckpoint(checkpoint, node.view.Load().validators) {
+	if trustedFrame == nil {
+		trustedFrame = node.view.Load().validators
+	}
+	if !node.verifyCheckpoint(checkpoint, trustedFrame) || node.divergesFrom(checkpoint) {
 		return
 	}
 	node.fastForward(checkpoint)
@@ -495,18 +581,30 @@ func (node *Node) adopt(checkpoint Checkpoint) {
 // may have signed at before it lost its sign log, the node may have signed at the network's height too,
 // so it waits there before it starts it (see waitForOwnSignatures), and empties its sign log at the log's
 // own height, as adopt does, so that a restart during the wait waits too. It returns nil once it has
-// fast-forwarded, or the reason it did not, which ImportCheckpoint answers. A checkpoint of another
-// network does not verify: every signature binds the network id, and the checkpoint carries no other
-// mark of its network, so the reason names both.
-func (node *Node) catchUp(checkpoint Checkpoint) error {
+// fast-forwarded, or the reason it did not, which ImportCheckpoint answers. The checkpoint is verified as
+// adopt verifies it, against trustedFrame or, when it is nil, the node's own validators. A halted node
+// takes none (see halt), and one of its height in progress that does not build on its last block raises
+// the divergence alarm, as in adopt (divergesFrom). A checkpoint of
+// another network does not verify: every signature binds the network id, and the checkpoint carries no
+// other mark of its network, so the reason names both.
+func (node *Node) catchUp(checkpoint Checkpoint, trustedFrame *consensus.ValidatorSet) error {
 	if !node.started {
 		return errors.New("the node is still starting: try again once it runs") // pre-start is adopt()'s job
+	}
+	if alarm := node.haltedBecause.Load(); alarm != nil {
+		return fmt.Errorf("the node is halted until its operator restarts it, by the %s", *alarm)
 	}
 	if checkpoint.Commit.Height+1 <= node.height() {
 		return fmt.Errorf("not ahead: the checkpoint is of height %d, and this node has committed height %d", checkpoint.Commit.Height, node.state.Height)
 	}
-	if !node.verifyCheckpoint(checkpoint, node.view.Load().validators) {
+	if trustedFrame == nil {
+		trustedFrame = node.view.Load().validators
+	}
+	if !node.verifyCheckpoint(checkpoint, trustedFrame) {
 		return errors.New("does not verify: it is not a state this network's validators signed, so it is another network's checkpoint, or damaged")
+	}
+	if node.divergesFrom(checkpoint) {
+		return errors.New("diverges: more than ⅔ of the set signed a block of this node's height in progress that does not build on its last block, and the node halts")
 	}
 	waits := node.height() <= node.mayHaveSignedUpTo
 	node.fastForward(checkpoint)
@@ -527,7 +625,8 @@ func (node *Node) catchUp(checkpoint Checkpoint) error {
 
 // ImportCheckpoint takes a checkpoint a carrier brought (spec §7.5) through the event catch-up uses: the
 // loop verifies it as catch-up does, with the validators of the node's last committed state as the
-// anchor, and adopts it if it is ahead. It returns nil once the node has adopted it, or the reason it did
+// anchor, and adopts it if it is ahead. It walks no frames: a carrier brings no record, so more than ⅔ of
+// those validators must have signed it. It returns nil once the node has adopted it, or the reason it did
 // not (see catchUp).
 func (node *Node) ImportCheckpoint(checkpoint Checkpoint) error {
 	verdict := make(chan admission, 1)
@@ -537,32 +636,33 @@ func (node *Node) ImportCheckpoint(checkpoint Checkpoint) error {
 }
 
 // verifyCheckpoint reports whether a peer's checkpoint is trustworthy from THIS node's vantage, the
-// trust anchor being the validator set (name, key, power) of the node's own committed state. It runs
+// trust anchor being a frame the node trusts (Phase 4 spec §4.1): the validator set (name, key, power)
+// of the node's own committed state, or one a walk of the frames reached from it (walkFrames). It runs
 // the four steps of spec 4.14 in order, each only if the one before passed: the shape and the hashes,
 // which need no signature (Checkpoint.Consistent: the block hash recomputed from the header and the
 // state's digest is the one the commit decided, and the set the checkpoint carries hashes to the
-// header's); then more than 1/3 of the anchor's power vouches for it (anchorVouches), so at least one
-// validator we already trust signed it; and last, the commit is a valid > 2/3 quorum of the set the
-// checkpoint carries, the set that signed it. So a set padded with made-up validators fails the hashes,
-// and a forged header the anchor, before any member of the set is verified. This is the BFT "skipping"
-// rule: it lets a node safely adopt a checkpoint whose validator set changed while it was away, without
-// trusting the serving peer. (Full rotation past the anchor would need a chain of checkpoints; for
-// incremental change the anchor overlaps the signing set — the real case.)
+// header's); then more than ⅔ of the anchor's power vouches for it (anchorVouches); and last, the commit
+// is a valid > ⅔ quorum of the set the checkpoint carries, the set that signed it. So a set padded with
+// made-up validators fails the hashes, and a forged header the anchor, before any member of the set is
+// verified. It lets a node adopt a checkpoint whose validator set changed while it was away, as long as
+// more than ⅔ of the frame it trusts still signs, without trusting the serving peer: forging a state
+// takes the keys of more than ⅔ of the power of a set the node already trusts (Phase 4 spec §4.2). When
+// the set changed more than that, the node walks from frame to frame.
 func (node *Node) verifyCheckpoint(checkpoint Checkpoint, anchor *consensus.ValidatorSet) bool {
 	signers := consensus.NewValidatorSet(checkpoint.Validators)
-	return checkpoint.Consistent() && node.anchorVouches(checkpoint, signers, anchor) &&
+	return checkpoint.Consistent() && node.anchorVouches(checkpoint.Commit, signers, anchor) &&
 		checkpoint.Commit.Verify(node.config.Chain.Scheme, node.config.Chain.NetworkID, signers)
 }
 
-// anchorVouches reports whether names of the anchor holding more than 1/3 of its power signed the
-// checkpoint's commit, each under the key the anchor holds for it. A vote counts only when it is one of
-// the commit's, a precommit for its height, round and block hash, and when the set the checkpoint
-// carries gives its name the anchor's key, so neither a vote for another block nor a forged set that
-// gives real names keys of the forger's can borrow their power. Only a name's first such vote is
-// checked, whether or not it verifies, so copies of one name's vote cost one signature check, not one
-// each (spec 4.14 step 3); a commit that names a name twice fails Commit.Verify anyway.
-func (node *Node) anchorVouches(checkpoint Checkpoint, signers, anchor *consensus.ValidatorSet) bool {
-	commit := checkpoint.Commit
+// anchorVouches reports whether names of the anchor holding more than ⅔ of its power signed the commit,
+// each under the key the anchor holds for it: the anchor's own quorum (Phase 4 spec §4.2; it was ⅓
+// before). A vote counts only when it is one of the commit's, a precommit for its height, round and block
+// hash, and when signers, the set that signed the commit, gives its name the anchor's key, so neither a
+// vote for another block nor a forged set that gives real names keys of the forger's can borrow their
+// power. Only a name's first such vote is checked, whether or not it verifies, so copies of one name's
+// vote cost one signature check, not one each (spec 4.14 step 3); a commit that names a name twice fails
+// Commit.Verify anyway.
+func (node *Node) anchorVouches(commit consensus.Commit, signers, anchor *consensus.ValidatorSet) bool {
 	checked := make(map[string]bool)
 	var vouched int64
 	for _, vote := range commit.Votes {
@@ -576,5 +676,5 @@ func (node *Node) anchorVouches(checkpoint Checkpoint, signers, anchor *consensu
 			vouched += anchor.Power(vote.Validator)
 		}
 	}
-	return vouched*3 > anchor.TotalPower()
+	return vouched >= anchor.Quorum()
 }

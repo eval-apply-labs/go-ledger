@@ -96,8 +96,8 @@ func (httpTransport *HTTPTransport) SetPeers(peers [][]string) {
 	httpTransport.mutex.Unlock()
 }
 
-// Peers returns a copy of the current peer list (asked for a checkpoint to catch up to when no
-// bootstrap peer yields one; see Node.catchUpCheckpoint).
+// Peers returns a copy of the current peer list (asked for a checkpoint to catch up to; see
+// Node.catchUpCheckpoint).
 func (httpTransport *HTTPTransport) Peers() [][]string {
 	httpTransport.mutex.RLock()
 	defer httpTransport.mutex.RUnlock()
@@ -408,17 +408,31 @@ func (server *Server) handlePay(responseWriter http.ResponseWriter, request *htt
 // handleStatus serves the status of the committed view (statusOf), off the event loop: every wallet
 // page and every catch-up tick asks it.
 func (server *Server) handleStatus(responseWriter http.ResponseWriter, request *http.Request) {
-	writeJSON(responseWriter, server.node.statusOf(server.node.view.Load().state))
+	writeJSON(responseWriter, server.node.statusOf(server.node.view.Load()))
 }
 
-// statusOf is the status of a committed state: the height in progress (heightInProgress: one above the
-// committed height), the number of accounts and the effective network id (spec 2.3), which a wallet pins
-// on first use. /hdls/status answers it, and the public folder's hdls/status holds it.
-func (node *Node) statusOf(state ledger.LedgerState) map[string]any {
+// statusOf is the status of a committed view: the height in progress (heightInProgress: one above the
+// committed height), the number of accounts, the effective network id (spec 2.3), which a wallet pins on
+// first use, the hash of the last committed block, in hex (lastBlockHash), by which catch-up tells a peer
+// at the block of a checkpoint it already holds from one at another block (see bestCheckpoint), the
+// height at which the node's own precommit first confirmed its state (confirmed, null before; see
+// noteConfirmation), and the alarm that halted the node (halted, null while it runs; see halt).
+// /hdls/status answers it, and the public folder's hdls/status holds it.
+func (node *Node) statusOf(view *committedView) map[string]any {
+	var confirmed, halted any // null until the node is confirmed, and while it runs
+	if height := node.confirmedHeight.Load(); height > 0 {
+		confirmed = height
+	}
+	if alarm := node.haltedBecause.Load(); alarm != nil {
+		halted = *alarm
+	}
 	return map[string]any{
-		"heightInProgress": state.Height + 1,
-		"accounts":         len(state.Accounts),
+		"heightInProgress": view.state.Height + 1,
+		"accounts":         len(view.state.Accounts),
 		"networkId":        node.config.Chain.NetworkID,
+		"lastBlockHash":    hex.EncodeToString(view.lastBlockHash[:]),
+		"confirmed":        confirmed,
+		"halted":           halted,
 	}
 }
 
@@ -428,9 +442,9 @@ func (server *Server) handleAccounts(responseWriter http.ResponseWriter, request
 
 // NameRecord is a name's record — the ledger acting as a decentralized name server. A committed name
 // maps to the account's current public key, its bank of record, whether it is frozen, any key or bank
-// change waiting on it, AND where it is reached: its public address and its IP addresses, each only
-// when set (plus the description), so one query replaces both a key directory and DNS for anything
-// registered on-chain. /hdls/resolve answers it with the committed state it was read from
+// change waiting on it, AND where it is reached: its public address, its IP addresses and its TLS keys,
+// each only when set (plus the description), so one query replaces both a key directory and DNS for
+// anything registered on-chain. /hdls/resolve answers it with the committed state it was read from
 // (ResolveRecord), and the public folder holds it alone, so every bank of one chain publishes the same
 // bytes for a name (publishNameRecord).
 type NameRecord struct {
@@ -444,6 +458,7 @@ type NameRecord struct {
 	PendingHeight int64    `json:"pendingHeight"`
 	PublicAddress string   `json:"publicAddress,omitempty"` // the name's public face (e.g. "https://bank-a.example")
 	IPAddresses   []string `json:"ipAddresses,omitempty"`   // what DNS A and AAAA records would hold; a validator's gossip addresses
+	TLSKeys       []string `json:"tlsKeys,omitempty"`       // what DNS TLSA records would hold: the hashes of its web server's keys
 	Description   string   `json:"description,omitempty"`
 }
 
@@ -459,6 +474,7 @@ func nameRecordOf(account ledger.Account) NameRecord {
 		PendingHeight: account.PendingHeight,
 		PublicAddress: account.PublicAddress,
 		IPAddresses:   account.IPAddresses,
+		TLSKeys:       account.TLSKeys,
 		Description:   account.Description,
 	}
 }

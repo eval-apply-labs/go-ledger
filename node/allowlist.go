@@ -1,10 +1,13 @@
 package node
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/netip"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,9 +56,11 @@ func gossipAllowList(accounts []ledger.Account, validators *consensus.ValidatorS
 // a byte of it, so no HTTP is parsed for a stranger, and goes on to the next. It needs no privilege and
 // no tool in the image. It is a cost filter, not authentication: the signatures are (spec §5.5).
 type allowListListener struct { // implements net.Listener
-	net.Listener              // the gossip port's own listener, whose Close and Addr this one keeps
-	node         *Node        // whose committed view holds the allow list
-	refusals     atomic.Int64 // the connections refused since the last report (see reportRefusals)
+	net.Listener                      // the gossip port's own listener, whose Close and Addr this one keeps
+	node         *Node                // whose committed view holds the allow list
+	refusals     atomic.Int64         // the connections refused since the last report (see reportRefusals)
+	mutex        sync.Mutex           // guards refusedFrom: Accept counts, reportRefusals takes
+	refusedFrom  map[netip.Addr]int64 // the connections refused since the last report, by address, for at most maxReportedAddresses
 }
 
 // The compiler checks that *allowListListener implements net.Listener.
@@ -64,30 +69,48 @@ var _ net.Listener = (*allowListListener)(nil)
 // NewAllowListListener puts listener, the gossip port's, behind node's allow list. cmd/server serves
 // the gossip routes (Server.GossipHandler) on what it returns.
 func NewAllowListListener(listener net.Listener, node *Node) net.Listener {
-	return &allowListListener{Listener: listener, node: node}
+	return &allowListListener{Listener: listener, node: node, refusedFrom: map[netip.Addr]int64{}}
 }
 
 // refusalReportInterval is how often the gossip port logs the connections it refused, while it refuses
-// any.
-const refusalReportInterval = time.Minute
+// any. maxReportedAddresses bounds the addresses it counts the refusals of in that time, so a flood from
+// many addresses costs no more memory than that.
+const (
+	refusalReportInterval = time.Minute
+	maxReportedAddresses  = 1024
+)
 
 // Accept returns the next connection from an address on the allow list, unless its remote address is its
-// local one (bothEndsOneAddress). It closes every other one as it comes, and counts it. The first refusal
-// after a report schedules the next report, so strangers cost one log line a minute however many
-// connections they open.
+// local one (bothEndsOneAddress). It closes every other one as it comes, and counts it, in all and by its
+// address. The first refusal after a report schedules the next report, so strangers cost one log line a
+// minute however many connections they open.
 func (listener *allowListListener) Accept() (net.Conn, error) {
 	for {
 		connection, err := listener.Listener.Accept()
 		if err != nil {
 			return nil, err
 		}
-		if tcpAddress, isTCP := connection.RemoteAddr().(*net.TCPAddr); isTCP && listener.allows(tcpAddress.AddrPort().Addr()) && !bothEndsOneAddress(connection) {
+		tcpAddress, isTCP := connection.RemoteAddr().(*net.TCPAddr)
+		if isTCP && listener.allows(tcpAddress.AddrPort().Addr()) && !bothEndsOneAddress(connection) {
 			return &allowListConnection{Conn: connection, listener: listener, remoteAddress: tcpAddress.AddrPort().Addr()}, nil
 		}
 		connection.Close()
 		if listener.refusals.Add(1) == 1 {
 			time.AfterFunc(refusalReportInterval, listener.reportRefusals)
 		}
+		if isTCP {
+			listener.countRefusalFrom(tcpAddress.AddrPort().Addr().WithZone("").Unmap())
+		}
+	}
+}
+
+// countRefusalFrom counts a connection refused from address, unless the refusals of maxReportedAddresses
+// other addresses are counted since the last report.
+func (listener *allowListListener) countRefusalFrom(address netip.Addr) {
+	listener.mutex.Lock()
+	defer listener.mutex.Unlock()
+	if _, counted := listener.refusedFrom[address]; counted || len(listener.refusedFrom) < maxReportedAddresses {
+		listener.refusedFrom[address]++
 	}
 }
 
@@ -115,11 +138,48 @@ func bothEndsOneAddress(connection net.Conn) bool {
 	return localIsTCP && remoteIsTCP && localAddress.AddrPort().Addr().Unmap() == remoteAddress.AddrPort().Addr().Unmap()
 }
 
-// reportRefusals logs how many connections the allow list refused since the last report, and starts
-// the count again. It is how an operator finds a bank whose connections come from an address it does
-// not publish (spec §5.4).
+// reportRefusals logs how many connections the allow list refused since the last report, and from which
+// address it refused the most, with the names that list that address in the committed state (spec
+// §3.4), and starts the counts again. It is how an operator finds a bank whose connections come from an
+// address it does not publish (spec §5.4), and the name that claims the address of a flood, for people
+// to resolve: its bank of record calls its customer, and if that fails the ⅔ freeze the name.
 func (listener *allowListListener) reportRefusals() {
-	log.Printf("gossip port %s: refused %d connections in the last minute from addresses not on the allow list", listener.Addr(), listener.refusals.Swap(0))
+	listener.mutex.Lock()
+	refusedFrom := listener.refusedFrom
+	listener.refusedFrom = map[netip.Addr]int64{}
+	listener.mutex.Unlock()
+	line := fmt.Sprintf("gossip port %s: refused %d connections in the last minute from addresses not on the allow list", listener.Addr(), listener.refusals.Swap(0))
+	var mostRefused netip.Addr // the address refused the most; the lowest one of a tie, so the line is the same each time
+	for address, count := range refusedFrom {
+		if !mostRefused.IsValid() || count > refusedFrom[mostRefused] || count == refusedFrom[mostRefused] && address.Less(mostRefused) {
+			mostRefused = address
+		}
+	}
+	if mostRefused.IsValid() {
+		view := listener.node.view.Load()
+		line += fmt.Sprintf(", %d of them from %s: %s", refusedFrom[mostRefused], mostRefused, claimantsOf(view.state.Accounts, view.validators, mostRefused.String()))
+	}
+	log.Print(line)
+}
+
+// claimantsOf says which names among accounts list the IP address, each marked a validator of validators
+// or not: "listed by carol (not a validator)", several names comma-separated, or "listed by no name". An
+// address a name lists is a claim: nothing checks that the name controls it.
+func claimantsOf(accounts []ledger.Account, validators *consensus.ValidatorSet, ipAddress string) string {
+	var claimants []string
+	for _, account := range accounts {
+		if slices.Contains(account.IPAddresses, ipAddress) {
+			role := "not a validator"
+			if validators.Contains(account.Name) {
+				role = "a validator"
+			}
+			claimants = append(claimants, account.Name+" ("+role+")")
+		}
+	}
+	if len(claimants) == 0 {
+		return "listed by no name"
+	}
+	return "listed by " + strings.Join(claimants, ", ")
 }
 
 // allowListConnection is a connection the allow list let in. HTTP keeps a connection open from one

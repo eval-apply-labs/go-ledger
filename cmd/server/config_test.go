@@ -1,9 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -255,6 +262,75 @@ func TestLoadReadsThePublicPath(t *testing.T) {
 	}
 }
 
+// The zone settings (spec §3.2) are read into the node's ZoneSettings: a zone of at most 208 characters,
+// its name servers, outside it, and contact as domain names, and a time to live from 0 (the default) to
+// 2³¹ - 1 seconds. A zone needs the public folder it is written into, and the other settings need a
+// zone. Anything else is refused at load.
+func TestLoadReadsTheZoneSettings(t *testing.T) {
+	zoneConfig := func(t *testing.T) (config, genesis map[string]any) {
+		config, genesis = baseConfig(t)
+		config["publicPath"], config["zone"], config["zoneContact"] = t.TempDir(), "hdls.example.org", "hostmaster.example.org"
+		config["zoneNameServers"], config["zoneTimeToLive"] = []string{"ns1.example.org", "ns2.example.net"}, 300
+		return config, genesis
+	}
+	config, genesis := zoneConfig(t)
+	nodeConfig, _, _, _, err := load(writeConfig(t, config, genesis))
+	if settings := nodeConfig.ZoneSettings; err != nil || settings.Zone != "hdls.example.org" || settings.ZoneContact != "hostmaster.example.org" ||
+		!slices.Equal(settings.ZoneNameServers, []string{"ns1.example.org", "ns2.example.net"}) || settings.ZoneTimeToLive != 300 {
+		t.Errorf("the zone settings are %+v (error %v)", settings, err)
+	}
+	config, genesis = baseConfig(t)
+	if nodeConfig, _, _, _, err := load(writeConfig(t, config, genesis)); err != nil || nodeConfig.ZoneSettings.Zone != "" {
+		t.Errorf("a config without a zone: %+v (error %v), want none", nodeConfig.ZoneSettings, err)
+	}
+	config, genesis = zoneConfig(t)
+	config["zoneNameServers"] = []string{"ns1.example.net", "nshdls.example.org"} // outside the zone, the second though it ends as the zone does
+	if _, _, _, _, err := load(writeConfig(t, config, genesis)); err != nil {
+		t.Errorf("load refused name servers outside the zone: %v", err)
+	}
+	longestZone := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 16) // 208 characters
+	config, genesis = zoneConfig(t)
+	config["zone"] = longestZone
+	if _, _, _, _, err := load(writeConfig(t, config, genesis)); err != nil {
+		t.Errorf("load refused a zone of 208 characters: %v", err)
+	}
+
+	for _, test := range []struct {
+		key        string
+		value      any
+		wantInLoad string
+	}{
+		{"zone", "Hdls.example.org", `zone "Hdls.example.org" is not a domain name`},
+		{"zone", "hdls.example.org.", `zone "hdls.example.org." is not a domain name`},
+		{"zone", "-hdls.example.org", `zone "-hdls.example.org" is not a domain name`},
+		{"zone", strings.Repeat("a.", 127) + "org", "is not a domain name"},
+		{"zone", longestZone + "d", "is 209 characters, more than 208"},
+		{"zoneNameServers", []string{}, "the zone needs at least one name server"},
+		{"zoneNameServers", []string{"ns1.example.org", "ns 2.example.org"}, `zoneNameServers: "ns 2.example.org" is not a domain name`},
+		{"zoneNameServers", []string{"ns1.example.org", "ns1.hdls.example.org"}, `zoneNameServers: "ns1.hdls.example.org" is inside the zone`},
+		{"zoneNameServers", []string{"hdls.example.org"}, `zoneNameServers: "hdls.example.org" is inside the zone`},
+		{"zoneContact", "", `zoneContact "" is not`},
+		{"zoneContact", "hostmaster@example.org", `zoneContact "hostmaster@example.org" is not`},
+		{"zoneTimeToLive", -1, "zoneTimeToLive -1 is out of range"},
+		{"zoneTimeToLive", 1 << 31, "zoneTimeToLive 2147483648 is out of range"},
+		{"publicPath", "", "zone is set but publicPath is not"},
+	} {
+		config, genesis := zoneConfig(t)
+		config[test.key] = test.value
+		expectLoadError(t, config, genesis, test.wantInLoad)
+	}
+	for _, key := range []string{"zoneNameServers", "zoneContact", "zoneTimeToLive"} {
+		config, genesis := zoneConfig(t)
+		delete(config, "zone")
+		for _, other := range []string{"zoneNameServers", "zoneContact", "zoneTimeToLive"} {
+			if other != key {
+				delete(config, other)
+			}
+		}
+		expectLoadError(t, config, genesis, "zoneNameServers, zoneContact or zoneTimeToLive is set but zone is not")
+	}
+}
+
 // minimumStepTimeoutMs, the slow-down switch (spec §7.6), is read into the node's MinimumStepTimeout,
 // from 0 (off, and the default) to a day, MaxTimingMs. Anything else is refused at load.
 func TestLoadReadsTheSlowDownSwitch(t *testing.T) {
@@ -414,5 +490,109 @@ func TestKeygenOutputLoads(t *testing.T) {
 	}
 	if nodeConfig.Signer.PublicKeyBase64() != printed["publicKey"] {
 		t.Error("the node does not sign as the public key keygen printed")
+	}
+}
+
+// writeSecretFile writes a client secret to a new file, as keygen -secret prints it, and returns the
+// file's path and the secret.
+func writeSecretFile(t *testing.T) (string, []byte) {
+	t.Helper()
+	secret := bytes.Repeat([]byte{7}, 32)
+	path := filepath.Join(t.TempDir(), "engine.secret")
+	if err := os.WriteFile(path, []byte(hex.EncodeToString(secret)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path, secret
+}
+
+// fakeSigner is a test server in the place of the signer program of the bank bankName. To a request from
+// the client engine, under the HMAC of secret, it answers with keySigner's signature, but for a key
+// self-test in another name than bankName, which it refuses with 403, as the signer program does; to
+// any other, 401. It returns the server's URL.
+func fakeSigner(t *testing.T, secret []byte, bankName string, keySigner signing.Signer) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		body, _ := io.ReadAll(request.Body)
+		mac := hmac.New(sha256.New, secret)
+		mac.Write(body)
+		var signRequest struct {
+			Domain signing.Domain `json:"domain"`
+			Fields [][]byte       `json:"fields"`
+		}
+		if request.Header.Get("Authorization") != "HDLS-HMAC engine "+hex.EncodeToString(mac.Sum(nil)) || json.Unmarshal(body, &signRequest) != nil {
+			http.Error(responseWriter, "unknown client", http.StatusUnauthorized)
+			return
+		}
+		if signRequest.Domain == keySelfTest && (len(signRequest.Fields) != 1 || string(signRequest.Fields[0]) != bankName) {
+			http.Error(responseWriter, "the signer signs only in its own name", http.StatusForbidden)
+			return
+		}
+		signature, _ := keySigner.SignBase64(signRequest.Domain, signRequest.Fields...)
+		json.NewEncoder(responseWriter).Encode(map[string]string{"signature": signature})
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// The config takes the key from exactly one of privateKey, in the process, and signer, the signer
+// program (spec §2.7): both, or neither, is refused, as is a signer object without its url, its client
+// or its secret file, or with a secret file that is not as keygen -secret prints it.
+func TestLoadTakesExactlyOneOfPrivateKeyAndSigner(t *testing.T) {
+	secretFile, _ := writeSecretFile(t)
+	config, genesis := baseConfig(t)
+	config["signer"] = map[string]any{"url": "http://127.0.0.1:1", "client": "engine", "secretFile": secretFile}
+	expectLoadError(t, config, genesis, "privateKey and signer are both set")
+	delete(config, "privateKey")
+	delete(config, "signer")
+	expectLoadError(t, config, genesis, "neither privateKey nor signer is set")
+	config["signer"] = map[string]any{"url": "http://127.0.0.1:1", "client": "engine"}
+	expectLoadError(t, config, genesis, "signer needs url, client and secretFile")
+	config["signer"] = map[string]any{"url": "http://127.0.0.1:1", "client": "engine", "secretFile": writeJSON(t, "engine.secret", "not a secret")}
+	expectLoadError(t, config, genesis, "signer.secretFile: the secret file")
+}
+
+// With signer, the engine signs through the signer program, and its self-test signature at load goes
+// through it too, in the engine's name, and must verify under publicKey (spec §2.7): a signer that holds
+// another key, or one whose name is not the engine's, or none that answers, stops the engine at load,
+// not at its first vote.
+func TestLoadSignsThroughTheSignerAndChecksItsKey(t *testing.T) {
+	config, genesis := baseConfig(t)
+	bankConfig, _, _, _, err := load(writeConfig(t, config, genesis)) // the bank's key in the process, on the same network
+	if err != nil {
+		t.Fatal(err)
+	}
+	anotherKey, err := signing.Generate(signing.NetworkScheme(), bankConfig.Chain.NetworkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretFile, secret := writeSecretFile(t)
+	stopped := httptest.NewServer(http.NotFoundHandler())
+	stopped.Close()
+	delete(config, "privateKey")
+	for _, test := range []struct {
+		name      string
+		url       string
+		wantError string // "" for a config that loads
+	}{
+		{"a signer holding the bank's key", fakeSigner(t, secret, "founder", bankConfig.Signer), ""},
+		{"a signer holding another key", fakeSigner(t, secret, "founder", anotherKey), "key self-test: the signer's answer in key-self-test does not verify under publicKey"},
+		{"a signer whose name is not the engine's", fakeSigner(t, secret, "other-bank", bankConfig.Signer), "key self-test: the signer answered 403 Forbidden in key-self-test"},
+		{"no signer that answers", stopped.URL, "key self-test: "},
+	} {
+		config["signer"] = map[string]any{"url": test.url, "client": "engine", "secretFile": secretFile}
+		nodeConfig, _, _, _, err := load(writeConfig(t, config, genesis))
+		switch {
+		case test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)):
+			t.Errorf("%s: load gave %v, want an error with %q", test.name, err, test.wantError)
+		case test.wantError != "":
+		case err != nil:
+			t.Errorf("%s: load gave %v", test.name, err)
+		default:
+			_, remote := nodeConfig.Signer.(*signing.RemoteSigner)
+			signature, err := nodeConfig.Signer.Sign(signing.DomainReceipt)
+			if !remote || err != nil || !signing.Verify(signing.NetworkScheme(), nodeConfig.Chain.NetworkID, nodeConfig.Signer.PublicKey(), signing.DomainReceipt, signature) {
+				t.Errorf("%s: the node does not sign through the signer (remote %v, %v)", test.name, remote, err)
+			}
+		}
 	}
 }

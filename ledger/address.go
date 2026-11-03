@@ -130,3 +130,43 @@ func ipAddressesError(ipAddresses []string) error {
 	}
 	return nil
 }
+
+// MaxTLSKeys is the most TLS keys a name lists: its web server's current key and the next, so it can
+// roll the key without a gap.
+const MaxTLSKeys = 2
+
+// CanonicalTLSKey reports whether text is a TLS key record in its one form: the SHA-256 of a key's
+// SubjectPublicKeyInfo, as 64 lowercase hexadecimal digits, the hash DANE's TLSA records call "3 1 1".
+// The key's algorithm is the web server's choice, not the chain's, and a name's payment key is never
+// its TLS key: the record holds a hash, never a key.
+func CanonicalTLSKey(text string) bool {
+	if len(text) != 64 {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		if !(text[i] >= '0' && text[i] <= '9' || text[i] >= 'a' && text[i] <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// tlsKeyRule is the form CanonicalTLSKey takes, as a refusal names it.
+const tlsKeyRule = "the SHA-256 of the key's SubjectPublicKeyInfo, as 64 lowercase hexadecimal digits"
+
+// tlsKeysError says why a list of TLS keys can't be a name's, or is nil: at most MaxTLSKeys, each
+// CanonicalTLSKey, none twice. An empty list is a name's too: it has none.
+func tlsKeysError(tlsKeys []string) error {
+	if len(tlsKeys) > MaxTLSKeys {
+		return fmt.Errorf("%d TLS keys, above the %d a name may list", len(tlsKeys), MaxTLSKeys)
+	}
+	for i, tlsKey := range tlsKeys {
+		if !CanonicalTLSKey(tlsKey) {
+			return fmt.Errorf("the TLS key %q is not a TLS key: %s", tlsKey, tlsKeyRule)
+		}
+		if slices.Contains(tlsKeys[:i], tlsKey) {
+			return fmt.Errorf("the TLS key %q is given twice", tlsKey)
+		}
+	}
+	return nil
+}

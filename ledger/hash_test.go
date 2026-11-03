@@ -12,12 +12,12 @@ import (
 // hash over "go-ledger block content v2" and the content's JSON; the sealed digest over "go-ledger
 // sealed digest v2", the nonce, the state digest and the content hash; the validators hash over
 // "go-ledger validators v2" and each member's name, key and power; and the block hash over "go-ledger
-// block hash v2", the height in decimal, the previous block hash, the validators hash and the sealed
-// digest. Digests and nonces are 32 raw bytes. A header holds what recomputes the hash from the state
-// digest.
+// block hash v2", the height in decimal, the previous block hash, the validators hash, the next
+// validators hash and the sealed digest. Digests and nonces are 32 raw bytes. A header holds what
+// recomputes the hash from the state digest.
 func TestBlockHashLayout(t *testing.T) {
 	validators := []consensus.Validator{{Name: "bank-a", PublicKey: "key-a", Power: 1}, {Name: "bank-b", PublicKey: "key-b", Power: 12}}
-	block := Block{Height: 42, PreviousBlockHash: [32]byte{1}, ValidatorsHash: ValidatorsHash(validators), Nonce: [32]byte{2},
+	block := Block{Height: 42, PreviousBlockHash: [32]byte{1}, ValidatorsHash: ValidatorsHash(validators), NextValidatorsHash: [32]byte{4}, Nonce: [32]byte{2},
 		Content:     BlockContent{Payments: []Payment{{From: "alice", To: "bakery", Amount: rational("12.5"), BlockID: 42}}},
 		StateDigest: [32]byte{3}}
 	contentJSON, err := json.Marshal(block.Content)
@@ -27,7 +27,8 @@ func TestBlockHashLayout(t *testing.T) {
 	contentHash := sha256.Sum256(lengthPrefixedPreimage("go-ledger block content v2", string(contentJSON)))
 	sealedDigest := sha256.Sum256(lengthPrefixedPreimage("go-ledger sealed digest v2", string(block.Nonce[:]), string(block.StateDigest[:]), string(contentHash[:])))
 	validatorsHash := sha256.Sum256(lengthPrefixedPreimage("go-ledger validators v2", "bank-a", "key-a", "1", "bank-b", "key-b", "12"))
-	blockHash := sha256.Sum256(lengthPrefixedPreimage("go-ledger block hash v2", "42", string(block.PreviousBlockHash[:]), string(validatorsHash[:]), string(sealedDigest[:])))
+	blockHash := sha256.Sum256(lengthPrefixedPreimage("go-ledger block hash v2", "42", string(block.PreviousBlockHash[:]), string(validatorsHash[:]),
+		string(block.NextValidatorsHash[:]), string(sealedDigest[:])))
 
 	switch {
 	case ContentHash(block.Content) != contentHash:
@@ -36,9 +37,10 @@ func TestBlockHashLayout(t *testing.T) {
 		t.Error("the sealed digest does not follow the spec 5.1 layout")
 	case ValidatorsHash(validators) != validatorsHash:
 		t.Error("the validators hash does not follow the spec 5.1 layout")
-	case BlockHashOf(42, block.PreviousBlockHash, validatorsHash, sealedDigest) != blockHash || BlockHash(block) != blockHash:
+	case BlockHashOf(42, block.PreviousBlockHash, validatorsHash, block.NextValidatorsHash, sealedDigest) != blockHash || BlockHash(block) != blockHash:
 		t.Error("the block hash does not follow the spec 5.1 layout")
-	case block.Header() != BlockHeader{Height: 42, PreviousBlockHash: block.PreviousBlockHash, ValidatorsHash: validatorsHash, Nonce: block.Nonce, ContentHash: contentHash}:
+	case block.Header() != BlockHeader{Height: 42, PreviousBlockHash: block.PreviousBlockHash, ValidatorsHash: validatorsHash, NextValidatorsHash: block.NextValidatorsHash,
+		Nonce: block.Nonce, ContentHash: contentHash}:
 		t.Errorf("the header is %+v", block.Header())
 	case block.Header().BlockHash(block.StateDigest) != blockHash:
 		t.Error("the header and the state digest do not recompute the block hash")
@@ -46,8 +48,8 @@ func TestBlockHashLayout(t *testing.T) {
 }
 
 // The block hash covers every part of a block (spec 5.1): its height, the previous block hash, the
-// signing set (each member's name, key and power), the nonce, the state digest and each field of the
-// content. So a vote, commit or proposal over it covers them all: a block that differs in any one is
+// signing set (each member's name, key and power), the next signing set, the nonce, the state digest
+// and each field of the content. So a vote, commit or proposal over it covers them all: a block that differs in any one is
 // another block, and two blocks that differ only in their nonce are two blocks.
 func TestBlockHashCoversEveryPart(t *testing.T) {
 	validators := []consensus.Validator{{Name: "bank-a", PublicKey: "key-a", Power: 1}}
@@ -67,6 +69,7 @@ func TestBlockHashCoversEveryPart(t *testing.T) {
 		"a signer's key":          otherSet(func(validator *consensus.Validator) { validator.PublicKey = "key-b" }),
 		"a signer's power":        otherSet(func(validator *consensus.Validator) { validator.Power = 2 }),
 		"another signer":          func(changed *Block) { changed.ValidatorsHash = ValidatorsHash(append(validators, validators[0])) },
+		"the next signing set":    func(changed *Block) { changed.NextValidatorsHash = ValidatorsHash(append(validators, validators[0])) },
 		"the nonce":               func(changed *Block) { changed.Nonce[0]++ },
 		"the state digest":        func(changed *Block) { changed.StateDigest[0]++ },
 		"a payment": func(changed *Block) {

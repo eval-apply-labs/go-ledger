@@ -2,11 +2,11 @@
 //
 // It is the fix for the central finding of the security audit (C1: cross-protocol signature reuse),
 // where one unscoped key signed every payload type over bare, ':'-joined strings with no type tag or
-// network id, so a signature made in one context could be replayed in another. Signer, the type all
-// production code signs with, has no method that signs raw bytes: it signs only a canonical,
+// network id, so a signature made in one context could be replayed in another. Signer, the interface
+// all production code signs with, has no method that signs raw bytes: it signs only a canonical,
 // length-prefixed preimage that binds a Domain and the network id (see domain.go), and every check
 // (Verify, VerifyBase64) rebuilds that preimage. PrivateKey.Sign does take raw bytes; outside tests,
-// only Signer.Sign calls it.
+// only LocalSigner.Sign calls it.
 package signing
 
 import (
@@ -16,12 +16,13 @@ import (
 
 // Scheme is a signature algorithm: its signature size, the public keys it accepts, key generation, key
 // parsing and verification over raw bytes. A Scheme does not sign; the PrivateKey it parses does.
-// Domain separation and canonical encoding are one layer up: Signer.Sign gives its key only a domain
-// preimage, and Verify rebuilds one for the Scheme. The rest of the code knows the network's scheme
-// only through this interface and NetworkScheme, so changing the scheme is replacing the files that
-// implement it (README, Cryptographic agility). In tests it is also implemented by wrappers of the
+// Domain separation and canonical encoding are one layer up: LocalSigner.Sign gives its key only a
+// domain preimage, and Verify rebuilds one for the Scheme. The rest of the code knows the network's
+// scheme only through this interface and NetworkScheme, so changing the scheme is replacing the files
+// that implement it (README, Cryptographic agility). In tests it is also implemented by wrappers of the
 // network's scheme that replace one method: countingScheme (consensus and node tests), brokenScheme
-// (consensus), verificationCounter (ledger) and keyRefusingScheme (signing).
+// (consensus), verificationCounter (ledger), keyRefusingScheme (signing) and crashingScheme
+// (cmd/signer).
 //
 // A scheme's methods, and those of the keys it parses, must be safe to call from many goroutines at
 // once: the node signs receipts on its HTTP handlers while its loop signs votes. A public key must have
@@ -56,7 +57,8 @@ type Scheme interface { // implemented by mldsa65 (mldsa65.go), the network's on
 }
 
 // PrivateKey is a private key that ParsePrivateKey read. In tests it is also implemented by
-// brokenKey (consensus), a key that cannot sign.
+// brokenKey (consensus), a key that cannot sign, and crashingKey (cmd/signer), one that crashes the
+// program when it signs.
 type PrivateKey interface { // implemented by mldsa65Key (mldsa65.go)
 	// PublicKey returns the public key that verifies this key's signatures.
 	PublicKey() []byte

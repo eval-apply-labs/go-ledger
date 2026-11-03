@@ -77,7 +77,7 @@ func exampleGenesis() Genesis {
 		Validators:  []GenesisValidator{{Name: "bank-a", Power: 1}, {Name: "bank-b", Power: 1}},
 		Accounts: []GenesisAccount{
 			{Name: "bank-a", PublicKey: testSigner("bank-a").PublicKeyBase64(), Amount: "1000", Delegate: "bank-a",
-				PublicAddress: "https://bank-a.example", IPAddresses: []string{"10.0.0.2"}},
+				PublicAddress: "https://bank-a.example", IPAddresses: []string{"10.0.0.2"}, TLSKeys: []string{exampleTLSKey("bank-a")}},
 			{Name: "bank-b", PublicKey: testSigner("bank-b").PublicKeyBase64(), Amount: "1000", Bank: "bank-a", Delegate: "bank-b",
 				PublicAddress: "https://bank-b.example", IPAddresses: []string{"10.0.0.3", "2001:db8::3"}},
 			{Name: "alice", PublicKey: testSigner("alice").PublicKeyBase64(), Amount: "50", Bank: "bank-a", Description: "the baker"},
@@ -214,7 +214,7 @@ func TestNetworkIdIsTheNamePlusTheGenesisHash(t *testing.T) {
 	wantState := LedgerState{Parameters: DefaultParameters(), Accounts: []Account{
 		{Name: "alice", PublicKey: testSigner("alice").PublicKeyBase64(), Amount: amount("50"), Bank: "bank-a", Description: "the baker"},
 		{Name: "bank-a", PublicKey: testSigner("bank-a").PublicKeyBase64(), Amount: amount("1000"), Delegate: "bank-a",
-			PublicAddress: "https://bank-a.example", IPAddresses: []string{"10.0.0.2"}},
+			PublicAddress: "https://bank-a.example", IPAddresses: []string{"10.0.0.2"}, TLSKeys: []string{exampleTLSKey("bank-a")}},
 		{Name: "bank-b", PublicKey: testSigner("bank-b").PublicKeyBase64(), Amount: amount("1000"), Bank: "bank-a", Delegate: "bank-b",
 			PublicAddress: "https://bank-b.example", IPAddresses: []string{"10.0.0.3", "2001:db8::3"}},
 	}}
@@ -246,6 +246,7 @@ func TestNetworkIdIsTheNamePlusTheGenesisHash(t *testing.T) {
 		"another public address": func(genesis *Genesis) { genesis.Accounts[1].PublicAddress = "https://bank-b.example.org" },
 		"another IP address":     func(genesis *Genesis) { genesis.Accounts[1].IPAddresses[1] = "2001:db8::4" },
 		"IP addresses reordered": func(genesis *Genesis) { slices.Reverse(genesis.Accounts[1].IPAddresses) },
+		"another TLS key":        func(genesis *Genesis) { genesis.Accounts[0].TLSKeys[0] = exampleTLSKey("bank-a, next") },
 		"another gossip port":    func(genesis *Genesis) { genesis.GossipPort = 8091 },
 	} {
 		changed := exampleGenesis()
@@ -357,21 +358,21 @@ func TestGenesisFileGivesEveryParameterAndNoUnknownKey(t *testing.T) {
   "validatorThreshold": "",
   "accounts": [
     { "name": "bank-a", "publicKey": "KEY-A", "amount": "1000", "bank": "", "delegate": "bank-a",
-      "description": "", "publicAddress": "https://bank-a.example", "ipAddresses": [ "10.0.0.2" ] },
+      "description": "", "publicAddress": "https://bank-a.example", "ipAddresses": [ "10.0.0.2" ], "tlsKeys": [ "TLS-KEY-A" ] },
     { "name": "bank-b", "publicKey": "KEY-B", "amount": "1000", "bank": "bank-a", "delegate": "bank-b",
       "description": "", "publicAddress": "https://bank-b.example", "ipAddresses": [ "10.0.0.3", "2001:db8::3" ] },
     { "name": "alice", "publicKey": "KEY-ALICE", "amount": "50", "bank": "bank-a", "delegate": "",
-      "description": "the baker", "publicAddress": "", "ipAddresses": [] }
+      "description": "the baker", "publicAddress": "", "ipAddresses": [], "tlsKeys": [] }
   ]
 }`
 	exampleFile = strings.NewReplacer("MAX-MESSAGE-BYTES", fmt.Sprint(DefaultParameters().MaxMessageBytes), "KEY-ALICE", testSigner("alice").PublicKeyBase64(),
-		"KEY-A", testSigner("bank-a").PublicKeyBase64(), "KEY-B", testSigner("bank-b").PublicKeyBase64()).Replace(exampleFile)
+		"KEY-A", testSigner("bank-a").PublicKeyBase64(), "KEY-B", testSigner("bank-b").PublicKeyBase64(), "TLS-KEY-A", exampleTLSKey("bank-a")).Replace(exampleFile)
 	genesis, err := ParseGenesis([]byte(exampleFile))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := exampleGenesis()
-	want.Accounts[2].IPAddresses = []string{} // the file's [], which leaves alice none, as nothing would
+	want.Accounts[2].IPAddresses, want.Accounts[2].TLSKeys = []string{}, []string{} // the file's [], which leaves alice none, as nothing would
 	if genesis.Parameters.Digest() != want.Parameters.Digest() || !slices.Equal(genesis.Validators, want.Validators) ||
 		!reflect.DeepEqual(genesis.Accounts, want.Accounts) || genesis.NetworkName != "village" || genesis.GossipPort != 8090 || genesis.ValidatorThreshold != "" {
 		t.Fatalf("read %+v, want %+v", genesis, want)

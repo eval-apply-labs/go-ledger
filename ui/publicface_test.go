@@ -25,7 +25,7 @@ import (
 // writes its public folder (spec §6.1) for a fetcher to serve.
 type engine struct {
 	handler      http.Handler
-	bank         *signing.Signer // bank-a's key, for this network
+	bank         signing.Signer // bank-a's key, for this network
 	publicFolder string
 }
 

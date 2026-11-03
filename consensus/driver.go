@@ -87,7 +87,7 @@ func (ActionDecided) isAction()       {}
 // Driver is the per-height consensus state machine for one validator node.
 type Driver struct {
 	height       int64
-	signer       *signing.Signer
+	signer       signing.Signer
 	self         string // this node's name, which its votes carry
 	validatorSet *ValidatorSet
 	scheme       signing.Scheme
@@ -123,7 +123,7 @@ type Driver struct {
 // which its votes carry; proposeValue is the hash of the block it will propose when it is the proposer and
 // holds no lock. With a nil signer the driver follows the rounds and decides, but never signs a vote or a
 // proposal: the node's name is not seated with the node's key (spec 6.3).
-func NewDriver(signer *signing.Signer, self string, validatorSet *ValidatorSet, scheme signing.Scheme, networkID string, height int64, proposeValue [32]byte) *Driver {
+func NewDriver(signer signing.Signer, self string, validatorSet *ValidatorSet, scheme signing.Scheme, networkID string, height int64, proposeValue [32]byte) *Driver {
 	return &Driver{
 		height: height, signer: signer, self: self,
 		validatorSet: validatorSet, scheme: scheme, networkID: networkID,

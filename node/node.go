@@ -22,14 +22,14 @@ import (
 // Config is a node's static configuration.
 type Config struct {
 	Chain  ledger.Chain // the signature scheme, the network id and how the validator set follows from the state
-	Signer *signing.Signer
+	Signer signing.Signer
 	Name   string // this node's account name, which its votes, proposals and receipts carry; "" for an unnamed observer
 	// Genesis is the state the network starts from, at height 0 for a new network. Its parameters (the
 	// transaction cost, the step timeout, the block interval, the gossip fan-out, the message bound and
 	// the rest) hold until a vote changes them. The node reads the timings from its committed state, so
 	// every timing follows a vote, the re-gossip and catch-up intervals included.
 	Genesis   ledger.LedgerState
-	Bootstrap []string // peer base URLs to sync the committed state from on start (join/rejoin), and the first ones the running catch-up asks (see catchUpCheckpoint)
+	Bootstrap []string // peer base URLs to sync the committed state from on start (join/rejoin), which the running catch-up asks too (see catchUpCheckpoint)
 	// SnapshotPath, if set, is where the node keeps its committed checkpoint, with the sign log and the
 	// signature record's files beside it (see signLogPath, recordPrefix); it reloads the first two on
 	// start.
@@ -43,6 +43,9 @@ type Config struct {
 	// PublicPath, if set, is the public folder: the files the fetcher serves to the public, written at
 	// Open and after each commit and catch-up (spec §6.1, see publicfolder.go). "" writes none.
 	PublicPath string
+	// ZoneSettings, with a Zone, make the public folder hold the name service's zone file (spec §3.2,
+	// see zone.go).
+	ZoneSettings ZoneSettings
 	// MinimumStepTimeout is the slow-down switch (spec §7.6), 0 for off: the round timers wait at least
 	// this long per step, when the governed step timeout is shorter (see stepTimeout). So the node waits
 	// longer for a proposal before it votes "no block", as a carrier needs; no rule reads the clock, so
@@ -80,6 +83,7 @@ const (
 	eventAdopt
 	eventCatchUp
 	eventIdleHeartbeat
+	eventHalt
 )
 
 type event struct {
@@ -100,7 +104,9 @@ type event struct {
 	governanceQuery chan GovernanceView
 	bundleQuery     chan []byte // receives the node's bundle (see ExportBundle)
 	checkpoint      *Checkpoint
-	admit           chan admission // receives the loop's verdict on a payment, an update, a name request, a certificate or a carried checkpoint
+	trustedFrame    *consensus.ValidatorSet // for an eventAdopt or eventCatchUp: the frame catch-up found the checkpoint passes against; nil for the committed view's (see catchUp)
+	admit           chan admission          // receives the loop's verdict on a payment, an update, a name request, a certificate or a carried checkpoint
+	alarm           string                  // for an eventHalt: the alarm that halts the node (see halt)
 }
 
 // admission is the loop's verdict on a payment, an update, a name request or a certificate: whether it
@@ -132,11 +138,11 @@ func (snapshot Snapshot) checkpoint() Checkpoint {
 
 // Node is one node of the network: a validator, or an observer that follows the chain and signs
 // nothing. All mutable state is owned by the run loop, but backupBusy (see saveSnapshot),
-// pullRoundRunning and stuckOnItsHeight (see pullPublicBundles), publicFaceTurn (see
-// catchUpCheckpoint), the votes the pulls verified, which their mutex guards (see verifiedVotes), and
-// the public folder's queue, which its writer guards (see publicFolderWriter). Other goroutines post
-// events onto the loop's channel (the Submit* and Admit* inputs, Snapshot, GovernanceView,
-// ExportBundle), or read the committed view the loop publishes (see committedView).
+// pullRoundRunning (see pullPublicBundles), the votes the pulls verified, which their mutex guards (see
+// verifiedVotes), confirmedHeight and haltedBecause, which the loop sets (see noteConfirmation and halt),
+// and the public folder's queue, which its writer guards (see publicFolderWriter). Other goroutines post
+// events onto the loop's channel (the Submit* and Admit* inputs, Snapshot, GovernanceView, ExportBundle),
+// or read the committed view the loop publishes (see committedView).
 type Node struct {
 	config    Config
 	self      string
@@ -166,6 +172,7 @@ type Node struct {
 	heightVotes      map[string]consensus.Vote // votes seen at the current height, by validator, round and type (see rememberVote), re-gossiped periodically (see reGossipLoop)
 	heightProposals  map[int32]ProposalMessage // the proposals taken at the current height (see onProposal), by round (first wins, like the driver)
 	invalidProposals map[int32]int             // authentic proposals at the current height whose block did not apply, by round (see onProposal)
+	refusedBlocks    map[[32]byte]refusedBlock // the header of each of their blocks, and why it did not apply, by block hash (see noteDivergence)
 
 	heightStartedAt      time.Time // when startHeight last began the height in progress, by the wall clock: when its driver started, if one runs (see pullPublicBundles)
 	pullingPublicBundles bool      // whether the node pulls public bundles, so it logs when it starts and when it stops (see pullPublicBundles)
@@ -184,14 +191,15 @@ type Node struct {
 	configuredPeers [][]string // the transport's peers before on-chain resolution replaced them (see resolvePeersFromState)
 	peersResolved   bool       // whether the transport is using resolved peers
 
-	backupBusy       atomic.Bool   // a BackupPath mirror is in flight (see saveSnapshot); set on the loop, cleared by the mirror
-	pullRoundRunning atomic.Bool   // a round of public bundle pulls is in flight (see pullPublicBundles); set on the loop, cleared by the round
-	stuckOnItsHeight atomic.Bool   // pullingPublicBundles, for catch-up's goroutine (see catchUpCheckpoint); set on the loop
-	pulledVotes      verifiedVotes // the votes of pulled public bundles that verified at the committed height (see pulledCheck)
-	publicFaceTurn   atomic.Uint64 // which public face catch-up asks when it asks one (see catchUpCheckpoint); catch-up's goroutine alone counts it
+	backupBusy       atomic.Bool            // a BackupPath mirror is in flight (see saveSnapshot); set on the loop, cleared by the mirror
+	pullRoundRunning atomic.Bool            // a round of public bundle pulls is in flight (see pullPublicBundles); set on the loop, cleared by the round
+	pulledVotes      verifiedVotes          // the votes of pulled public bundles that verified at the committed height (see pulledCheck)
+	confirmedHeight  atomic.Int64           // the height of the first commit that holds the node's own precommit, 0 before (see noteConfirmation); set on the loop, read by the status
+	haltedBecause    atomic.Pointer[string] // the alarm that halted the node, nil while it runs (see halt); set on the loop, read by catch-up and the status
 
 	publicFolder    *publicFolderWriter // writes the public folder off the loop; nil without a PublicPath (see openPublicFolder)
 	publishedBundle []byte              // the public bundle publishBundle last queued, so that one unchanged is not written again
+	frames          []frameLine         // the lines of hdls/frames, oldest first (see noteFrame)
 }
 
 // Open builds a node. If a snapshot is configured and present on disk, it is loaded as the starting
@@ -222,6 +230,7 @@ func Open(config Config, transport Transport) (*Node, error) {
 		heightVotes:                 map[string]consensus.Vote{},
 		heightProposals:             map[int32]ProposalMessage{},
 		invalidProposals:            map[int32]int{},
+		refusedBlocks:               map[[32]byte]refusedBlock{},
 		pendingProofs:               map[string]pendingProof{},
 		parameterCertificatePool:    map[string]*ledger.ParameterChange{},
 		reassignmentCertificatePool: map[string]*ledger.Reassignment{},
@@ -256,7 +265,7 @@ func (node *Node) Start() {
 	} else {
 		node.enqueue(event{kind: eventStart})
 	}
-	// Ongoing catch-up runs regardless, from bootstrap peers, gossip peers or the other validators'
+	// Ongoing catch-up runs regardless, from bootstrap peers, gossip peers and the other validators'
 	// public addresses (see catchUpCheckpoint), so a node that falls a full height behind self-recovers
 	// instead of getting stuck.
 	go node.catchUpLoop()
@@ -375,12 +384,14 @@ func (node *Node) handle(incoming event) {
 	case eventIdleHeartbeat:
 		node.onIdleHeartbeat(incoming.height)
 	case eventAdopt:
-		node.adopt(*incoming.checkpoint)
+		node.adopt(*incoming.checkpoint, incoming.trustedFrame)
 	case eventCatchUp:
-		err := node.catchUp(*incoming.checkpoint)
+		err := node.catchUp(*incoming.checkpoint, incoming.trustedFrame)
 		if incoming.admit != nil { // a carried checkpoint, whose import waits for the verdict (ImportCheckpoint)
 			incoming.admit <- admission{err: err}
 		}
+	case eventHalt:
+		node.halt(incoming.alarm)
 	case eventProposal:
 		// Relay only a proposal the node took: AUTHENTIC (from the round's proposer, correctly
 		// signed) and valid. Any other is dropped, not gossiped onward.
@@ -405,6 +416,7 @@ func (node *Node) handle(incoming event) {
 			if node.driver != nil {
 				node.process(node.driver.ReceiveVote(*incoming.vote))
 			}
+			node.noteDivergence(incoming.vote.BlockHash) // a precommit for a block the node refused
 			node.wakeIfIdle()
 		}
 	case eventTimeout:
@@ -483,6 +495,7 @@ func (node *Node) snapshot() Snapshot {
 type committedView struct {
 	state                ledger.LedgerState
 	stateDigest          [32]byte // state.Digest(): what a payment's pin names (E38)
+	lastBlockHash        [32]byte // the hash of the block that produced state, which the status reports (see statusOf)
 	validators           *consensus.ValidatorSet
 	lastCommitValidators *consensus.ValidatorSet // the set that signed the last commit; nil before the first
 	gossipAllowList      []netip.Prefix          // see gossipAllowList
@@ -495,7 +508,7 @@ type committedView struct {
 // list the new state makes in front of the gossip port (spec §5.2).
 func (node *Node) publishView() {
 	validators := node.config.Chain.ValidatorRule.SetFor(node.state)
-	node.view.Store(&committedView{state: node.state, stateDigest: node.state.Digest(), validators: validators,
+	node.view.Store(&committedView{state: node.state, stateDigest: node.state.Digest(), lastBlockHash: node.lastBlockHash, validators: validators,
 		lastCommitValidators: node.lastCommitValidators, gossipAllowList: gossipAllowList(node.state.Accounts, validators, node.self, node.config.GossipAllow)})
 }
 
@@ -555,6 +568,9 @@ func (node *Node) reconcilePools(previousAccounts []ledger.Account) {
 // back to it), and the proposals onProposal took before the driver existed, in the post-commit window.
 // It is then fed the votes that arrived meanwhile.
 func (node *Node) startHeight() {
+	if node.haltedBecause.Load() != nil {
+		return // halted: the node signs nothing more (see halt)
+	}
 	if node.heightStarted == node.height() && node.driver != nil {
 		return // already started this height — ignore a stale eventNextHeight/eventCatchUp that would
 		//        otherwise replace the live driver mid-height and discard its in-progress votes.
@@ -631,7 +647,7 @@ func (node *Node) startHeight() {
 // driver follows the rounds and decides without signing a vote or a proposal. So a node that is not
 // seated, an observer among them, never signs, and one whose name was re-keyed never signs under its
 // old key. When the name is seated under another key, the node logs that once.
-func (node *Node) seatedSigner() *signing.Signer {
+func (node *Node) seatedSigner() signing.Signer {
 	seatedKey := node.heightValidators.PublicKey(node.self)
 	switch {
 	case seatedKey == node.config.Signer.PublicKeyBase64():
@@ -752,7 +768,8 @@ const maxInvalidProposals = 2
 // that does not apply. Each such copy costs an ApplyBlock, and the proposer can send it again and again
 // without signing anything new, so once maxInvalidProposals of them have failed for a round, the node
 // takes no more proposals for it. If no valid proposal comes, the driver prevotes nil when its propose
-// step times out.
+// step times out. The node keeps the header of each block it refused, and why, at the height: should more
+// than ⅔ of the set precommit one, its state and the network's disagree (see noteDivergence).
 //
 // Between a commit and the start of the next height (the block interval window) there is no
 // driver, and the next one starts at round 0. A proposal for the new height is then taken all the
@@ -782,6 +799,8 @@ func (node *Node) onProposal(proposalMessage ProposalMessage) bool {
 	}
 	if _, err := ledger.ApplyBlock(node.config.Chain, node.state, node.lastBlockHash, block); err != nil {
 		node.invalidProposals[signedProposal.Round]++
+		node.refusedBlocks[signedProposal.BlockHash] = refusedBlock{Header: block.Header(), Reason: err.Error()}
+		node.noteDivergence(signedProposal.BlockHash) // its precommits may have come first
 		return false
 	}
 	node.blocks[signedProposal.BlockHash] = block
@@ -1033,11 +1052,12 @@ func (node *Node) blockInterval() time.Duration {
 }
 
 // commit applies the block the driver decided and makes the result the committed state; then it saves
-// the snapshot, empties the sign log, writes the record, publishes the view, reconciles the pools,
-// re-resolves the peers, sends the last commit, writes the public folder, and starts the next height
-// after the block interval; at a height it waits at (see waitForOwnSignatures), after the wait
-// (ownSignaturesWait) if that is longer. The public folder comes after the record: its status must not pass a
-// height before the record holds it (see publishCommittedState).
+// the snapshot, empties the sign log, writes the record and lists the frame the block starts, if it
+// starts one (noteFrame), publishes the view, reconciles the pools, re-resolves the peers, sends the last
+// commit, writes the public folder, and starts the next height after the block interval; at a height it
+// waits at (see waitForOwnSignatures), after the wait (ownSignaturesWait) if that is longer. The public
+// folder comes after the record: its status must not pass a height before the record holds it (see
+// publishCommittedState).
 func (node *Node) commit(decision consensus.ActionDecided) {
 	block, found := node.blocks[decision.Commit.BlockHash]
 	if !found || block.Height != node.height() {
@@ -1054,6 +1074,7 @@ func (node *Node) commit(decision consensus.ActionDecided) {
 	node.lastCommit = decision.Commit
 	node.lastProposal = node.heightProposals[decision.Commit.Round]
 	node.lastCommitValidators = node.heightValidators // the set that signed this commit, for checkpoints we serve
+	node.noteConfirmation(decision.Commit)
 	// The decided driver is done, and until startHeight builds the next one no driver runs (see
 	// onProposal). Keep the double-signs it saw, under the keys of the set it counted votes under, to
 	// freeze their names in a later block.
@@ -1075,12 +1096,14 @@ func (node *Node) commit(decision consensus.ActionDecided) {
 		node.emptySignLog(logHeight)
 	}
 	node.recordCommittedBlock(previousState, block, node.lastProposal.Proposal, node.lastCommit, node.lastCommitValidators)
+	node.noteFrame(block)
 	node.publishView()
 	node.reconcilePools(previousState.Accounts)
 	node.relaySeen = map[string]bool{}             // bound the relay-dedup set; old messages won't re-flood usefully
 	node.heightVotes = map[string]consensus.Vote{} // previous height's votes are done; start the new height clean
 	node.heightProposals = map[int32]ProposalMessage{}
 	node.invalidProposals = map[int32]int{}
+	node.refusedBlocks = map[[32]byte]refusedBlock{}
 	node.blocks = map[[32]byte]ledger.Block{}
 	node.resolvePeersFromState() // re-resolve gossip peers from any address changes this block (peer DNS)
 	node.sendLastCommit()

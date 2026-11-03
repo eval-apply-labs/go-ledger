@@ -1,6 +1,8 @@
 package ledger
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -136,5 +138,91 @@ func TestIPAddressesHaveOnePlainForm(t *testing.T) {
 	next, err = ApplyBlock(testChain(), next, zeroHash, ProposeBlock(testChain(), next, zeroHash, zeroHash, BlockContent{AccountUpdates: []AccountUpdate{setsOne}}))
 	if err != nil || !slices.Equal(find(next.Accounts, "alice").IPAddresses, []string{"2001:db8::8"}) {
 		t.Fatalf("an update to one IP address: %v, alice holds %v, want that address alone", err, find(next.Accounts, "alice").IPAddresses)
+	}
+}
+
+// exampleTLSKey is a TLS key record in its one form: the SHA-256, in lowercase hex, of seed, which
+// stands in for a key's SubjectPublicKeyInfo.
+func exampleTLSKey(seed string) string {
+	hash := sha256.Sum256([]byte(seed))
+	return hex.EncodeToString(hash[:])
+}
+
+// A name lists at most MaxTLSKeys TLS keys (Phase 4 spec §3.3), the current one and the next, each the
+// SHA-256 of a SubjectPublicKeyInfo as 64 lowercase hex digits, the hash a TLSA "3 1 1" record holds,
+// and none twice. The genesis refuses every other list, and so do an update's intake check
+// (UpdateFitsState), ProposeBlock and ApplyBlock: it is a rule of the block. An update that changes
+// only the TLS keys is a change: it sets them, a later one replaces the whole list, and "-" alone
+// clears it.
+func TestTLSKeysHaveOneForm(t *testing.T) {
+	current, next := exampleTLSKey("current"), exampleTLSKey("next")
+	if !CanonicalTLSKey(current) {
+		t.Fatalf("CanonicalTLSKey(%q) = false, want true", current)
+	}
+	type refusedList struct {
+		description string
+		tlsKeys     []string
+		want        string
+	}
+	var refusedLists []refusedList
+	for description, tlsKey := range map[string]string{
+		"capitals": strings.ToUpper(current), "a digit short": current[:63], "a digit more": current + "0", "a 0x prefix": "0x" + current[2:],
+		"a letter past f": "g" + current[1:], "a space": " " + current[1:], "base64": "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU=",
+		"nothing": "", "the dash among keys": ClearField,
+	} {
+		tlsKeys := []string{tlsKey}
+		if tlsKey == ClearField {
+			tlsKeys = []string{current, ClearField} // alone, it clears the list
+		}
+		refusedLists = append(refusedLists, refusedList{description, tlsKeys, fmt.Sprintf("the TLS key %q is not a TLS key", tlsKey)})
+	}
+	refusedLists = append(refusedLists,
+		refusedList{"a duplicate", []string{current, current}, fmt.Sprintf("the TLS key %q is given twice", current)},
+		refusedList{"a third key", []string{current, next, exampleTLSKey("third")}, "3 TLS keys, above the 2 a name may list"})
+
+	previousState := buildLedgerState(4, []Account{namedAccount("alice", "100"), seatedAccount()}, rational("0.1"))
+	for _, refused := range refusedLists {
+		t.Run(refused.description, func(t *testing.T) {
+			genesis := exampleGenesis()
+			genesis.Accounts[2].TLSKeys = refused.tlsKeys // alice's
+			expectGenesisRefused(t, genesis, `the TLS keys of "alice": `+refused.want)
+			update := signedUpdate(AccountUpdate{Name: "alice", TLSKeys: refused.tlsKeys, BlockID: 5})
+			if err := UpdateFitsState(previousState, update); err == nil || !strings.Contains(err.Error(), refused.want) {
+				t.Errorf("UpdateFitsState: %v, want the refusal %q", err, refused.want)
+			}
+			if block := ProposeBlock(testChain(), previousState, zeroHash, zeroHash, BlockContent{AccountUpdates: []AccountUpdate{update}}); len(block.Content.AccountUpdates) != 0 {
+				t.Error("ProposeBlock carried the update")
+			}
+			if _, err := ApplyBlock(testChain(), previousState, zeroHash, forgeUpdateBlock(previousState, 5, update)); err == nil {
+				t.Error("ApplyBlock accepted a block carrying the update")
+			}
+		})
+	}
+	genesis := exampleGenesis()
+	genesis.Accounts[2].TLSKeys = []string{ClearField}
+	expectGenesisRefused(t, genesis, `the TLS keys of "alice": the TLS key "-" is not a TLS key`)
+
+	two := []string{current, next}
+	genesis = exampleGenesis()
+	genesis.Accounts[2].TLSKeys = two
+	if _, state, err := ValidateGenesis(genesis); err != nil || !slices.Equal(find(state.Accounts, "alice").TLSKeys, two) {
+		t.Errorf("a genesis with two TLS keys: %v, alice holds %v", err, find(state.Accounts, "alice").TLSKeys)
+	}
+	state := previousState
+	for _, step := range []struct {
+		description string
+		tlsKeys     []string
+		want        []string
+	}{
+		{"sets two", two, two},
+		{"replaces them with one", []string{next}, []string{next}},
+		{"clears them", []string{ClearField}, nil},
+	} {
+		update := signedUpdate(AccountUpdate{Name: "alice", TLSKeys: step.tlsKeys, BlockID: state.Height + 1})
+		block := ProposeBlock(testChain(), state, zeroHash, zeroHash, BlockContent{AccountUpdates: []AccountUpdate{update}})
+		var err error
+		if state, err = ApplyBlock(testChain(), state, zeroHash, block); err != nil || len(block.Content.AccountUpdates) != 1 || !slices.Equal(find(state.Accounts, "alice").TLSKeys, step.want) {
+			t.Fatalf("an update that %s: %v, alice holds %v, want %v", step.description, err, find(state.Accounts, "alice").TLSKeys, step.want)
+		}
 	}
 }

@@ -70,7 +70,7 @@ func ReassignmentID(reassignment Reassignment) string {
 
 // SignReassignmentVote is the approval of reassignment by the validator named validatorName, whose key
 // signer holds.
-func SignReassignmentVote(signer *signing.Signer, validatorName string, reassignment Reassignment) (ReassignmentVote, error) {
+func SignReassignmentVote(signer signing.Signer, validatorName string, reassignment Reassignment) (ReassignmentVote, error) {
 	signature, err := signer.SignBase64(signing.DomainReassignmentVote, reassignment.voteFields()...)
 	if err != nil {
 		return ReassignmentVote{}, err
@@ -80,7 +80,7 @@ func SignReassignmentVote(signer *signing.Signer, validatorName string, reassign
 
 // SignReassignmentNewKey returns a copy of reassignment with its new key's proof of possession, made by
 // newKeySigner, which holds that key.
-func SignReassignmentNewKey(newKeySigner *signing.Signer, reassignment Reassignment) (Reassignment, error) {
+func SignReassignmentNewKey(newKeySigner signing.Signer, reassignment Reassignment) (Reassignment, error) {
 	signature, err := newKeySigner.SignBase64(signing.DomainReassignmentNewKey, reassignment.voteFields()...)
 	reassignment.NewKeySignature = signature
 	return reassignment, err

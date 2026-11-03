@@ -129,9 +129,10 @@
  <div class="card">
    <h2>Description, delegation and addresses</h2>
    <p class="muted">Describe yourself, choose the validator your balance backs as stake, or publish where
-   your name is reached: your public address (a bank's public face, or your website) and up to 4 IP
-   addresses (a validator's are where the other validators send it their messages). What you publish is
-   public. Leave a field blank to keep it as it is, or write - to clear it.</p>
+   your name is reached: your public address (a bank's public face, or your website), up to 4 IP
+   addresses (a validator's are where the other validators send it their messages) and up to 2 TLS keys
+   (the SHA-256 of your web server's public key, in hex: the current one and the next). What you publish
+   is public. Leave a field blank to keep it as it is, or write - to clear it.</p>
    <form method="post" action="/update">
      <label for="description">description</label>
      <input type="text" id="description" name="description" placeholder="e.g. Alice's bakery">
@@ -141,6 +142,8 @@
      <input type="text" id="publicAddress" name="publicAddress" placeholder="e.g. https://bank-a.example">
      <label for="ipAddresses">IP addresses (separated by spaces; they replace the ones you published)</label>
      <input type="text" id="ipAddresses" name="ipAddresses" placeholder="e.g. 203.0.113.7 2001:db8::7">
+     <label for="tlsKeys">TLS keys (separated by spaces; they replace the ones you published)</label>
+     <input type="text" id="tlsKeys" name="tlsKeys" placeholder="64 hex digits each">
      <button type="submit">Update</button>
    </form>
  </div>

@@ -7,7 +7,8 @@
 # under the same number: the wallet refuses a request for another port, as a guard against DNS
 # rebinding.
 #
-#   docker run -p 127.0.0.1:8090:8090 -v wallet:/wallet go-ledger-ui -node https://bank-a.example -network village
+#   docker run -p 127.0.0.1:8090:8090 -v wallet:/wallet -v "$PWD/wallet.password":/wallet.password:ro \
+#       go-ledger-ui -node https://bank-a.example -network village -password-file /wallet.password
 
 # The builder: the Go version that go.mod's toolchain line names and CI uses.
 FROM docker.io/library/golang:1.27.3 AS builder
@@ -31,6 +32,7 @@ COPY --from=builder /out/go_ledger_ui /
 # folder's owner, so the wallet can write to it.
 COPY --from=builder --chown=65532:65532 /out/wallet /wallet
 USER 65532:65532
-# The wallet listens on every address of the container, so that a published port reaches it. Flags
+# The wallet listens on every address of the container, so that a published port reaches it; so does
+# any other container on its network, and the wallet refuses to start without -password-file. Flags
 # given to docker run come after these, and a flag given twice takes its last value.
 ENTRYPOINT ["/go_ledger_ui", "-listen", ":8090", "-wallet", "/wallet/wallet.json"]

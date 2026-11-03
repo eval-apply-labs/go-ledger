@@ -83,7 +83,7 @@ func gossipRoute(message Message) (routeName string, body any) {
 // block the caller), because Broadcast is called from the node's event loop. In tests it is also
 // implemented by the in-memory networks: bus (node_test.go), chaosNetwork and dropFirstProposalSend
 // (chaos_test.go), restartNetwork, powerCut and peeredRecorder (restart_test.go), recordingTransport
-// (catchup_test.go) and hyperBus (topology_test.go).
+// (catchup_test.go), hyperBus (topology_test.go), and engineBus (cmd/signer's engine_test.go).
 type Transport interface { // implemented by HTTPTransport (httptransport.go)
 	Broadcast(from string, message Message)
 }

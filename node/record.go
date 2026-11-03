@@ -40,11 +40,12 @@ const (
 
 // RecordEntry is the rolling entry of one committed block.
 type RecordEntry struct {
-	Height            int64
-	PreviousBlockHash [32]byte
-	SealedDigest      [32]byte                 // mixes the nonce; never the bare state digest
-	Proposal          consensus.SignedProposal // the proposal of the round that decided it
-	Commit            consensus.Commit
+	Height             int64
+	PreviousBlockHash  [32]byte
+	NextValidatorsHash [32]byte                 // the hash of the set that signs the next height, as the block names it
+	SealedDigest       [32]byte                 // mixes the nonce; never the bare state digest
+	Proposal           consensus.SignedProposal // the proposal of the round that decided it
+	Commit             consensus.Commit
 	// Validators is the signing set, written when its ValidatorsHash differs from the entry before's
 	// and in the first entry of each unit file; otherwise empty.
 	Validators      []consensus.Validator
@@ -116,20 +117,21 @@ func (node *Node) writeRecordEntry(previousState ledger.LedgerState, block ledge
 	}
 	validators := signingSet.Validators()
 	entry := RecordEntry{
-		Height:            block.Height,
-		PreviousBlockHash: block.PreviousBlockHash,
-		SealedDigest:      ledger.SealedDigestOf(block.Nonce, block.StateDigest, ledger.ContentHash(block.Content)),
-		Proposal:          proposal,
-		Commit:            commit,
-		Validators:        validators,
-		KeepUntilHeight:   block.Height + previousState.Parameters.RetainBlocks,
+		Height:             block.Height,
+		PreviousBlockHash:  block.PreviousBlockHash,
+		NextValidatorsHash: block.NextValidatorsHash,
+		SealedDigest:       ledger.SealedDigestOf(block.Nonce, block.StateDigest, ledger.ContentHash(block.Content)),
+		Proposal:           proposal,
+		Commit:             commit,
+		Validators:         validators,
+		KeepUntilHeight:    block.Height + previousState.Parameters.RetainBlocks,
 	}
 	var before RecordEntry
 	if lastLine != nil && json.Unmarshal(lastLine, &before) == nil { // not the first entry of the unit
 		entry.KeepUntilHeight = max(entry.KeepUntilHeight, before.KeepUntilHeight)
 		// The block hash of the entry before covers the set that signed it: recomputed with this set,
 		// it comes out the same only if the set is the same.
-		if ledger.BlockHashOf(before.Height, before.PreviousBlockHash, ledger.ValidatorsHash(validators), before.SealedDigest) == before.Commit.BlockHash {
+		if ledger.BlockHashOf(before.Height, before.PreviousBlockHash, ledger.ValidatorsHash(validators), before.NextValidatorsHash, before.SealedDigest) == before.Commit.BlockHash {
 			entry.Validators = nil
 		}
 	}

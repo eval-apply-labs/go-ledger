@@ -30,7 +30,7 @@ import (
 
 func main() {
 	nodeListen := flag.String("listen", "127.0.0.1:8080", "node HTTP API address: an IP address and a port")
-	uiListen := flag.String("ui-listen", "127.0.0.1:8091", "wallet + admin UI address")
+	uiListen := flag.String("ui-listen", "127.0.0.1:8091", "wallet + admin UI address, a loopback IP address: the demo gives the wallet no password")
 	uiBinary := flag.String("ui", "bin/go_ledger_ui", "path to the wallet UI binary (blank to skip)")
 	network := flag.String("network", "village", "network name (the network id is made from it and the genesis)")
 	flag.Parse()
@@ -116,7 +116,7 @@ func main() {
 
 // demoNodeConfig is the founder node's config. Its pool and comment limits are the defaults that
 // cmd/server's load gives a node whose config file leaves them out (0 would mean no limit).
-func demoNodeConfig(chain ledger.Chain, genesisState ledger.LedgerState, founder *signing.Signer, snapshotPath string) node.Config {
+func demoNodeConfig(chain ledger.Chain, genesisState ledger.LedgerState, founder signing.Signer, snapshotPath string) node.Config {
 	return node.Config{
 		Chain:            chain,
 		Signer:           founder,

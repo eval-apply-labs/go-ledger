@@ -9,11 +9,12 @@ QUICKSTART_COMPOSE = $(COMPOSE) -f deploy/compose.yaml --env-file $(QUICKSTART)/
 
 .PHONY: build test demo clean images quickstart quickstart-clean
 
-# build compiles the node, the fetcher, the key generator, the demo launcher, and the wallet UI into
-# ./bin, each a static binary: the code uses only the standard library, so CGO_ENABLED=0 costs
-# nothing. (test keeps cgo, which the race detector needs.)
+# build compiles the node, the signer, the fetcher, the key generator, the demo launcher, and the
+# wallet UI into ./bin, each a static binary: the code uses only the standard library, so
+# CGO_ENABLED=0 costs nothing. (test keeps cgo, which the race detector needs.)
 build:
 	CGO_ENABLED=0 $(GO) build -o $(BIN)/server ./cmd/server
+	CGO_ENABLED=0 $(GO) build -o $(BIN)/signer ./cmd/signer
 	CGO_ENABLED=0 $(GO) build -o $(BIN)/fetcher ./cmd/fetcher
 	CGO_ENABLED=0 $(GO) build -o $(BIN)/keygen ./cmd/keygen
 	CGO_ENABLED=0 $(GO) build -o $(BIN)/demo ./cmd/demo
@@ -29,22 +30,23 @@ test:
 demo: build
 	$(BIN)/demo
 
-# images builds the container images: go-ledger, with the engine, the fetcher and keygen
+# images builds the container images: go-ledger, with the engine, the signer, the fetcher and keygen
 # (deploy/Dockerfile), and go-ledger-ui, the wallet (deploy/ui.Dockerfile).
 images:
 	$(CONTAINER) build -f deploy/Dockerfile -t go-ledger .
 	$(CONTAINER) build -f deploy/ui.Dockerfile -t go-ledger-ui .
 
-# quickstart starts four banks on this machine (deploy/compose.yaml). The first time, it writes their
-# keys, the genesis and the node configs into deploy/quickstart; later it starts the same network again.
+# quickstart starts four banks on this machine (deploy/compose.yaml), each with its signer and its
+# wallet. The first time, it writes their keys, sealed, the genesis, the configs and the signers'
+# client secrets into deploy/quickstart; later it starts the same network again.
 quickstart: images $(QUICKSTART)/network.env
 	$(QUICKSTART_COMPOSE) up -d
 
 $(QUICKSTART)/network.env:
 	$(GO) run ./cmd/quickstart -folder $(QUICKSTART)
 
-# quickstart-clean removes the quickstart network: its containers, its Docker network, its volumes
-# with the chain, and deploy/quickstart with the keys.
+# quickstart-clean removes the quickstart network: its containers, its Docker networks, its volumes
+# with the chain, and deploy/quickstart with the keys and the signers' logs.
 quickstart-clean:
 	if [ -f $(QUICKSTART)/network.env ]; then $(QUICKSTART_COMPOSE) down --volumes; fi
 	rm -rf $(QUICKSTART)

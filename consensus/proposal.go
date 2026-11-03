@@ -30,7 +30,7 @@ func (signedProposal SignedProposal) signFields() [][]byte {
 
 // SignProposal returns a copy of proposal signed by signer in the proposal domain, bound to the
 // signer's network.
-func SignProposal(signer *signing.Signer, proposal SignedProposal) (SignedProposal, error) {
+func SignProposal(signer signing.Signer, proposal SignedProposal) (SignedProposal, error) {
 	signature, err := signer.SignBase64(signing.DomainProposal, proposal.signFields()...)
 	if err != nil {
 		return proposal, err

@@ -6,55 +6,30 @@ package main
 // AES-256-GCM, so a copied/backed-up/stolen wallet.json is useless without the passphrase — the
 // dominant loss vector for a file that otherwise holds the key in plain base64. An EMPTY passphrase
 // keeps the plaintext form (exactly like ssh-keygen); a plaintext file keeps working and is sealed in
-// place as soon as a passphrase is available. Zero external dependencies: PBKDF2 comes from the
-// standard library (crypto/pbkdf2).
+// place as soon as a passphrase is available. The format is signing.KeyFile (signing/keyfile.go),
+// which the signer shares: this file finds the passphrase and makes the key on first use.
 
 import (
 	"bufio"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/pbkdf2"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/eval-apply-labs/go-ledger/signing"
 )
 
-// kdfIterations follows the OWASP recommendation for PBKDF2-HMAC-SHA256 (~2025). Stored in the
-// file, so it can be raised later without breaking existing wallets.
-const kdfIterations = 600_000
-
 // passphraseEnvironmentVariable lets scripts and tests supply the passphrase non-interactively.
 const passphraseEnvironmentVariable = "GOLEDGER_WALLET_PASSPHRASE"
-
-type keyFile struct {
-	PublicKey  string        `json:"publicKey"`                     // its public key, for display; checked on load
-	PrivateKey string        `json:"privateKey,omitempty"`          // the private key, plaintext (empty passphrase)
-	Encrypted  *encryptedKey `json:"encryptedPrivateKey,omitempty"` // the private key, sealed
-}
-
-type encryptedKey struct {
-	KDF        string `json:"kdf"` // "pbkdf2-hmac-sha256"
-	Iterations int    `json:"iterations"`
-	Salt       string `json:"salt"`       // base64
-	Nonce      string `json:"nonce"`      // base64
-	Ciphertext string `json:"ciphertext"` // base64: AES-256-GCM over the private key
-}
 
 // loadOrCreateKey returns the wallet key pair, creating and saving a fresh one if no file exists
 // yet (asking whether to protect it with a passphrase). Only a MISSING file creates a new key — any
 // other failure (unreadable JSON, wrong passphrase) is surfaced instead of silently overwriting a
 // wallet that may hold funds.
 func loadOrCreateKey(path string) (publicKey, privateKey []byte, err error) {
-	data, err := os.ReadFile(path)
+	storedKey, err := signing.ReadKeyFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if publicKey, privateKey, err = signing.NetworkScheme().GenerateKey(); err != nil {
 			return nil, nil, err
@@ -63,30 +38,23 @@ func loadOrCreateKey(path string) (publicKey, privateKey []byte, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return publicKey, privateKey, saveKey(path, publicKey, privateKey, passphrase)
+		return publicKey, privateKey, signing.WriteKeyFile(path, publicKey, privateKey, passphrase)
 	}
 	if err != nil {
 		return nil, nil, err
 	}
-	var storedKey keyFile
-	if err := json.Unmarshal(data, &storedKey); err != nil {
-		return nil, nil, fmt.Errorf("unreadable wallet file %s: %w", path, err)
+	if storedKey.PrivateKey == "" && storedKey.Encrypted == nil {
+		return nil, nil, fmt.Errorf("wallet file %s holds a public key only, as a bank's wallet whose key is in its signer does: "+
+			"name the signer with -signer-url, -signer-client and -signer-secret-file", path)
 	}
-	switch {
-	case storedKey.Encrypted != nil:
-		passphrase, err := getPassphrase("wallet passphrase: ")
-		if err != nil {
+	passphrase := "" // a plaintext key needs none
+	if storedKey.Encrypted != nil {
+		if passphrase, err = getPassphrase("wallet passphrase: "); err != nil {
 			return nil, nil, err
 		}
-		if privateKey, err = storedKey.Encrypted.open(passphrase); err != nil {
-			return nil, nil, err
-		}
-	case storedKey.PrivateKey != "":
-		if privateKey, err = base64.StdEncoding.DecodeString(storedKey.PrivateKey); err != nil {
-			return nil, nil, err
-		}
-	default:
-		return nil, nil, fmt.Errorf("wallet file %s carries no private key", path)
+	}
+	if privateKey, err = storedKey.Unlock(passphrase); err != nil {
+		return nil, nil, fmt.Errorf("cannot unlock the wallet: %w", err)
 	}
 	// The account is the key the private key derives. The publicKey field is outside the seal, so one that
 	// disagrees (a tampered or corrupted file) is refused rather than shown as this wallet's account.
@@ -106,7 +74,7 @@ func loadOrCreateKey(path string) (publicKey, privateKey []byte, err error) {
 	if storedKey.Encrypted == nil {
 		passphrase, err := newPassphrase("wallet key is stored UNENCRYPTED — set a passphrase now (empty to keep): ")
 		if err == nil && passphrase != "" {
-			err = saveKey(path, publicKey, privateKey, passphrase)
+			err = signing.WriteKeyFile(path, publicKey, privateKey, passphrase)
 		}
 		if err != nil {
 			return nil, nil, err
@@ -115,105 +83,33 @@ func loadOrCreateKey(path string) (publicKey, privateKey []byte, err error) {
 	return publicKey, privateKey, nil
 }
 
-// saveKey writes the key pair: sealed under the passphrase, or plaintext if it is empty. It may
-// replace a funded wallet's only copy, so the write is crash-atomic: a synced temp file (mode 0600)
-// renamed over the old one. A path that is a symlink is followed, so the file it points to is the one
-// replaced: renaming over the link itself would leave a plaintext key there.
-func saveKey(path string, publicKey, privateKey []byte, passphrase string) error {
-	storedKey := keyFile{PublicKey: base64.StdEncoding.EncodeToString(publicKey)}
-	if passphrase == "" {
-		storedKey.PrivateKey = base64.StdEncoding.EncodeToString(privateKey)
-	} else {
-		sealed, err := sealPrivateKey(privateKey, passphrase)
-		if err != nil {
-			return err
-		}
-		storedKey.Encrypted = sealed
+// readSignerClient reads what a bank's wallet whose key is in the signer program needs (spec §2.7): the
+// bank's public key, from the wallet file at path, and the secret of the client it asks the signer as.
+// The wallet file holds the public key only, {"publicKey": "<base64>"}, the key the engine's config
+// gives: the wallet checks every answer of the signer under it, so it comes from the bank, never from
+// the signer. A file that holds a private key is refused: a wallet signs with its own key or through the
+// signer, not both. A missing file is an error, never a new key.
+func readSignerClient(path string, settings signerSettings) (publicKey, secret []byte, err error) {
+	if settings.url == "" || settings.client == "" || settings.secretFile == "" {
+		return nil, nil, errors.New("-signer-url, -signer-client and -signer-secret-file go together: where the signer listens, " +
+			"the client name its config gives this wallet, and that client's secret file")
 	}
-	data, err := json.MarshalIndent(storedKey, "", "  ")
+	storedKey, err := signing.ReadKeyFile(path)
 	if err != nil {
-		return err
+		return nil, nil, fmt.Errorf("with -signer-url, the wallet file must hold the bank's public key, as {\"publicKey\": \"<base64>\"}: %w", err)
 	}
-	if target, err := filepath.EvalSymlinks(path); err == nil {
-		path = target
+	if storedKey.PrivateKey != "" || storedKey.Encrypted != nil {
+		return nil, nil, fmt.Errorf("wallet file %s holds a private key, and -signer-url names a signer: a wallet signs with its own key or through the signer, not both. "+
+			"A bank's wallet file for its signer holds the bank's public key only", path)
 	}
-	temporaryFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*") // created 0600
-	if err != nil {
-		return err
+	if err := signing.ValidatePublicKeyBase64(signing.NetworkScheme(), storedKey.PublicKey); err != nil {
+		return nil, nil, fmt.Errorf("wallet file %s: its publicKey is not a public key of the network's scheme: %w", path, err)
 	}
-	defer os.Remove(temporaryFile.Name()) // nothing left to remove once renamed
-	_, err = temporaryFile.Write(data)
-	if err == nil {
-		err = temporaryFile.Sync()
+	if secret, err = signing.ReadSecretFile(settings.secretFile); err != nil {
+		return nil, nil, fmt.Errorf("-signer-secret-file: %w", err)
 	}
-	if closeErr := temporaryFile.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(temporaryFile.Name(), path)
-}
-
-func sealPrivateKey(privateKey []byte, passphrase string) (*encryptedKey, error) {
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, err
-	}
-	aesGCM, err := gcmFor(passphrase, salt, kdfIterations)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, aesGCM.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return &encryptedKey{
-		KDF:        "pbkdf2-hmac-sha256",
-		Iterations: kdfIterations,
-		Salt:       base64.StdEncoding.EncodeToString(salt),
-		Nonce:      base64.StdEncoding.EncodeToString(nonce),
-		Ciphertext: base64.StdEncoding.EncodeToString(aesGCM.Seal(nil, nonce, privateKey, nil)),
-	}, nil
-}
-
-func (sealedKey *encryptedKey) open(passphrase string) ([]byte, error) {
-	if sealedKey.KDF != "pbkdf2-hmac-sha256" || sealedKey.Iterations < 1 {
-		return nil, fmt.Errorf("unsupported wallet key encryption %q", sealedKey.KDF)
-	}
-	salt, err := base64.StdEncoding.DecodeString(sealedKey.Salt)
-	if err != nil {
-		return nil, err
-	}
-	nonce, err := base64.StdEncoding.DecodeString(sealedKey.Nonce)
-	if err != nil {
-		return nil, err
-	}
-	ciphertext, err := base64.StdEncoding.DecodeString(sealedKey.Ciphertext)
-	if err != nil {
-		return nil, err
-	}
-	aesGCM, err := gcmFor(passphrase, salt, sealedKey.Iterations)
-	if err != nil {
-		return nil, err
-	}
-	privateKey, err := aesGCM.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, errors.New("cannot unlock the wallet: wrong passphrase (or a corrupted key file)")
-	}
-	return privateKey, nil
-}
-
-func gcmFor(passphrase string, salt []byte, iterations int) (cipher.AEAD, error) {
-	derivedKey, err := pbkdf2.Key(sha256.New, passphrase, salt, iterations, 32)
-	if err != nil {
-		return nil, err
-	}
-	blockCipher, err := aes.NewCipher(derivedKey)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(blockCipher)
+	publicKey, _ = base64.StdEncoding.DecodeString(storedKey.PublicKey) // valid, so it decodes
+	return publicKey, secret, nil
 }
 
 // ---- passphrase acquisition ----

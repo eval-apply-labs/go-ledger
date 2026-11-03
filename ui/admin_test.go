@@ -32,7 +32,7 @@ type governanceNode struct {
 	reportedHeight  int64  // when a test sets it, the height in progress its /hdls/status reports instead: a lie
 	checkpointFails int    // when a test sets it, the error status /hdls/checkpoint answers with, and no checkpoint
 	accounts        []ledger.Account
-	validators      []*signing.Signer
+	validators      []signing.Signer
 	pending         []node.ReassignmentView
 	posts           []recordedPost
 	checkpointReads int // how many times a wallet read its checkpoint
@@ -54,7 +54,7 @@ const governanceSequence = 4
 
 func newGovernanceNode(t *testing.T) *governanceNode {
 	t.Helper()
-	testNode := &governanceNode{networkID: testNetworkID, height: 9, validators: []*signing.Signer{testNodeSigner(t)}}
+	testNode := &governanceNode{networkID: testNetworkID, height: 9, validators: []signing.Signer{testNodeSigner(t)}}
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/hdls/checkpoint", func(responseWriter http.ResponseWriter, request *http.Request) {
 		testNode.mutex.Lock()
@@ -109,7 +109,7 @@ func newGovernanceNode(t *testing.T) *governanceNode {
 
 // setState gives the node its validators (power 1 each; nil keeps the one it started with) and accounts,
 // with an account at zero for each validator they leave out.
-func (testNode *governanceNode) setState(validators []*signing.Signer, accounts ...ledger.Account) {
+func (testNode *governanceNode) setState(validators []signing.Signer, accounts ...ledger.Account) {
 	testNode.mutex.Lock()
 	defer testNode.mutex.Unlock()
 	if validators != nil {
@@ -120,20 +120,20 @@ func (testNode *governanceNode) setState(validators []*signing.Signer, accounts 
 
 // nameOf is a test signer's name, derived from its key: "v-" and the first 12 hex digits of the key's
 // SHA-256.
-func nameOf(signer *signing.Signer) string {
+func nameOf(signer signing.Signer) string {
 	keyHash := sha256.Sum256(signer.PublicKey())
 	return "v-" + hex.EncodeToString(keyHash[:6])
 }
 
 // accountOf is the account of a test signer, named by nameOf, with the balance.
-func accountOf(signer *signing.Signer, amount string) ledger.Account {
+func accountOf(signer signing.Signer, amount string) ledger.Account {
 	parsed, _ := ledger.ParseAmount(amount)
 	return ledger.Account{Name: nameOf(signer), PublicKey: signer.PublicKeyBase64(), Amount: parsed}
 }
 
 // withValidatorAccounts is the accounts, plus an account at zero for each validator they leave out (a
 // validator's seat takes its key from its account), in name order as the ledger keeps them.
-func withValidatorAccounts(validators []*signing.Signer, accounts []ledger.Account) []ledger.Account {
+func withValidatorAccounts(validators []signing.Signer, accounts []ledger.Account) []ledger.Account {
 	all := append([]ledger.Account(nil), accounts...)
 	for _, validator := range validators {
 		if !slices.ContainsFunc(all, func(account ledger.Account) bool { return account.Name == nameOf(validator) }) {
@@ -147,12 +147,12 @@ func withValidatorAccounts(validators []*signing.Signer, accounts []ledger.Accou
 // signedCheckpoint is the checkpoint a network of these validators (power 1 each, named by nameOf)
 // serves for the accounts, with an account for each validator, at governanceNode's parameters: every
 // validator precommitted the block at height 9 that resulted in that state.
-func signedCheckpoint(validators []*signing.Signer, accounts []ledger.Account) node.Checkpoint {
+func signedCheckpoint(validators []signing.Signer, accounts []ledger.Account) node.Checkpoint {
 	return signedCheckpointAt(9, validators, accounts)
 }
 
 // signedCheckpointAt is signedCheckpoint for the block at height.
-func signedCheckpointAt(height int64, validators []*signing.Signer, accounts []ledger.Account) node.Checkpoint {
+func signedCheckpointAt(height int64, validators []signing.Signer, accounts []ledger.Account) node.Checkpoint {
 	checkpoint := node.Checkpoint{State: ledger.LedgerState{Accounts: withValidatorAccounts(validators, accounts),
 		Parameters: governanceParameters, GovernanceSequence: governanceSequence, Height: height}}
 	for _, validator := range validators {
@@ -164,7 +164,7 @@ func signedCheckpointAt(height int64, validators []*signing.Signer, accounts []l
 
 // signedBy is checkpoint with the header of a block at its state's height signed by the validators it
 // carries, and a commit of every one of the signers given (named by nameOf) over that block's hash.
-func signedBy(checkpoint node.Checkpoint, signers []*signing.Signer) node.Checkpoint {
+func signedBy(checkpoint node.Checkpoint, signers []signing.Signer) node.Checkpoint {
 	height := checkpoint.State.Height
 	checkpoint.LastBlock = ledger.BlockHeader{Height: height, ValidatorsHash: ledger.ValidatorsHash(checkpoint.Validators)}
 	checkpoint.Commit = consensus.Commit{Height: height, BlockHash: checkpoint.LastBlock.BlockHash(checkpoint.State.Digest())}
@@ -200,9 +200,9 @@ func TestReassignmentReviewShowsTargetAndSendsNothing(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	testNode.pending = []node.ReassignmentView{{Name: "coop", PreviousAmount: "7", NewAmount: "8"}}
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet), testNodeSigner(t), testNodeSigner(t)},
+	testNode.setState([]signing.Signer{walletSigner(t, wallet), testNodeSigner(t), testNodeSigner(t)},
 		ledger.Account{Name: "coop", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(7, 1)})
-	walletUI := routes(wallet, "127.0.0.1:8090")
+	walletUI := routes(wallet, "127.0.0.1:8090", "")
 	post := func(form url.Values) *httptest.ResponseRecorder {
 		request := httptest.NewRequest("POST", "http://127.0.0.1:8090/admin/reassignment", strings.NewReader(form.Encode()))
 		request.Header.Set("Origin", "http://127.0.0.1:8090")
@@ -236,7 +236,7 @@ func TestReassignmentVotesAreCollectedOffNode(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	secondValidator, thirdValidator, outsider := testNodeSigner(t), testNodeSigner(t), testNodeSigner(t)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet), secondValidator, thirdValidator},
+	testNode.setState([]signing.Signer{walletSigner(t, wallet), secondValidator, thirdValidator},
 		ledger.Account{Name: "target", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(100, 1)})
 
 	draft, err := wallet.DraftReassignment(verified(t, wallet), nameActionForm{Name: "target", NewAmount: "0"})
@@ -257,7 +257,7 @@ func TestReassignmentVotesAreCollectedOffNode(t *testing.T) {
 			ledger.Reassignment{Name: "target", PreviousAmount: big.NewRat(100, 1), NewAmount: new(big.Rat), Sequence: governanceSequence}, signed.Votes[0]) {
 		t.Fatalf("the signed vote %s is not this wallet's vote, under its name, for the drafted values (%v)", ownVote, err)
 	}
-	voteBy := func(signer *signing.Signer, newAmount *big.Rat) string {
+	voteBy := func(signer signing.Signer, newAmount *big.Rat) string {
 		action := ledger.Reassignment{Name: signed.Name, PreviousAmount: signed.PreviousAmount, NewAmount: newAmount, Sequence: signed.Sequence}
 		vote, _ := ledger.SignReassignmentVote(signer, nameOf(signer), action)
 		action.Votes = []ledger.ReassignmentVote{vote}
@@ -292,7 +292,7 @@ func TestParameterVotesAreCollectedOffNode(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	secondValidator, thirdValidator := testNodeSigner(t), testNodeSigner(t)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet), secondValidator, thirdValidator})
+	testNode.setState([]signing.Signer{walletSigner(t, wallet), secondValidator, thirdValidator})
 
 	draft, err := wallet.DraftParameters(verified(t, wallet), parameterForm{TransactionCost: "0.2"})
 	if err != nil {
@@ -310,7 +310,7 @@ func TestParameterVotesAreCollectedOffNode(t *testing.T) {
 	if err := json.Unmarshal([]byte(ownVote), &signed); err != nil {
 		t.Fatal(err)
 	}
-	voteBy := func(signer *signing.Signer) string {
+	voteBy := func(signer signing.Signer) string {
 		vote, _ := ledger.SignParameterVote(signer, nameOf(signer), signed.NewParameters, signed.PreviousParametersDigest, signed.Sequence)
 		change := signed
 		change.Votes = []ledger.ParameterVote{vote}
@@ -338,7 +338,7 @@ func TestParameterVotesForAMovedSequenceNameTheirCause(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	signer := walletSigner(t, wallet)
-	testNode.setState([]*signing.Signer{signer})
+	testNode.setState([]signing.Signer{signer})
 
 	newParameters := governanceParameters
 	newParameters.TransactionCost = big.NewRat(1, 5)
@@ -364,7 +364,7 @@ func TestParameterVotesForAMovedSequenceNameTheirCause(t *testing.T) {
 func TestParameterTimingRefusalIsNeutral(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet)})
+	testNode.setState([]signing.Signer{walletSigner(t, wallet)})
 	_, err := wallet.DraftParameters(verified(t, wallet), parameterForm{StepTimeoutMs: "1"})
 	if err == nil || strings.Contains(err.Error(), "too short") || !strings.Contains(err.Error(), "step timeout 1 ms") {
 		t.Errorf("refusing a 1 ms step timeout: %v; want a neutral message naming the profile", err)
@@ -376,7 +376,7 @@ func TestParameterTimingRefusalIsNeutral(t *testing.T) {
 func TestSoleValidatorVoteIsSubmittedAtOnce(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet)}, ledger.Account{Name: "target", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(5, 1)})
+	testNode.setState([]signing.Signer{walletSigner(t, wallet)}, ledger.Account{Name: "target", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(5, 1)})
 
 	draft, err := wallet.DraftReassignment(verified(t, wallet), nameActionForm{Name: "target", NewAmount: "6"})
 	if err != nil {
@@ -401,7 +401,7 @@ func TestSoleValidatorVoteIsSubmittedAtOnce(t *testing.T) {
 func TestParameterDraftCarriesTheTenParameters(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet)})
+	testNode.setState([]signing.Signer{walletSigner(t, wallet)})
 
 	draft, err := wallet.DraftParameters(verified(t, wallet), parameterForm{
 		TransactionCost: "0.2", BlockIntervalMs: "600", StepTimeoutMs: "2500", MaxPeers: "7", MaxMessageBytes: "0",
@@ -443,7 +443,7 @@ func TestParameterDraftCarriesTheTenParameters(t *testing.T) {
 func TestParameterDraftIsSignedOnlyWhileItFitsTheState(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet)})
+	testNode.setState([]signing.Signer{walletSigner(t, wallet)})
 	draft, err := wallet.DraftParameters(verified(t, wallet), parameterForm{TransactionCost: "0.2"})
 	if err != nil {
 		t.Fatal(err)
@@ -490,7 +490,7 @@ func TestGovernanceViewRefusesAFailedAnswer(t *testing.T) {
 func TestReassignmentDraftRefusesABalanceAboveTheCap(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet)}, ledger.Account{Name: "target", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(5, 1)},
+	testNode.setState([]signing.Signer{walletSigner(t, wallet)}, ledger.Account{Name: "target", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(5, 1)},
 		ledger.Account{Name: "rich", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(20_000_000, 1)}) // above the default cap of 10,000,000
 	if _, err := wallet.DraftReassignment(verified(t, wallet), nameActionForm{Name: "target", NewAmount: "10000000.00000001"}); err == nil || !strings.Contains(err.Error(), "largest balance") {
 		t.Errorf("a draft raising a balance above the cap was not refused: %v", err)
@@ -515,7 +515,7 @@ func TestNameActionDraftCollectsTheNewKeyProof(t *testing.T) {
 	bank, newWallet := newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL)
 	thief := testNodeSigner(t)
 	testNode.pending = []node.ReassignmentView{{Name: "bob", NewKey: thief.PublicKeyBase64(), Freeze: false, Unfreeze: true}}
-	testNode.setState([]*signing.Signer{walletSigner(t, bank)}, ledger.Account{Name: "alice", PublicKey: thief.PublicKeyBase64(), Amount: big.NewRat(5, 1),
+	testNode.setState([]signing.Signer{walletSigner(t, bank)}, ledger.Account{Name: "alice", PublicKey: thief.PublicKeyBase64(), Amount: big.NewRat(5, 1),
 		Bank: nameOf(walletSigner(t, bank)), Frozen: true})
 
 	draftPage := html.UnescapeString(submitForm(bank, "/admin/reassignment", url.Values{"name": {"alice"}, "newKey": {newWallet.PublicKey()}, "freeze": {"unfreeze"}}).Body.String())
@@ -564,7 +564,7 @@ func TestNameActionDraftCollectsTheNewKeyProof(t *testing.T) {
 func TestNameActionPagesSayWhoSignsNext(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	bank, newWallet := newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, bank), testNodeSigner(t)},
+	testNode.setState([]signing.Signer{walletSigner(t, bank), testNodeSigner(t)},
 		ledger.Account{Name: "shop", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: new(big.Rat)})
 	pageOf := func(wallet *Wallet, path string, form url.Values) string {
 		return html.UnescapeString(submitForm(wallet, path, form).Body.String())
@@ -593,7 +593,7 @@ func TestNameActionVotesOnlyOnAProofThatVerifies(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	bank, newWallet := newTestWallet(t, testNode.baseURL), newTestWallet(t, testNode.baseURL)
 	secondValidator, thirdValidator := testNodeSigner(t), testNodeSigner(t)
-	testNode.setState([]*signing.Signer{walletSigner(t, bank), secondValidator, thirdValidator},
+	testNode.setState([]signing.Signer{walletSigner(t, bank), secondValidator, thirdValidator},
 		ledger.Account{Name: "shop", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: new(big.Rat)})
 	draft, err := bank.DraftReassignment(verified(t, bank), nameActionForm{Name: "shop", NewKey: newWallet.PublicKey()})
 	if err != nil {
@@ -613,7 +613,7 @@ func TestNameActionVotesOnlyOnAProofThatVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	voteOf := func(validator *signing.Signer, proof ledger.Reassignment) string {
+	voteOf := func(validator signing.Signer, proof ledger.Reassignment) string {
 		vote, _ := ledger.SignReassignmentVote(validator, nameOf(validator), action)
 		proof.Votes = []ledger.ReassignmentVote{vote}
 		return marshal(proof)
@@ -642,7 +642,7 @@ func TestNameActionWithoutAmountsIsSignedAndSubmitted(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	secondValidator, thirdValidator := testNodeSigner(t), testNodeSigner(t)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet), secondValidator, thirdValidator},
+	testNode.setState([]signing.Signer{walletSigner(t, wallet), secondValidator, thirdValidator},
 		ledger.Account{Name: "thief", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(100, 1)})
 	draft, err := wallet.DraftReassignment(verified(t, wallet), nameActionForm{Name: "thief", Bank: ledger.ClearField, Freeze: "freeze"})
 	if err != nil {
@@ -654,7 +654,7 @@ func TestNameActionWithoutAmountsIsSignedAndSubmitted(t *testing.T) {
 	}
 	action := ledger.Reassignment{Name: "thief", Bank: ledger.ClearField, Freeze: true, Sequence: governanceSequence}
 	texts := ownVote.Certificate
-	for _, validator := range []*signing.Signer{secondValidator, thirdValidator} {
+	for _, validator := range []signing.Signer{secondValidator, thirdValidator} {
 		vote, _ := ledger.SignReassignmentVote(validator, nameOf(validator), action)
 		signed := action
 		signed.Votes = []ledger.ReassignmentVote{vote}

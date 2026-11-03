@@ -14,14 +14,14 @@ var scheme = signing.NetworkScheme()
 
 // nameOf is a test validator's name, derived from its key so that a test can pass signers around and
 // still name them: "v-" and the first 12 hex digits of the key's SHA-256.
-func nameOf(signer *signing.Signer) string {
+func nameOf(signer signing.Signer) string {
 	keyHash := sha256.Sum256(signer.PublicKey())
 	return "v-" + hex.EncodeToString(keyHash[:6])
 }
 
-func makeValidators(t *testing.T, count int) ([]*signing.Signer, *ValidatorSet) {
+func makeValidators(t *testing.T, count int) ([]signing.Signer, *ValidatorSet) {
 	t.Helper()
-	signers := make([]*signing.Signer, count)
+	signers := make([]signing.Signer, count)
 	validators := make([]Validator, count)
 	for i := 0; i < count; i++ {
 		signer, err := signing.Generate(scheme, network)
@@ -35,7 +35,7 @@ func makeValidators(t *testing.T, count int) ([]*signing.Signer, *ValidatorSet) 
 }
 
 // weightedValidators is like makeValidators, with the given powers: signer i holds powers[i].
-func weightedValidators(t *testing.T, powers ...int64) ([]*signing.Signer, *ValidatorSet) {
+func weightedValidators(t *testing.T, powers ...int64) ([]signing.Signer, *ValidatorSet) {
 	t.Helper()
 	signers, _ := makeValidators(t, len(powers))
 	validators := make([]Validator, len(powers))
@@ -53,7 +53,7 @@ func digest(fillByte byte) [32]byte {
 	return blockDigest
 }
 
-func mustVote(t *testing.T, signer *signing.Signer, height int64, round int32, voteType VoteType, blockDigest [32]byte) Vote {
+func mustVote(t *testing.T, signer signing.Signer, height int64, round int32, voteType VoteType, blockDigest [32]byte) Vote {
 	t.Helper()
 	vote, err := SignVote(signer, Vote{Height: height, Round: round, Type: voteType, BlockHash: blockDigest, Validator: nameOf(signer)})
 	if err != nil {
@@ -327,7 +327,7 @@ func TestCertificateTallyCountsEachNameOnceUnderTheSetsKey(t *testing.T) {
 	signers, validatorSet := weightedValidators(t, 3, 3, 2, 1) // total 9, quorum 7
 	outsiders, _ := makeValidators(t, 1)
 	blockDigest := digest(0xAB)
-	precommitBy := func(signer *signing.Signer) Vote { return mustVote(t, signer, 1, 0, Precommit, blockDigest) }
+	precommitBy := func(signer signing.Signer) Vote { return mustVote(t, signer, 1, 0, Precommit, blockDigest) }
 	checks := 0
 	tally := NewCertificateTally(validatorSet)
 	add := func(vote Vote) bool {
@@ -365,7 +365,7 @@ func TestCommitWithOneBadVoteDoesNotVerify(t *testing.T) {
 	signers, validatorSet := weightedValidators(t, 3, 3, 2, 1) // total 9, quorum 7
 	outsiders, _ := makeValidators(t, 1)
 	blockDigest := digest(0xAB)
-	precommitBy := func(signer *signing.Signer) Vote { return mustVote(t, signer, 1, 0, Precommit, blockDigest) }
+	precommitBy := func(signer signing.Signer) Vote { return mustVote(t, signer, 1, 0, Precommit, blockDigest) }
 	first, second, third, fourth := precommitBy(signers[0]), precommitBy(signers[1]), precommitBy(signers[2]), precommitBy(signers[3])
 	inAnotherName, _ := SignVote(outsiders[0], Vote{Height: 1, Round: 0, Type: Precommit, BlockHash: blockDigest, Validator: nameOf(signers[3])})
 	for name, testCase := range map[string]struct {

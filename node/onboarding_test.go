@@ -28,7 +28,7 @@ func validatorsOf(names []string, powers ...int64) []consensus.Validator {
 
 // buildCommit assembles a ⅔ precommit certificate for a block hash: one precommit naming each validator
 // listed, signed by signers[name], or by testSigner(name) for a name signers leaves out.
-func buildCommit(t *testing.T, height int64, blockHash [32]byte, validators []consensus.Validator, signers map[string]*signing.Signer) consensus.Commit {
+func buildCommit(t *testing.T, height int64, blockHash [32]byte, validators []consensus.Validator, signers map[string]signing.Signer) consensus.Commit {
 	t.Helper()
 	var votes []consensus.Vote
 	for _, validator := range validators {
@@ -49,11 +49,18 @@ func buildCommit(t *testing.T, height int64, blockHash [32]byte, validators []co
 // checkpointOf is the checkpoint of a state committed at height, so the state at that height, with the
 // header of a block at that height signed by the validators listed: its commit is signed by every one
 // of them (see buildCommit), over the block hash the header and the state's digest give, and it carries
-// the list as the signing set. The state's accounts are taken as given, in their order.
-func checkpointOf(t *testing.T, height int64, state ledger.LedgerState, validators []consensus.Validator, signers map[string]*signing.Signer) Checkpoint {
+// the list as the signing set. The state's accounts are taken as given, in their order. The block's
+// previous block hash is zero, a test chain's genesis hash (see checkpointAfter).
+func checkpointOf(t *testing.T, height int64, state ledger.LedgerState, validators []consensus.Validator, signers map[string]signing.Signer) Checkpoint {
+	t.Helper()
+	return checkpointAfter(t, [32]byte{}, height, state, validators, signers)
+}
+
+// checkpointAfter is checkpointOf for a block that builds on the block whose hash is previousBlockHash.
+func checkpointAfter(t *testing.T, previousBlockHash [32]byte, height int64, state ledger.LedgerState, validators []consensus.Validator, signers map[string]signing.Signer) Checkpoint {
 	t.Helper()
 	state.Height = height
-	header := ledger.BlockHeader{Height: height, ValidatorsHash: ledger.ValidatorsHash(validators)}
+	header := ledger.BlockHeader{Height: height, PreviousBlockHash: previousBlockHash, ValidatorsHash: ledger.ValidatorsHash(validators)}
 	return Checkpoint{State: state, LastBlock: header, Commit: buildCommit(t, height, header.BlockHash(state.Digest()), validators, signers), Validators: validators}
 }
 
@@ -112,7 +119,7 @@ func TestCheckpointGivingRealNamesForeignKeysIsRefused(t *testing.T) {
 		stolen.Accounts[i].Amount = rational("0")
 	}
 	forgedSet := validatorsOf(names)
-	forgerSigners := map[string]*signing.Signer{}
+	forgerSigners := map[string]signing.Signer{}
 	for i, name := range names {
 		forgerSigners[name] = testSigner("forger-key-" + name)
 		forgedSet[i].PublicKey = forgerSigners[name].PublicKeyBase64()
@@ -131,12 +138,50 @@ func TestCheckpointGivingRealNamesForeignKeysIsRefused(t *testing.T) {
 	}
 	delete(forgerSigners, names[0])
 	if joiner.verifyCheckpoint(checkpointOf(t, 5, stolen, oneReal, forgerSigners), anchor) {
-		t.Fatal("one real validator of three vouched for a checkpoint: more than a third must")
+		t.Fatal("one real validator of three vouched for a checkpoint: more than two thirds must")
 	}
 
 	genuine := checkpointOf(t, 5, stolen, validatorsOf(names), nil)
 	if !joiner.verifyCheckpoint(genuine, anchor) {
 		t.Fatal("the same state, signed by the real validators under their own keys, was refused")
+	}
+}
+
+// A checkpoint must be signed by names holding more than ⅔ of the power of the frame the node trusts,
+// under that frame's keys (Phase 4 spec §4.2); more than ⅓ was enough before. A history forged with the
+// keys of two of three validators, whose third seat the forger fills with a key of its own, is a quorum
+// of the set it carries and holds exactly ⅔ of the trusted frame, which is refused; with four, two real
+// validators hold half, which is refused too. The real set signing the same state is trusted.
+func TestCheckpointSignedByTwoThirdsOfTheFrameIsRefused(t *testing.T) {
+	for _, validatorCount := range []int{3, 4} {
+		names := validatorNames(validatorCount)
+		var accounts []ledger.Account
+		for _, name := range names {
+			accounts = append(accounts, testAccount(name, "100"))
+		}
+		genesis := testGenesis(append(accounts, testAccount("forger", "0")), time.Second, 0)
+		joiner := New(testConfig(staticChain(names...), "joiner", genesis), NewHTTPTransport(nil))
+		trustedFrame := joiner.view.Load().validators
+
+		stolen := genesis
+		stolen.Accounts = append([]ledger.Account(nil), genesis.Accounts...)
+		stolen.Accounts[0].Amount = rational("100") // forger
+		twoReal := validatorsOf(names)              // the first two under their own keys, the others the forger's
+		forgerSigners := map[string]signing.Signer{}
+		for i := 2; i < len(names); i++ {
+			forgerSigners[names[i]] = testSigner("forger-key-" + names[i])
+			twoReal[i].PublicKey = forgerSigners[names[i]].PublicKeyBase64()
+		}
+		forged := checkpointOf(t, 5, stolen, twoReal, forgerSigners)
+		if !joiner.selfConsistent(forged) {
+			t.Fatal("premise: the forged checkpoint's commit is a quorum of the set it carries")
+		}
+		if joiner.verifyCheckpoint(forged, trustedFrame) {
+			t.Errorf("with %d validators, two real ones vouched for a checkpoint: more than two thirds of the frame must", validatorCount)
+		}
+		if !joiner.verifyCheckpoint(checkpointOf(t, 5, stolen, validatorsOf(names), nil), trustedFrame) {
+			t.Errorf("with %d validators, the same state signed by the real set was refused", validatorCount)
+		}
 	}
 }
 
@@ -168,7 +213,7 @@ func TestAnchorChecksOneVotePerName(t *testing.T) {
 	joiner := New(testConfig(chain, "joiner", genesis), NewHTTPTransport(nil))
 
 	// The real set signs, except that validator-0's vote is the impostor's; then 20 copies of that vote.
-	checkpoint := checkpointOf(t, 5, genesis, validatorsOf(names), map[string]*signing.Signer{names[0]: testSigner("impostor")})
+	checkpoint := checkpointOf(t, 5, genesis, validatorsOf(names), map[string]signing.Signer{names[0]: testSigner("impostor")})
 	for range 20 {
 		checkpoint.Commit.Votes = append(checkpoint.Commit.Votes, checkpoint.Commit.Votes[0])
 	}
@@ -207,6 +252,7 @@ func TestCheckpointRecomputesTheBlockHash(t *testing.T) {
 		"a parameter":                      func(checkpoint *Checkpoint) { checkpoint.State.Parameters.TransactionCost = rational("0.2") },
 		"the state's height":               func(checkpoint *Checkpoint) { checkpoint.State.Height++ },
 		"the header's previous block hash": func(checkpoint *Checkpoint) { checkpoint.LastBlock.PreviousBlockHash[0]++ },
+		"the header's next set":            func(checkpoint *Checkpoint) { checkpoint.LastBlock.NextValidatorsHash[0]++ },
 		"the header's nonce":               func(checkpoint *Checkpoint) { checkpoint.LastBlock.Nonce[0]++ },
 		"the header's content hash":        func(checkpoint *Checkpoint) { checkpoint.LastBlock.ContentHash[0]++ },
 		"a signer's power": func(checkpoint *Checkpoint) {

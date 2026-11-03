@@ -179,9 +179,11 @@ func TestRecordNeverHoldsTheBareStateDigest(t *testing.T) {
 }
 
 // Anyone can check the record from its own fields: each entry's block hash, recomputed from its
-// height, previous block hash and sealed digest with the latest set the record holds at or before it,
-// is the hash its proposal and commit sign; both verify under that set; and each entry names the block
-// hash of the one before. The set is written in the first entry and wherever it changes, and only there.
+// height, previous block hash, next validators hash and sealed digest with the latest set the record
+// holds at or before it, is the hash its proposal and commit sign; both verify under that set; each
+// entry names the block hash of the one before; and each entry's set is the one the entry before named
+// as the next (Phase 4 spec §4.3), here across the three blocks that changed it. The set is written in
+// the first entry and wherever it changes, and only there.
 func TestRecordChainChecksFromItsOwnFields(t *testing.T) {
 	run := runRecordedNode(t)
 	entries := rollingEntries(t, run.node)
@@ -193,7 +195,7 @@ func TestRecordChainChecksFromItsOwnFields(t *testing.T) {
 			setsWritten++
 		}
 		set := consensus.NewValidatorSet(validators)
-		blockHash := ledger.BlockHashOf(entry.Height, entry.PreviousBlockHash, ledger.ValidatorsHash(validators), entry.SealedDigest)
+		blockHash := ledger.BlockHashOf(entry.Height, entry.PreviousBlockHash, ledger.ValidatorsHash(validators), entry.NextValidatorsHash, entry.SealedDigest)
 		switch {
 		case blockHash != entry.Commit.BlockHash || blockHash != entry.Proposal.BlockHash:
 			t.Fatalf("the block hash of entry %d does not recompute from its fields", entry.Height)
@@ -205,6 +207,8 @@ func TestRecordChainChecksFromItsOwnFields(t *testing.T) {
 			t.Fatal("the first entry does not build on the genesis hash")
 		case i > 0 && entry.PreviousBlockHash != entries[i-1].Commit.BlockHash:
 			t.Fatalf("entry %d does not name the block hash of the entry before", entry.Height)
+		case i > 0 && ledger.ValidatorsHash(validators) != entries[i-1].NextValidatorsHash:
+			t.Fatalf("entry %d is signed by another set than the one the entry before named as the next", entry.Height)
 		}
 		setChanged := i == 0 || run.blocks[entry.Height].ValidatorsHash != run.blocks[entry.Height-1].ValidatorsHash
 		if (len(entry.Validators) > 0) != setChanged {
@@ -457,7 +461,8 @@ func TestRecordUnitsHoldAHundredAlignedHeights(t *testing.T) {
 			if (i == 0) != (len(entry.Validators) > 0) {
 				t.Fatalf("%s: entry %d carries the set: %v", name, entry.Height, len(entry.Validators) > 0)
 			}
-			if ledger.BlockHashOf(entry.Height, entry.PreviousBlockHash, ledger.ValidatorsHash(entries[0].Validators), entry.SealedDigest) != entry.Commit.BlockHash {
+			if ledger.BlockHashOf(entry.Height, entry.PreviousBlockHash, ledger.ValidatorsHash(entries[0].Validators), entry.NextValidatorsHash, entry.SealedDigest) !=
+				entry.Commit.BlockHash {
 				t.Fatalf("%s: the block hash of entry %d does not recompute with the unit's set", name, entry.Height)
 			}
 		}

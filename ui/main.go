@@ -7,10 +7,17 @@
 //
 //	go_ledger_ui -node http://127.0.0.1:8080 -network village -wallet wallet.json -listen 127.0.0.1:8090
 //
-// then open http://127.0.0.1:8090 in a browser.
+// then open http://127.0.0.1:8090 in a browser. A bank's wallet whose key is in the bank's signer
+// (cmd/signer) holds no key: it signs through the signer, and its wallet file holds the bank's public
+// key only. A wallet that listens beyond loopback asks for a password, the one in -password-file.
+//
+//	go_ledger_ui -node http://127.0.0.1:8080 -network village -wallet bank.json -listen :8090 \
+//	  -password-file wallet.password \
+//	  -signer-url http://172.28.71.254:7000 -signer-client desk -signer-secret-file desk.secret
 package main
 
 import (
+	"crypto/subtle"
 	"embed"
 	"errors"
 	"flag"
@@ -20,6 +27,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 
 	"github.com/eval-apply-labs/go-ledger/consensus"
 	"github.com/eval-apply-labs/go-ledger/ledger"
@@ -37,23 +46,83 @@ func main() {
 	network := flag.String("network", "village", "network name (the node's network id must start with it and a slash)")
 	keyfile := flag.String("wallet", "wallet.json", "wallet key file (created if absent)")
 	lookahead := flag.Int64("lookahead", 3, fmt.Sprintf("blocks ahead a payment or a freeze names, at most %d (raise if they miss their block)", node.MaxBlockIDLookahead-blockSlack))
+	// A bank's wallet whose key is in the signer program (spec §2.7) names it, and -wallet is then a file
+	// holding the bank's public key only.
+	signerURL := flag.String("signer-url", "", "a bank's wallet: the signer that holds the bank's key, such as http://172.28.71.254:7000; -wallet then holds the bank's public key only")
+	signerClient := flag.String("signer-client", "", "with -signer-url: the client name the signer's config gives this wallet, such as desk or admin")
+	signerSecretFile := flag.String("signer-secret-file", "", "with -signer-url: the file holding that client's secret, as keygen -secret prints it")
+	passwordFile := flag.String("password-file", "", "a file holding the password the wallet asks for, under any user name; required when -listen is not a loopback address")
 	flag.Parse()
 
-	wallet, err := LoadOrCreateWallet(*keyfile, *network, *nodeURL, *lookahead)
+	// Before the wallet file: a wallet that would refuse to start must not make a key first.
+	password, err := walletPassword(*listen, *passwordFile)
+	if err != nil {
+		log.Fatalf("wallet: %v", err)
+	}
+	wallet, err := loadWallet(*keyfile, *network, *nodeURL, *lookahead, signerSettings{url: *signerURL, client: *signerClient, secretFile: *signerSecretFile})
 	if err != nil {
 		log.Fatalf("wallet: %v", err)
 	}
 
 	log.Printf("go_ledger wallet on http://%s  (key %s…, node %s)", *listen, first(wallet.PublicKey(), 12), *nodeURL)
-	log.Fatal(http.ListenAndServe(*listen, routes(wallet, *listen)))
+	log.Fatal(http.ListenAndServe(*listen, routes(wallet, *listen, password)))
+}
+
+// walletPassword is the password the wallet asks for: the one in passwordFile, or none when there is
+// no file. A wallet that listens beyond loopback must have one: guard stops a browser's page, never a
+// program on the network, which sends whatever headers it likes, and the wallet signs for its key.
+func walletPassword(listen, passwordFile string) (string, error) {
+	if passwordFile == "" {
+		if !loopbackOnly(listen) {
+			return "", fmt.Errorf("-listen %s reaches beyond this machine: give the wallet a password with -password-file", listen)
+		}
+		return "", nil
+	}
+	data, err := os.ReadFile(passwordFile)
+	if err != nil {
+		return "", err
+	}
+	password := strings.TrimSpace(string(data))
+	if password == "" {
+		return "", fmt.Errorf("%s holds no password", passwordFile)
+	}
+	return password, nil
+}
+
+// loopbackOnly reports whether listen (a -listen address) is on loopback only: a loopback IP address.
+// An empty host, 0.0.0.0, any other address, and any host name can be reached from elsewhere, even
+// localhost, which the system's hosts file or DNS resolves.
+func loopbackOnly(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	hostIP := net.ParseIP(host)
+	return hostIP != nil && hostIP.IsLoopback()
+}
+
+// requirePassword lets through only a request carrying password as HTTP Basic auth, under any user
+// name. The browser asks for it once, and sends it with every request to the wallet after that.
+func requirePassword(password string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		_, given, _ := request.BasicAuth() // none gives "", never the password, which is not empty
+		if subtle.ConstantTimeCompare([]byte(given), []byte(password)) != 1 {
+			responseWriter.Header().Set("WWW-Authenticate", `Basic realm="go_ledger wallet", charset="UTF-8"`)
+			http.Error(responseWriter, "this wallet asks for its password", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(responseWriter, request)
+	})
 }
 
 type handler struct{ wallet *Wallet }
 
 // routes is the wallet's HTTP surface. Every route sits behind guard: the mutating ones auto-sign
 // with the local key, so a page the user merely visits must not be able to submit a payment, a freeze,
-// a name request or a governance vote (CSRF / drive-by / DNS rebinding).
-func routes(wallet *Wallet, listen string) http.Handler {
+// a name request or a governance vote (CSRF / drive-by / DNS rebinding). Behind guard, a password, when
+// there is one, stops a program that sends the headers guard wants. guard comes first, so a page of
+// another site gets guard's refusal, never a login box under its own host name.
+func routes(wallet *Wallet, listen, password string) http.Handler {
 	walletHandler := &handler{wallet: wallet}
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/", walletHandler.index)
@@ -65,7 +134,10 @@ func routes(wallet *Wallet, listen string) http.Handler {
 	serveMux.HandleFunc("/admin", walletHandler.admin)
 	serveMux.HandleFunc("/admin/parameter", walletHandler.proposeParameter)
 	serveMux.HandleFunc("/admin/reassignment", walletHandler.voteReassignment)
-	return guard(listen, serveMux)
+	if password == "" {
+		return guard(listen, serveMux)
+	}
+	return guard(listen, requirePassword(password, serveMux))
 }
 
 // guard refuses any request sameOrigin does not accept, and forbids framing the wallet's pages, so
@@ -227,7 +299,7 @@ func (walletHandler *handler) updateAccount(responseWriter http.ResponseWriter, 
 		return
 	}
 	update, err := walletHandler.wallet.UpdateAccount(request.FormValue("description"), request.FormValue("delegate"), request.FormValue("publicAddress"),
-		request.FormValue("ipAddresses"))
+		request.FormValue("ipAddresses"), request.FormValue("tlsKeys"))
 	if err != nil {
 		http.Redirect(responseWriter, request, "/?err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return

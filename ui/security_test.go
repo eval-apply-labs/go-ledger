@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -93,7 +94,7 @@ func TestOwnHost(t *testing.T) {
 // before touching the wallet. The routes carry no wallet here: if the guard ever let the request
 // through, the nil dereference would fail the test loudly.
 func TestMutatingHandlersAreGuarded(t *testing.T) {
-	walletUI := routes(nil, "127.0.0.1:8090")
+	walletUI := routes(nil, "127.0.0.1:8090", "")
 	for _, path := range []string{"/send", "/update", "/freeze", "/checkpoint", "/requests", "/admin/parameter", "/admin/reassignment"} {
 		request := httptest.NewRequest("POST", "http://127.0.0.1:8090"+path, strings.NewReader("a=b"))
 		request.Header.Set("Sec-Fetch-Site", "cross-site")
@@ -112,14 +113,14 @@ func TestMutatingHandlersAreGuarded(t *testing.T) {
 func TestDNSRebindingIsRefused(t *testing.T) {
 	node := testNodeSigner(t)
 	var paid atomic.Int32
-	nodeServer := fakeNode(t, []*signing.Signer{node}, nil, func(payment ledger.Payment) any {
+	nodeServer := fakeNode(t, []signing.Signer{node}, nil, func(payment ledger.Payment) any {
 		paid.Add(1)
 		receipt, _ := ledger.SignReceipt(node, nameOf(node), payment)
 		return receipt
 	})
 	walletServer := httptest.NewUnstartedServer(nil)
 	listen := walletServer.Listener.Addr().String() // what -listen 127.0.0.1:<port> serves
-	walletServer.Config.Handler = routes(newTestWallet(t, nodeServer.URL), listen)
+	walletServer.Config.Handler = routes(newTestWallet(t, nodeServer.URL), listen, "")
 	walletServer.Start()
 	defer walletServer.Close()
 	_, port, _ := net.SplitHostPort(listen)
@@ -169,7 +170,7 @@ func TestDNSRebindingIsRefused(t *testing.T) {
 
 // No other site may frame the wallet's pages and overlay their one-click signing buttons.
 func TestPagesDenyFraming(t *testing.T) {
-	walletUI := routes(newTestWallet(t, "http://127.0.0.1:0"), "127.0.0.1:8090")
+	walletUI := routes(newTestWallet(t, "http://127.0.0.1:0"), "127.0.0.1:8090", "")
 	for _, path := range []string{"/", "/requests", "/admin"} {
 		recorder := httptest.NewRecorder()
 		walletUI.ServeHTTP(recorder, httptest.NewRequest("GET", "http://127.0.0.1:8090"+path, nil))
@@ -184,7 +185,7 @@ func TestPagesDenyFraming(t *testing.T) {
 // fakeNode is a minimal node for the wallet to talk to: it reports a height and a state its
 // validators signed, holding the accounts, and answers /hdls/pay with whatever receipt makeReceipt
 // builds from the submitted payment, usually a ledger.Receipt.
-func fakeNode(t *testing.T, validators []*signing.Signer, accounts []ledger.Account, makeReceipt func(payment ledger.Payment) any) *httptest.Server {
+func fakeNode(t *testing.T, validators []signing.Signer, accounts []ledger.Account, makeReceipt func(payment ledger.Payment) any) *httptest.Server {
 	t.Helper()
 	serveMux := http.NewServeMux()
 	serveMux.HandleFunc("/hdls/status", func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -219,7 +220,7 @@ func newTestWallet(t *testing.T, nodeURL string) *Wallet {
 var testNetworkID = ledger.NetworkID("testnet", [32]byte{1})
 
 // walletSigner signs with the wallet's key for the test network, as a validator of a fake node.
-func walletSigner(t *testing.T, wallet *Wallet) *signing.Signer {
+func walletSigner(t *testing.T, wallet *Wallet) signing.Signer {
 	t.Helper()
 	signer, err := signing.NewSigner(signing.NetworkScheme(), testNetworkID, wallet.privateKey)
 	if err != nil {
@@ -228,7 +229,7 @@ func walletSigner(t *testing.T, wallet *Wallet) *signing.Signer {
 	return signer
 }
 
-func testNodeSigner(t *testing.T) *signing.Signer {
+func testNodeSigner(t *testing.T) signing.Signer {
 	t.Helper()
 	signer, err := signing.Generate(signing.NetworkScheme(), testNetworkID)
 	if err != nil {
@@ -240,7 +241,7 @@ func testNodeSigner(t *testing.T) *signing.Signer {
 // payThroughFakeNode has a test wallet, named "alice" on a fake node whose validators are given, pay
 // the shop 1, the node answering with makeReceipt's receipt, and reports whether the wallet verified
 // that receipt.
-func payThroughFakeNode(t *testing.T, validators []*signing.Signer, makeReceipt func(payment ledger.Payment) any) bool {
+func payThroughFakeNode(t *testing.T, validators []signing.Signer, makeReceipt func(payment ledger.Payment) any) bool {
 	t.Helper()
 	wallet := newTestWallet(t, "")
 	accounts := []ledger.Account{
@@ -259,7 +260,7 @@ func payThroughFakeNode(t *testing.T, validators []*signing.Signer, makeReceipt 
 // its name, and the wallet marks it verified.
 func TestReceiptFromValidatorVerifies(t *testing.T) {
 	node := testNodeSigner(t)
-	verified := payThroughFakeNode(t, []*signing.Signer{node}, func(payment ledger.Payment) any {
+	verified := payThroughFakeNode(t, []signing.Signer{node}, func(payment ledger.Payment) any {
 		receipt, err := ledger.SignReceipt(node, nameOf(node), payment)
 		if err != nil {
 			t.Fatal(err)
@@ -278,7 +279,7 @@ func TestReceiptFromNonValidatorNotVerified(t *testing.T) {
 	node := testNodeSigner(t)
 	someoneElse := testNodeSigner(t)
 	for _, claimedName := range []string{nameOf(node), nameOf(someoneElse)} {
-		verified := payThroughFakeNode(t, []*signing.Signer{someoneElse}, func(payment ledger.Payment) any {
+		verified := payThroughFakeNode(t, []signing.Signer{someoneElse}, func(payment ledger.Payment) any {
 			receipt, err := ledger.SignReceipt(node, claimedName, payment) // validly signed — but the signer is no validator
 			if err != nil {
 				t.Fatal(err)
@@ -295,7 +296,7 @@ func TestReceiptFromNonValidatorNotVerified(t *testing.T) {
 // valid signature: the receipt must be the node's promise about THIS payment.
 func TestReceiptOverDifferentPaymentNotVerified(t *testing.T) {
 	node := testNodeSigner(t)
-	verified := payThroughFakeNode(t, []*signing.Signer{node}, func(payment ledger.Payment) any {
+	verified := payThroughFakeNode(t, []signing.Signer{node}, func(payment ledger.Payment) any {
 		other := payment
 		other.Comment = "an unrelated payment" // different content → different PaymentID
 		receipt, err := ledger.SignReceipt(node, nameOf(node), other)
@@ -312,7 +313,7 @@ func TestReceiptOverDifferentPaymentNotVerified(t *testing.T) {
 // A receipt with a bad signature must not verify, whoever it claims to be from.
 func TestReceiptWithBadSignatureNotVerified(t *testing.T) {
 	node := testNodeSigner(t)
-	verified := payThroughFakeNode(t, []*signing.Signer{node}, func(payment ledger.Payment) any {
+	verified := payThroughFakeNode(t, []signing.Signer{node}, func(payment ledger.Payment) any {
 		receipt, err := ledger.SignReceipt(node, nameOf(node), payment)
 		if err != nil {
 			t.Fatal(err)
@@ -332,7 +333,7 @@ func TestReceiptWithBadSignatureNotVerified(t *testing.T) {
 func TestReceiptIsReadUpToItsBound(t *testing.T) {
 	node := testNodeSigner(t)
 	for padding, wantVerified := range map[int]bool{0: true, int(maxReceiptBytes): false} {
-		verified := payThroughFakeNode(t, []*signing.Signer{node}, func(payment ledger.Payment) any {
+		verified := payThroughFakeNode(t, []signing.Signer{node}, func(payment ledger.Payment) any {
 			receipt, err := ledger.SignReceipt(node, nameOf(node), payment)
 			if err != nil {
 				t.Error(err)
@@ -344,6 +345,76 @@ func TestReceiptIsReadUpToItsBound(t *testing.T) {
 		})
 		if verified != wantVerified {
 			t.Errorf("a receipt padded with %d bytes: verified %v, want %v", padding, verified, wantVerified)
+		}
+	}
+}
+
+// A wallet that listens beyond loopback signs for its key at the request of anything on the network:
+// guard stops a browser's page, never a program, which sends the headers guard wants. So such a
+// wallet refuses to start without a password, and one on a loopback address starts without. A host
+// name is never taken for loopback, localhost included: the hosts file or DNS resolves it.
+func TestWalletBeyondLoopbackNeedsAPassword(t *testing.T) {
+	for listen, wantError := range map[string]bool{
+		":8090": true, "0.0.0.0:8090": true, "[::]:8090": true, "172.28.70.31:8090": true, "wallet.example:8090": true, "localhost:8090": true,
+		"127.0.0.1:8090": false, "127.0.0.2:8090": false, "[::1]:8090": false,
+	} {
+		_, err := walletPassword(listen, "")
+		if (err != nil) != wantError {
+			t.Errorf("-listen %s with no password: error %v, want an error: %v", listen, err, wantError)
+		}
+	}
+	emptyFile := filepath.Join(t.TempDir(), "empty.password")
+	if err := os.WriteFile(emptyFile, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := walletPassword(":8090", emptyFile); err == nil {
+		t.Error("a password file holding no password was taken")
+	}
+}
+
+// The password, as HTTP Basic auth under any user name, opens every route, and nothing else does: a
+// request with no password or a wrong one is refused, with the header that makes a browser ask for
+// it. guard comes first: a page of another site, or one under a rebound host name, gets guard's
+// refusal, never a login box under its own name. The routes carry no wallet: /favicon.ico is not
+// found, and reads nothing.
+func TestWalletAsksForItsPassword(t *testing.T) {
+	passwordFile := filepath.Join(t.TempDir(), "wallet.password")
+	if err := os.WriteFile(passwordFile, []byte("correct horse\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	password, err := walletPassword(":8090", passwordFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	walletUI := routes(nil, ":8090", password)
+	for _, testCase := range []struct {
+		name, method, host, user, password string
+		withPassword, crossSite            bool
+		wantStatus                         int
+	}{
+		{"no password", "GET", "172.28.70.31:8090", "", "", false, false, http.StatusUnauthorized},
+		{"wrong password", "GET", "172.28.70.31:8090", "operator", "correct", true, false, http.StatusUnauthorized},
+		{"the password, with its newline", "GET", "172.28.70.31:8090", "operator", "correct horse\n", true, false, http.StatusUnauthorized},
+		{"the password", "GET", "172.28.70.31:8090", "operator", "correct horse", true, false, http.StatusNotFound},
+		{"the password, no user name", "GET", "172.28.70.31:8090", "", "correct horse", true, false, http.StatusNotFound},
+		{"a rebound host name, no password", "GET", "rebind.example:8090", "", "", false, false, http.StatusForbidden},
+		{"a cross-site POST, no password", "POST", "172.28.70.31:8090", "", "", false, true, http.StatusForbidden},
+		{"a cross-site POST with the password, as a browser that has it sends one", "POST", "172.28.70.31:8090", "operator", "correct horse", true, true, http.StatusForbidden},
+	} {
+		request := httptest.NewRequest(testCase.method, "http://"+testCase.host+"/favicon.ico", strings.NewReader("to=x&amount=1"))
+		if testCase.withPassword {
+			request.SetBasicAuth(testCase.user, testCase.password)
+		}
+		if testCase.crossSite {
+			request.Header.Set("Sec-Fetch-Site", "cross-site")
+		}
+		recorder := httptest.NewRecorder()
+		walletUI.ServeHTTP(recorder, request)
+		if recorder.Code != testCase.wantStatus {
+			t.Errorf("%s: status = %d, want %d", testCase.name, recorder.Code, testCase.wantStatus)
+		}
+		if asks := recorder.Header().Get("WWW-Authenticate") != ""; asks != (testCase.wantStatus == http.StatusUnauthorized) {
+			t.Errorf("%s: WWW-Authenticate %q", testCase.name, recorder.Header().Get("WWW-Authenticate"))
 		}
 	}
 }

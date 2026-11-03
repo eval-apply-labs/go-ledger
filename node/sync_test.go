@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/hex"
 	"io"
 	"net"
 	"net/http"
@@ -47,10 +48,10 @@ func waitFor(t *testing.T, timeout time.Duration, condition func() bool, failure
 }
 
 // servePeer answers as a peer whose last committed checkpoint is checkpoint: /hdls/status with its height
-// in progress, any other path with the checkpoint.
+// in progress and its last block hash, any other path with the checkpoint.
 func servePeer(responseWriter http.ResponseWriter, request *http.Request, checkpoint Checkpoint) {
 	if request.URL.Path == "/hdls/status" {
-		writeJSON(responseWriter, map[string]int64{"heightInProgress": checkpoint.Commit.Height + 1})
+		writeJSON(responseWriter, map[string]any{"heightInProgress": checkpoint.Commit.Height + 1, "lastBlockHash": hex.EncodeToString(checkpoint.Commit.BlockHash[:])})
 		return
 	}
 	writeJSON(responseWriter, checkpoint)
@@ -175,13 +176,13 @@ func TestCatchUpAsksEachPeerAtTheFirstURLThatAnswers(t *testing.T) {
 
 	recorder := &peeredRecorder{peers: [][]string{{refusing.URL, answering.URL, later.URL}}}
 	straggler := New(testConfig(staticChain(names...), "straggler", genesis), recorder)
-	if _, found := straggler.catchUpCheckpoint(); !found || answeringAsked.Load() != 2 || laterAsked.Load() != 0 {
+	if _, _, found := straggler.catchUpCheckpoint(); !found || answeringAsked.Load() != 2 || laterAsked.Load() != 0 {
 		t.Errorf("found %v; the URL that answered was asked %d times, want 2, its status and its checkpoint; the URL after it %d times, want none",
 			found, answeringAsked.Load(), laterAsked.Load())
 	}
 }
 
-// The fetches from the other validators' public addresses, catch-up's last source and the pull of public
+// The fetches from the other validators' public addresses, a source of catch-up and the pull of public
 // bundles, refuse a loopback destination (review N7): a validator could publish http://127.0.0.1:8080,
 // and every bank stuck at a height would fetch its own operator port's routes. A private address is
 // reached as any other. Here a validator's public face listens on 127.0.0.1, and serves a checkpoint
@@ -215,7 +216,7 @@ func TestPublicAddressFetchesRefuseLoopback(t *testing.T) {
 	for _, allowLoopback := range []bool{false, true} {
 		node.config.allowLoopbackPublicAddresses = allowLoopback
 		asked.Store(0)
-		_, found := node.catchUpCheckpoint()
+		_, _, found := node.catchUpCheckpoint()
 		node.heightStartedAt = time.Now().Add(-4 * network.timeout) // stuck: the next re-gossip tick pulls
 		node.handle(event{kind: eventRegossip})
 		waitFor(t, 5*time.Second, func() bool { return !node.pullRoundRunning.Load() }, "a round of pulls never ended")
@@ -267,23 +268,24 @@ func TestPublicAddressFetchesRefuseTheNodesOwnMachineAtAnyAddress(t *testing.T) 
 	}
 }
 
-// Catch-up asks every other validator's public face when no bootstrap or gossip peer answered at all,
-// or while the node is stuck on its height. Otherwise, on a healthy network, where its gossip peers
-// answer at its own height, it asks one public face a call, each in turn (review R2-2): one small request
-// a tick, not one for each bank, which still finds within a few ticks that the node lags behind banks its
-// gossip peers are not among, though an idle node is never stuck. Here a gossip peer answers at the
-// node's height, and two validators' public faces each hold a checkpoint ahead. Each situation has two
-// calls, and each finds the checkpoint.
-func TestCatchUpAsksOnePublicFaceInTurnWhileAPeerAnswers(t *testing.T) {
+// Catch-up asks every other validator of its trusted frame at its public face, at every call, besides its
+// bootstrap and gossip peers (Phase 4 spec §4.4): one public face a call, in turn, as review R2-2 had it,
+// let a gossip peer at the node's height and a public face that withholds the newest checkpoint keep the
+// node behind for a call. Here a gossip peer answers at the node's height, and two validators' public
+// faces each hold a checkpoint ahead, of the same block: at each call both are asked their status, and
+// the checkpoint is fetched from one, since the other reports the same block.
+func TestCatchUpAsksEveryValidatorsPublicFace(t *testing.T) {
 	names := []string{"auditor", "founder", "straggler"} // in name order, as a checkpoint carries them
 	ahead := checkpointOf(t, 5, testGenesis([]ledger.Account{testAccount("auditor", "0"), testAccount("founder", "900"), testAccount("straggler", "50")}, 30*time.Second, 0),
 		validatorsOf(names), nil)
-	var statusAsked [2]atomic.Int32 // the status requests each public face answered
+	var statusAsked, checkpointAsked [2]atomic.Int32 // the requests each public face answered
 	founder, auditor := testAccount("founder", "1000"), testAccount("auditor", "0")
 	for i, account := range []*ledger.Account{&founder, &auditor} {
 		publicFace := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 			if request.URL.Path == "/hdls/status" {
 				statusAsked[i].Add(1)
+			} else {
+				checkpointAsked[i].Add(1)
 			}
 			servePeer(responseWriter, request, ahead)
 		}))
@@ -294,45 +296,62 @@ func TestCatchUpAsksOnePublicFaceInTurnWhileAPeerAnswers(t *testing.T) {
 		writeJSON(responseWriter, map[string]int64{"heightInProgress": 1}) // the node's own height in progress
 	}))
 	defer gossipPeerAtTheNodesHeight.Close()
-	silentGossipPeer := httptest.NewServer(http.NotFoundHandler())
-	silentGossipPeer.Close() // its address now refuses connections
 
 	genesis := testGenesis([]ledger.Account{founder, auditor, testAccount("straggler", "0")}, 30*time.Second, 0)
-	for _, situation := range []struct {
-		name                string
-		gossipPeer          string
-		stuck               bool
-		publicFacesEachCall int32
-	}{
-		{"a gossip peer answers at the node's height", gossipPeerAtTheNodesHeight.URL, false, 1},
-		{"no gossip peer answers", silentGossipPeer.URL, false, 2},
-		{"a gossip peer answers, and the node is stuck", gossipPeerAtTheNodesHeight.URL, true, 2},
-	} {
-		config := testConfig(staticChain(names...), "straggler", genesis)
-		config.allowLoopbackPublicAddresses = true // the public faces listen on 127.0.0.1
-		straggler := New(config, &peeredRecorder{peers: [][]string{{situation.gossipPeer}}})
-		straggler.stuckOnItsHeight.Store(situation.stuck)
-		var askedInACall [2]int32 // the calls in which each public face was asked
-		for call := range 2 {
-			statusAsked[0].Store(0)
-			statusAsked[1].Store(0)
-			_, found := straggler.catchUpCheckpoint()
-			if asked := statusAsked[0].Load() + statusAsked[1].Load(); !found || asked != situation.publicFacesEachCall {
-				t.Errorf("%s, call %d: %d public faces were asked, want %d, and the checkpoint found %v", situation.name, call+1, asked, situation.publicFacesEachCall, found)
-			}
-			for i := range askedInACall {
-				askedInACall[i] += statusAsked[i].Load()
-			}
+	config := testConfig(staticChain(names...), "straggler", genesis)
+	config.allowLoopbackPublicAddresses = true // the public faces listen on 127.0.0.1
+	straggler := New(config, &peeredRecorder{peers: [][]string{{gossipPeerAtTheNodesHeight.URL}}})
+	for call := range 2 {
+		for i := range statusAsked {
+			statusAsked[i].Store(0)
+			checkpointAsked[i].Store(0)
 		}
-		if askedInACall[0] == 0 || askedInACall[1] == 0 {
-			t.Errorf("%s: in two calls, the public faces were asked in %v calls: one was never asked", situation.name, askedInACall)
+		checkpoint, _, found := straggler.catchUpCheckpoint()
+		if !found || checkpoint.Commit.Height != 5 || statusAsked[0].Load() != 1 || statusAsked[1].Load() != 1 ||
+			checkpointAsked[0].Load()+checkpointAsked[1].Load() != 1 {
+			t.Errorf("call %d: found the checkpoint %v; the public faces were asked their status %d and %d times, want once each, and for the checkpoint %d times in all, want once",
+				call+1, found, statusAsked[0].Load(), statusAsked[1].Load(), checkpointAsked[0].Load()+checkpointAsked[1].Load())
 		}
 	}
 }
 
+// One peer that withholds the newest checkpoint does not keep the node behind (Phase 4 spec §4.4): the
+// node asks every peer and every validator's public face, and fetches from those that report the
+// highest height first. Here the bootstrap peer serves an older checkpoint, of height 3, which used to be
+// taken alone, since a bootstrap peer that yields one was the only one asked; a gossip peer reports
+// height 1000, and serves a checkpoint whose state is not the one its commit signs; a validator's public
+// face serves the newest, of height 7. One call finds the newest.
+func TestOnePeerWithholdingTheNewestCheckpointDoesNotKeepTheNodeBehind(t *testing.T) {
+	names := []string{"founder", "straggler"}
+	founder := testAccount("founder", "1000")
+	stateWith := func(founderAmount string) ledger.LedgerState {
+		return testGenesis([]ledger.Account{testAccount("founder", founderAmount), testAccount("straggler", "0")}, 30*time.Second, 0)
+	}
+	older, newest := checkpointOf(t, 3, stateWith("990"), validatorsOf(names), nil), checkpointOf(t, 7, stateWith("950"), validatorsOf(names), nil)
+	damaged := checkpointOf(t, 999, stateWith("900"), validatorsOf(names), nil)
+	damaged.State.Accounts = stateWith("1").Accounts // another state than the one its commit signs
+	serve := func(checkpoint Checkpoint) *httptest.Server {
+		server := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+			servePeer(responseWriter, request, checkpoint)
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+	withholding, lying, publicFace := serve(older), serve(damaged), serve(newest)
+	founder.PublicAddress = publicFace.URL
+
+	config := testConfig(staticChain(names...), "straggler", testGenesis([]ledger.Account{founder, testAccount("straggler", "0")}, 30*time.Second, 0))
+	config.Bootstrap = []string{withholding.URL}
+	config.allowLoopbackPublicAddresses = true // the public face listens on 127.0.0.1
+	straggler := New(config, &peeredRecorder{peers: [][]string{{lying.URL}}})
+	if checkpoint, _, found := straggler.catchUpCheckpoint(); !found || checkpoint.Commit.Height != 7 {
+		t.Errorf("catch-up found a checkpoint %v of height %d, want the newest, of height 7, that the public face serves", found, checkpoint.Commit.Height)
+	}
+}
+
 // Catch-up asks a peer's /hdls/status first, and fetches /hdls/checkpoint, about 2.9 KB per account,
-// only from a peer whose height is ahead (spec 6.6): on an idle chain every peer is at the node's height,
-// tick after tick.
+// only from a peer whose height is ahead, or whose last block is not the node's (spec 6.6): on an idle
+// chain every peer is at the node's height, on its last block, tick after tick.
 func TestCatchUpAsksStatusBeforeTheCheckpoint(t *testing.T) {
 	names := []string{"founder", "straggler"}
 	genesis := testGenesis([]ledger.Account{testAccount("founder", "1000"), testAccount("straggler", "0")}, 30*time.Second, 0)
@@ -347,13 +366,18 @@ func TestCatchUpAsksStatusBeforeTheCheckpoint(t *testing.T) {
 	}))
 	defer peer.Close()
 
-	for _, nodeHeight := range []int64{6, 1} { // at the peer's height, then behind it
-		genesis.Height = nodeHeight - 1
+	for _, nodeHeight := range []int64{6, 1} { // at the peer's height, on its block, then behind it
 		node := New(testConfig(staticChain(names...), "straggler", genesis), NewHTTPTransport(nil))
+		if nodeHeight == 6 {
+			node.adopt(checkpoint, nil)
+		}
+		if node.height() != nodeHeight {
+			t.Fatalf("premise: the node works on height %d, not %d", nodeHeight, node.height())
+		}
 		mutex.Lock()
 		asked = nil
 		mutex.Unlock()
-		_, found, _ := node.bestCheckpoint(NewHTTPClient(5*time.Second), [][]string{{peer.URL}})
+		_, _, found := node.bestCheckpoint([]catchUpPeer{{urls: []string{peer.URL}, client: NewHTTPClient(5 * time.Second)}})
 		mutex.Lock()
 		want := []string{"/hdls/status"}
 		if nodeHeight < 6 {
@@ -363,6 +387,24 @@ func TestCatchUpAsksStatusBeforeTheCheckpoint(t *testing.T) {
 			t.Errorf("a node at height %d, the peer at 6: found %v, asked %v, want %v", nodeHeight, found, asked, want)
 		}
 		mutex.Unlock()
+	}
+}
+
+// No set signed the genesis, so a node there passes no checkpoint of height 0 (trustedFrameOf): a peer
+// that reports another genesis, and serves a checkpoint of it that is sound on its own, costs its fetch
+// and no more. The check has no set to check it against, and must not stop the node for want of one.
+func TestNoCheckpointOfTheGenesisHeightPasses(t *testing.T) {
+	names := []string{"founder", "straggler"}
+	genesis := testGenesis([]ledger.Account{testAccount("founder", "1000"), testAccount("straggler", "0")}, 30*time.Second, 0)
+	otherGenesis := checkpointOf(t, 0, testGenesis([]ledger.Account{testAccount("founder", "900"), testAccount("straggler", "100")}, 30*time.Second, 0), validatorsOf(names), nil)
+	peer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		servePeer(responseWriter, request, otherGenesis)
+	}))
+	defer peer.Close()
+
+	node := New(testConfig(staticChain(names...), "straggler", genesis), NewHTTPTransport(nil))
+	if _, _, found := node.bestCheckpoint([]catchUpPeer{{urls: []string{peer.URL}, client: NewHTTPClient(5 * time.Second)}}); found {
+		t.Error("catch-up took a checkpoint of the genesis height")
 	}
 }
 
@@ -387,7 +429,7 @@ func TestNodeFollowsNoRedirect(t *testing.T) {
 	config := testConfig(staticChain(names...), "straggler", genesis)
 	config.Bootstrap = []string{redirecting.URL}
 	node := New(config, NewHTTPTransport(nil))
-	if _, found := node.catchUpCheckpoint(); found || reached.Load() != 0 {
+	if _, _, found := node.catchUpCheckpoint(); found || reached.Load() != 0 {
 		t.Errorf("catch-up followed a redirect: found a checkpoint %v, the URL it names asked %d times", found, reached.Load())
 	}
 	NewHTTPTransport(nil).post([]string{redirecting.URL}, "/hdls/vote", []byte("{}"))

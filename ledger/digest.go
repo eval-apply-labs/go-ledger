@@ -8,7 +8,7 @@ import (
 
 // AccountsDigest is a deterministic SHA-256 digest of the account set (spec 3.5): the tag "go-ledger
 // accounts v2", then every field of every account, length-prefixed, in slice order, the IP addresses
-// last, after their count (listFields). It feeds the state digest (LedgerState.Digest), which the
+// and then the TLS keys last, each list after its count (listFields). It feeds the state digest (LedgerState.Digest), which the
 // block hash the consensus layer votes on and commits covers, so two honest nodes that computed the
 // same state produce the same digest and a commit binds the exact applied state (audit A2: a naive vote
 // can be over a value derived from a *different* input than what got applied).
@@ -29,12 +29,13 @@ func AccountsDigest(accounts []Account) [32]byte {
 			[]byte(account.Bank),
 			[]byte(account.Delegate),
 			[]byte(account.Description),
-			[]byte(account.PublicAddress), // mutable on-chain state, as are the IP addresses: bound, or a synced checkpoint could rewrite where a name is reached
+			[]byte(account.PublicAddress), // mutable on-chain state, as are the IP addresses and the TLS keys: bound, or a synced checkpoint could rewrite where a name is reached
 			[]byte(frozen),
 			[]byte(account.PendingKey),
 			[]byte(account.PendingBank),
 			[]byte(strconv.FormatInt(account.PendingHeight, 10)))
 		fields = append(fields, listFields(account.IPAddresses)...)
+		fields = append(fields, listFields(account.TLSKeys)...)
 	}
 	return lengthPrefixedDigest(fields...)
 }

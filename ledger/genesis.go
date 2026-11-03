@@ -42,6 +42,7 @@ type GenesisAccount struct {
 	Description   string   `json:"description"`
 	PublicAddress string   `json:"publicAddress"` // the name's public face: "" or CanonicalAddress
 	IPAddresses   []string `json:"ipAddresses"`   // at most MaxIPAddresses, each CanonicalIPAddress; a validator's are its gossip addresses (peer DNS)
+	TLSKeys       []string `json:"tlsKeys"`       // at most MaxTLSKeys, each CanonicalTLSKey: the hashes of its web server's keys
 }
 
 // genesisParameterNames are the keys of the genesis parameters. The file must give every one: a
@@ -95,10 +96,11 @@ func ParseGenesis(data []byte) (Genesis, error) {
 // accounts in name order, the parameters, governance sequence 0 and height 0. Each refusal names the
 // field to fix. The genesis must be a state the ledger itself could reach: one account per name and
 // one name per key, each in its one spelling (a key shared by two names would let its holder sign as
-// both), balances within the cap, public addresses and IP addresses as an update could set them
-// (CanonicalAddress, CanonicalIPAddress), delegates and banks that exist, banks that are seated, and
-// parameters a vote could have set. The gossip port is a port: it has no default, as no parameter has
-// one, and 8070 is the usual choice: clear of the operator port's 8080 and the wallet's 8090.
+// both), balances within the cap, public addresses, IP addresses and TLS keys as an update could set
+// them (CanonicalAddress, CanonicalIPAddress, CanonicalTLSKey), delegates and banks that exist, banks
+// that are seated, and parameters a vote could have set. The gossip port is a port: it has no default,
+// as no parameter has one, and 8070 is the usual choice: clear of the operator port's 8080 and the
+// wallet's 8090.
 func ValidateGenesis(genesis Genesis) (Chain, LedgerState, error) {
 	fail := func(format string, arguments ...any) (Chain, LedgerState, error) {
 		return Chain{}, LedgerState{}, fmt.Errorf("genesis: "+format, arguments...)
@@ -142,8 +144,12 @@ func ValidateGenesis(genesis Genesis) (Chain, LedgerState, error) {
 		if err := ipAddressesError(account.IPAddresses); err != nil {
 			return fail("accounts: the IP addresses of %q: %v", account.Name, err)
 		}
+		if err := tlsKeysError(account.TLSKeys); err != nil {
+			return fail("accounts: the TLS keys of %q: %v", account.Name, err)
+		}
 		accounts = append(accounts, Account{Name: account.Name, PublicKey: account.PublicKey, Amount: amount, Bank: account.Bank,
-			Delegate: account.Delegate, Description: account.Description, PublicAddress: account.PublicAddress, IPAddresses: account.IPAddresses})
+			Delegate: account.Delegate, Description: account.Description, PublicAddress: account.PublicAddress, IPAddresses: account.IPAddresses,
+			TLSKeys: account.TLSKeys})
 	}
 	slices.SortFunc(accounts, func(first, second Account) int { return strings.Compare(first.Name, second.Name) })
 	for _, account := range accounts {

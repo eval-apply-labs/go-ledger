@@ -2,28 +2,45 @@ package signing
 
 import "encoding/base64"
 
-// Signer holds a key pair bound to a network and produces domain-separated signatures. It
-// deliberately exposes no "sign these raw bytes" method: every signature is scoped to a
-// Domain, which is exactly what makes cross-protocol reuse impossible.
-type Signer struct {
+// Signer produces domain-separated signatures, bound to a network. It deliberately has no "sign these
+// raw bytes" method: every signature is scoped to a Domain, which is exactly what makes cross-protocol
+// reuse impossible. The code signs only through this interface, so where the key is, in the process or
+// in the signer program (spec §2.7), is the choice of whoever builds the Signer.
+type Signer interface { // implemented by LocalSigner (this file) and RemoteSigner (remote.go)
+	// Sign produces a signature over the canonical (networkID, domain, fields) preimage.
+	Sign(domain Domain, fields ...[]byte) ([]byte, error)
+	// SignBase64 is Sign with the signature returned in base64 wire form.
+	SignBase64(domain Domain, fields ...[]byte) (string, error)
+	// PublicKey returns the public key its signatures verify under.
+	PublicKey() []byte
+	// PublicKeyBase64 returns the public key in base64 wire form.
+	PublicKeyBase64() string
+}
+
+// LocalSigner is a Signer that holds its key pair in the process: the tests', the demo's, the
+// wallet's, and an engine's whose config gives its privateKey.
+type LocalSigner struct { // implements Signer
 	networkID  string
 	privateKey PrivateKey
 }
 
-// NewSigner builds a Signer for a stored private key. It derives the public key from the private
+// The compiler checks that *LocalSigner implements Signer.
+var _ Signer = (*LocalSigner)(nil)
+
+// NewSigner builds a LocalSigner for a stored private key. It derives the public key from the private
 // key, so the two cannot disagree.
-func NewSigner(scheme Scheme, networkID string, privateKey []byte) (*Signer, error) {
+func NewSigner(scheme Scheme, networkID string, privateKey []byte) (*LocalSigner, error) {
 	parsedKey, err := scheme.ParsePrivateKey(privateKey)
 	if err != nil {
 		return nil, err
 	}
-	return &Signer{networkID: networkID, privateKey: parsedKey}, nil
+	return &LocalSigner{networkID: networkID, privateKey: parsedKey}, nil
 }
 
-// Generate creates a fresh key pair and returns a Signer for it. Tests use it; keygen, the demo and
-// the wallet call Scheme.GenerateKey instead. Keys are meant to be created and held by their owner
+// Generate creates a fresh key pair and returns a LocalSigner for it. Tests use it; keygen, the demo
+// and the wallet call Scheme.GenerateKey instead. Keys are meant to be created and held by their owner
 // (the audit flagged generating keys server-side and returning the private key over HTTP).
-func Generate(scheme Scheme, networkID string) (*Signer, error) {
+func Generate(scheme Scheme, networkID string) (*LocalSigner, error) {
 	_, privateKey, err := scheme.GenerateKey()
 	if err != nil {
 		return nil, err
@@ -32,20 +49,25 @@ func Generate(scheme Scheme, networkID string) (*Signer, error) {
 }
 
 // PublicKey returns the signer's public key bytes.
-func (signer *Signer) PublicKey() []byte { return signer.privateKey.PublicKey() }
+func (signer *LocalSigner) PublicKey() []byte { return signer.privateKey.PublicKey() }
 
 // PublicKeyBase64 returns the public key in base64 wire form.
-func (signer *Signer) PublicKeyBase64() string {
+func (signer *LocalSigner) PublicKeyBase64() string {
 	return base64.StdEncoding.EncodeToString(signer.PublicKey())
 }
 
 // Sign produces a signature over the canonical (networkID, domain, fields) preimage.
-func (signer *Signer) Sign(domain Domain, fields ...[]byte) ([]byte, error) {
+func (signer *LocalSigner) Sign(domain Domain, fields ...[]byte) ([]byte, error) {
 	return signer.privateKey.Sign(Preimage(signer.networkID, domain, fields...))
 }
 
 // SignBase64 is Sign with the signature returned in base64 wire form.
-func (signer *Signer) SignBase64(domain Domain, fields ...[]byte) (string, error) {
+func (signer *LocalSigner) SignBase64(domain Domain, fields ...[]byte) (string, error) {
+	return signBase64(signer, domain, fields)
+}
+
+// signBase64 is signer's Sign with the signature in base64 wire form: the SignBase64 of every Signer.
+func signBase64(signer Signer, domain Domain, fields [][]byte) (string, error) {
 	signature, err := signer.Sign(domain, fields...)
 	if err != nil {
 		return "", err

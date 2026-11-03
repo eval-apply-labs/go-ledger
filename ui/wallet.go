@@ -29,11 +29,16 @@ import (
 // key anywhere -- it signs payments locally and submits only the signed payment.
 type Wallet struct {
 	privateKey  []byte // the private key; the wallet signs with it for the pinned network id (see signer)
-	publicKey   string // the key the private key derives, in base64
+	publicKey   string // the key the private key derives, in base64; or the bank's key, whose signer signs
 	networkName string // the -network flag: the network id the wallet pins must start with it and "/"
 	nodeURL     string
 	lookahead   int64 // how many blocks ahead a payment names, so it reaches the proposer in time
 	client      *http.Client
+
+	// A bank's wallet whose key is in the signer program (spec §2.7) has no privateKey: it signs through
+	// the signer that signerSettings name, as their client, with signerSecret, that client's secret.
+	signerSettings signerSettings
+	signerSecret   []byte
 
 	// saved is what <keyfile>.state keeps across restarts (walletState), written at statePath. Guarded
 	// by mutex (handlers run concurrently).
@@ -57,7 +62,7 @@ type Wallet struct {
 	pinPath       string
 	networkID     string
 	pinned        *consensus.ValidatorSet
-	networkSigner *signing.Signer
+	networkSigner signing.Signer
 
 	// newestCheckpoint is the newest state the wallet verified (verifyUnderPin), and newestSource where
 	// it came from: "node", or "file" for a checkpoint the user loaded (LoadCarriedCheckpoint). It
@@ -83,6 +88,21 @@ const blockSlack = 32
 // up to node.MaxBlockIDLookahead blocks past its height, and a burst of payments runs up to blockSlack
 // blocks past the lookahead.
 func LoadOrCreateWallet(keyfile, networkName, nodeURL string, lookahead int64) (*Wallet, error) {
+	return loadWallet(keyfile, networkName, nodeURL, lookahead, signerSettings{})
+}
+
+// signerSettings name the signer program that holds a bank's key, for a bank's wallet that signs through
+// it (spec §2.7): the -signer-url, -signer-client and -signer-secret-file flags. All empty for a wallet
+// that holds its own key.
+type signerSettings struct {
+	url        string // where the signer listens, such as http://172.28.71.254:7000
+	client     string // the client name the signer's config gives this wallet, such as desk or admin
+	secretFile string // that client's secret, as keygen -secret prints it
+}
+
+// loadWallet is LoadOrCreateWallet for any wallet. With settings that name a signer, the wallet is a
+// bank's whose key is in that signer: keyfile holds the bank's public key only (readSignerClient).
+func loadWallet(keyfile, networkName, nodeURL string, lookahead int64, settings signerSettings) (*Wallet, error) {
 	if lookahead < 1 {
 		lookahead = 3
 	}
@@ -90,7 +110,13 @@ func LoadOrCreateWallet(keyfile, networkName, nodeURL string, lookahead int64) (
 		return nil, fmt.Errorf("a lookahead of %d blocks is too far: at most %d, so that a burst of payments, up to %d blocks further, stays inside the node's %d-block window",
 			lookahead, node.MaxBlockIDLookahead-blockSlack, blockSlack, node.MaxBlockIDLookahead)
 	}
-	publicKey, privateKey, err := loadOrCreateKey(keyfile)
+	var publicKey, privateKey, signerSecret []byte
+	var err error
+	if settings == (signerSettings{}) {
+		publicKey, privateKey, err = loadOrCreateKey(keyfile)
+	} else {
+		publicKey, signerSecret, err = readSignerClient(keyfile, settings)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -100,19 +126,23 @@ func LoadOrCreateWallet(keyfile, networkName, nodeURL string, lookahead int64) (
 	if err != nil {
 		return nil, err
 	}
-	return &Wallet{
-		privateKey:  privateKey,
-		publicKey:   base64.StdEncoding.EncodeToString(publicKey),
-		networkName: networkName,
-		nodeURL:     nodeURL,
-		lookahead:   lookahead,
-		client:      node.NewHTTPClient(5 * time.Second), // follows no redirect
-		statePath:   statePath,
-		saved:       readWalletState(statePath, networkName), // resume the counter, the last name and the newest height
-		pinPath:     pinPath,
-		networkID:   networkID,
-		pinned:      pinned,
-	}, nil
+	wallet := &Wallet{
+		privateKey:     privateKey,
+		publicKey:      base64.StdEncoding.EncodeToString(publicKey),
+		networkName:    networkName,
+		nodeURL:        nodeURL,
+		lookahead:      lookahead,
+		client:         node.NewHTTPClient(5 * time.Second), // follows no redirect
+		signerSettings: settings,
+		signerSecret:   signerSecret,
+		statePath:      statePath,
+		saved:          readWalletState(statePath, networkName), // resume the counter, the last name and the newest height
+		pinPath:        pinPath,
+		networkID:      networkID,
+		pinned:         pinned,
+	}
+	wallet.client.Transport = &tlsPinningTransport{wallet: wallet} // pins a bank's web server by the chain (tlspin.go)
+	return wallet, nil
 }
 
 // walletState is the small sidecar (<keyfile>.state) that survives a restart. It belongs to one
@@ -183,19 +213,28 @@ func (wallet *Wallet) pinnedNetworkID() string {
 
 // signer signs with the wallet's key for the pinned network id (spec 7.2). The wallet signs only after
 // it has read a verified state, which pins the id on first use. The signer is built from the private key
-// once, since deriving the key can be costly (almost half a signature with ML-DSA-65).
-func (wallet *Wallet) signer() (*signing.Signer, error) {
+// once, since deriving the key can be costly (almost half a signature with ML-DSA-65). In a bank's wallet
+// whose key is in the signer program, it is the remote signer (spec §2.7): it asks the signer, which
+// refuses a domain not in this client's list with its reason, and checks every answer under the bank's
+// key.
+func (wallet *Wallet) signer() (signing.Signer, error) {
 	wallet.mutex.Lock()
 	defer wallet.mutex.Unlock()
 	if wallet.networkSigner == nil {
 		if wallet.networkID == "" {
 			return nil, errors.New("no network is pinned yet: the wallet has not read a state its node's validators signed")
 		}
-		signer, err := signing.NewSigner(signing.NetworkScheme(), wallet.networkID, wallet.privateKey)
-		if err != nil {
-			return nil, err
+		if wallet.signerSettings.url != "" {
+			publicKey, _ := base64.StdEncoding.DecodeString(wallet.publicKey)
+			wallet.networkSigner = signing.NewRemoteSigner(wallet.signerSettings.url, wallet.signerSettings.client, wallet.signerSecret,
+				publicKey, wallet.networkID, signing.NetworkScheme())
+		} else {
+			signer, err := signing.NewSigner(signing.NetworkScheme(), wallet.networkID, wallet.privateKey)
+			if err != nil {
+				return nil, err
+			}
+			wallet.networkSigner = signer
 		}
-		wallet.networkSigner = signer
 	}
 	return wallet.networkSigner, nil
 }
@@ -265,21 +304,21 @@ func pendingChange(account ledger.Account) string {
 
 // UpdateAccount submits a signed account update for the wallet's name: a description, the name its
 // balance backs as stake (a validator's name; its own, for a bank), its public address (a bank's public
-// face, or a website), and its IP addresses, separated by spaces (a validator's are where the others
-// gossip to it), which replace the whole list. A blank field is left unchanged, and ledger.ClearField
-// ("-") clears it. The update lands when the block it names commits. The wallet first checks it
-// against the verified state as a node's intake does (ledger.UpdateFitsState, its size measured as
-// signed), so an update that could not apply uses up no block; the node refuses, with the reason, one
-// that its own state does not take. Like a payment, each update names a block of its own (see
-// nextPaymentBlockID): a block carries one update per account, so of two updates naming one block, one
-// would be lost. While a checkpoint from a file stands in for the node's (newestVerifiedState), it
-// refuses, as Send does. It returns the update it signed, whose delegate the page shows as the wallet
-// read it (spec 3.2).
-func (wallet *Wallet) UpdateAccount(description, delegate, publicAddress, ipAddresses string) (ledger.AccountUpdate, error) {
+// face, or a website), its IP addresses (a validator's are where the others gossip to it) and its TLS
+// keys (the hashes of its web server's keys), each list separated by spaces, which replaces the whole
+// list. A blank field is left unchanged, and ledger.ClearField ("-") clears it. The update lands when
+// the block it names commits. The wallet first checks it against the verified state as a node's intake
+// does (ledger.UpdateFitsState, its size measured as signed), so an update that could not apply uses
+// up no block; the node refuses, with the reason, one that its own state does not take. Like a
+// payment, each update names a block of its own (see nextPaymentBlockID): a block carries one update
+// per account, so of two updates naming one block, one would be lost. While a checkpoint from a file
+// stands in for the node's (newestVerifiedState), it refuses, as Send does. It returns the update it
+// signed, whose delegate the page shows as the wallet read it (spec 3.2).
+func (wallet *Wallet) UpdateAccount(description, delegate, publicAddress, ipAddresses, tlsKeys string) (ledger.AccountUpdate, error) {
 	delegate, publicAddress = strings.TrimSpace(delegate), strings.TrimSpace(publicAddress)
-	ipAddressList := strings.Fields(ipAddresses) // "-" alone is ledger.ClearField alone, which clears them
-	if description == "" && delegate == "" && publicAddress == "" && len(ipAddressList) == 0 {
-		return ledger.AccountUpdate{}, errors.New("nothing to update: give a description, a name to delegate to, a public address or IP addresses")
+	ipAddressList, tlsKeyList := strings.Fields(ipAddresses), strings.Fields(tlsKeys) // "-" alone is ledger.ClearField alone, which clears them
+	if description == "" && delegate == "" && publicAddress == "" && len(ipAddressList) == 0 && len(tlsKeyList) == 0 {
+		return ledger.AccountUpdate{}, errors.New("nothing to update: give a description, a name to delegate to, a public address, IP addresses or TLS keys")
 	}
 	if delegate != "" && delegate != ledger.ClearField {
 		var err error
@@ -298,7 +337,8 @@ func (wallet *Wallet) UpdateAccount(description, delegate, publicAddress, ipAddr
 	if err != nil {
 		return ledger.AccountUpdate{}, err
 	}
-	update := ledger.AccountUpdate{Name: name, Delegate: delegate, Description: description, PublicAddress: publicAddress, IPAddresses: ipAddressList}
+	update := ledger.AccountUpdate{Name: name, Delegate: delegate, Description: description, PublicAddress: publicAddress, IPAddresses: ipAddressList,
+		TLSKeys: tlsKeyList}
 	// The node measures the signed update against the message bound, so check a copy that already has
 	// a signature's length and the widest block number (a few bytes more than the real one).
 	measured := update

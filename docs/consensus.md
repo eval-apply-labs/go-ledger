@@ -1,9 +1,10 @@
 # Consensus
 
 Area: **node**. Code: `consensus/` (the validator set, votes, commits, proposals, evidence, the vote
-set and the round driver), and the node's use of them in `node/node.go`, `node/proofs.go` and
-`node/sync.go`. This doc explains the commit rule, why it is safe, the timers and the slow-down
-switch, and what a double-sign does.
+set and the round driver), and the node's use of them in `node/node.go`, `node/proofs.go`,
+`node/sync.go`, `node/frames.go` and `node/alarms.go`. This doc explains the commit rule, why it is
+safe, the timers and the slow-down switch, what a double-sign does, and how a node catches up and
+joins without trusting any one peer.
 
 ## The problem it avoids
 
@@ -26,9 +27,10 @@ Quorum = floor(2 · totalPower / 3) + 1
    has > ⅔ precommits in a round, the honest validators among them, more than ⅓ of the power, are
    locked on it, so no other block gets > ⅔ prevotes, or an honest precommit, in a later round.
 2. **The block hash covers the applied state.** A commit is over the block hash, which covers the
-   height, the previous block hash, the signing set's hash, the content, the proposer's nonce and the
-   digest of the resulting state (see [architecture.md](architecture.md#the-block-and-its-hashes)).
-   Every node re-runs the block with `ApplyBlock` and takes it only if it gets that digest.
+   height, the previous block hash, the signing set's hash, the hash of the set that signs the next
+   block, the content, the proposer's nonce and the digest of the resulting state (see
+   [architecture.md](architecture.md#the-block-and-its-hashes)). Every node re-runs the block with
+   `ApplyBlock` and takes it only if it gets that digest and that next set.
 
 Voting power saturates at 2^40 per validator (`consensus.MaxValidatorPower`).
 
@@ -149,6 +151,28 @@ re-key, the node logs that once, when it next starts a height. An observer, a no
 not seated, signs no vote or proposal. Every node still signs a receipt, with its configured key,
 for each payment a wallet posts to it (`/hdls/pay`) that it newly pools.
 
+The key is in the engine's own process, or in the bank's signer, `cmd/signer`, a program on a
+machine of its own (see [signature.md](signature.md)). The engine signs the same way through either
+(`signing.Signer`). Through the signer, a request gives up after a second. A vote the engine cannot
+sign is dropped, as a vote whose sign log write fails is, and cast again at the next event. So a
+bank whose signer is down is a validator that does not vote: the chain goes on while the others
+hold more than ⅔.
+
+**Two sign logs.** A bank with a signer keeps two, and each guards something the other cannot:
+
+- **The engine's sign log** (`<snapshotPath>.votes`) holds its own votes and proposals of the height
+  in progress, and its lock, so that a restart resumes the round where it stopped (see
+  [signature.md](signature.md#the-sign-log)). It guards the lock.
+- **The signer's sign log** holds every slot it signed, a vote's height, round and type or a
+  proposal's height and round, and it refuses a second, different signature in a slot, whoever asks.
+  It guards the key: an engine that is broken, or that someone else drives, cannot make the key sign
+  two conflicting votes and get the bank's name frozen for a double-sign. A guard on the slot alone
+  does not stop a fork: one still forked in testing, because a node can vote unlocked in a later
+  round (review E2).
+
+The signer knows nothing of the lock, and the engine's log cannot stop someone else driving the key,
+so neither replaces the other. Each can be lost without the other.
+
 ## Equivocation freezes the name
 
 A double-sign is two votes of one name for the same height, round and type with different block
@@ -205,48 +229,185 @@ The freeze handles double-signing by under a third of the power. Its limits are 
   proposal first, then the current round's votes and proposal, then the height's other votes: the
   past rounds', newest first, then the future rounds', nearest first. So a node one height behind
   that imports it decides the last height first, and then takes the next height's messages.
-- **Checkpoint catch-up.** Every 3 s, or every 5 block intervals if that is longer, a
-  running node asks its peers' `/hdls/status` and fetches a checkpoint only from a peer that is
-  ahead (`Node.catchUpLoop`, `Node.catchUpCheckpoint`, `Node.bestCheckpoint`). It asks each peer at
-  the first of its URLs that answers. Bootstrap peers come first; gossip peers are asked only when
-  no bootstrap peer gives a checkpoint that verifies; the other validators' public addresses come
-  last, when neither does. It asks every one of those if no bootstrap or gossip peer answered at
-  all, or while it is stuck on its height, and otherwise one of them a tick, each in turn. So a node
-  that gossip can't reach, or that the others' allow lists no longer let in, still catches up; an
-  idle node, which runs no round and so is never stuck, finds banks ahead of its peers within about
-  as many ticks as there are validators; and on a healthy network each tick costs one small request.
-  A connection gives up after 2 s. A bootstrap peer can be a bank's public address too, which
-  serves the same files.
+- **Checkpoint catch-up.** Every 3 s, or every 5 block intervals if that is longer, a running node
+  asks for the status of every node it knows of, all at once (`Node.catchUpLoop`,
+  `Node.catchUpCheckpoint`, `Node.bestCheckpoint`): its bootstrap peers, its gossip peers, and every
+  other validator of its trusted frame (below) at its public address. A status gives the height in
+  progress and the hash of the last block. The node fetches a checkpoint, the highest first, only
+  from a peer at its own height or ahead of it that reports a block it does not know: another block
+  than its own at its own height, or, above it, another block than that of a checkpoint that already
+  passed. So on an idle chain, where every peer is at the node's height on its block, it fetches
+  nothing, and the honest peers at the network's height cost one fetch. It keeps a checkpoint only
+  if it passes (below): one of its own height, checked against the set that signed it; one ahead of
+  it, against the trusted frame, directly or by the walk. It adopts the highest one ahead of it. So
+  a peer that withholds the newest checkpoint is outvoted by the others: one honest validator whose
+  public face serves it is enough. A peer that lies about its height costs one fetch, and the next
+  one is asked.
+- **Whom it reaches, and how.** It asks each peer at the first of its URLs that answers, and at no
+  other. A connection gives up after 2 s, and a request after 5 s. The other validators' public
+  faces serve the status and the checkpoint as files, behind a CDN, so a node that gossip can't
+  reach, or that the others' allow lists no longer let in, still catches up; a bootstrap peer can be
+  a bank's public address too. Every one is asked at every tick: a status is a small file. A node
+  with bootstrap peers asks the same peers once before its first height (`Node.syncThenStart`);
+  without them it starts at once, and the loop catches it up. A halted node (below) asks nothing.
 - **A carried checkpoint.** `POST /hdls/checkpoint` on the operator port takes a checkpoint someone
   carried in, and the node checks it as catch-up does (below), with the same event
-  (`Node.ImportCheckpoint`).
+  (`Node.ImportCheckpoint`), but walks no frames: a carrier brings no record, so more than ⅔ of the
+  node's own set must have signed it.
 
 ## Onboarding and the checkpoint
 
 A `node.Checkpoint` is what a joining or restarting node adopts: `State` (the committed state),
 `LastBlock` (the header of the block that produced it: height, previous block hash, validators hash,
-nonce, content hash), `Commit`, and `Validators` (the set that signed the commit: name, key, power).
-The set is not signed, but the block hash covers its hash. A node checks a peer's checkpoint
-(`Node.verifyCheckpoint`) in this order, each step only if the one before passed:
+next validators hash, nonce, content hash), `Commit`, and `Validators` (the set that signed the
+commit: name, key, power). The set is not signed, but the block hash covers its hash. A node checks
+a peer's checkpoint (`Node.verifyCheckpoint`) in this order, each step only if the one before
+passed:
 
 1. **Shape:** state, header and commit are of one height; the state's names are strictly ascending;
    the set is sorted by name, distinct, each with power.
 2. **Hashes:** the set hashes to the header's validators hash, and the block hash recomputed from
    the header and the state's digest is the commit's block hash.
-3. **Anchor:** names of the node's anchor holding more than ⅓ of its power signed the commit, each
-   under the key the anchor holds for it. One check per anchor name, so padding costs nothing.
+3. **The trusted frame:** names of the node's trusted frame holding more than ⅔ of its power signed
+   the commit, each under the key the frame holds for it (`Node.anchorVouches`). One check per name,
+   so padding costs nothing.
 4. **Commit:** the commit is a valid > ⅔ quorum of the carried set.
 
-The anchor is the set (name, key, power) of the node's last committed state. So a checkpoint that
-gives real bank names keys an attacker holds fails, and a set padded with made-up validators fails
-step 2 before any signature is checked. A node trusts its own snapshot when it passes steps 1, 2 and
-4, and refuses to start, rather than fall back to genesis, if it does not.
+The **trusted frame** is the set (name, key, power) that the node's last committed state seats, or
+a later one the walk reached from it (below). So a checkpoint that gives real bank names keys an
+attacker holds fails, and a set padded with made-up validators fails step 2 before any signature is
+checked. Forging a state takes the keys of more than ⅔ of the power of a set the node already
+trusts. Before Phase 4, step 3 took more than ⅓, so the keys of a third of an old set, stolen or
+sold, were enough. A node trusts its own snapshot when it passes steps 1, 2 and 4, and refuses to
+start, rather than fall back to genesis, if it does not.
 
-A joiner with no snapshot anchors on the genesis set. On a network whose banks have re-keyed or
-left, or in dynamic mode, start a joiner from a snapshot of a node you trust (see
-[operating-a-network.md](operating-a-network.md#rejoining-after-a-restart)). The same holds for a
-node so far behind that the names of its anchor that still sign, each under the key the anchor
-holds for it, hold a third or less of the anchor's power: step 3 then fails.
+A joiner with no snapshot trusts the genesis set. A joiner its bank seeds with a snapshot trusts
+that snapshot's set (see
+[operating-a-network.md](operating-a-network.md#rejoining-after-a-restart)). When the names of the
+trusted frame that signed a newer checkpoint, under the keys it holds for them, hold ⅔ of its power
+or less, as after the set has changed while the node was away, step 3 fails, and the node walks.
+
+## Frames and the walk
+
+- **A frame** is a validator set and the height from which it signs: the set the chain has between
+  two changes of its names or keys. Its powers may change in between, and in dynamic mode a payment
+  that moves a validator's stake changes them at almost every busy block. A frame is the set as it
+  was at its first height.
+- **Each block names the next set.** The block header carries `NextValidatorsHash`, the hash of the
+  set that the resulting state seats: the set that signs the next height. `ProposeBlock` sets it,
+  `ApplyBlock` checks it, and the block hash covers it. The record entry carries it too, so the
+  block hash still recomputes from the record. So the commit of a frame's last height is more than
+  ⅔ of that frame, under its keys, signing off the next one. It came with Phase 4's new genesis.
+- **The frames file.** The engine writes `hdls/frames` into its public folder: one line per frame,
+  the oldest first, each with the frame's first height, its hash and its set, powers included (the
+  format is in [api.md](api.md#the-public-face)). A frame is listed only when the next set has other
+  names, or a name under another key, than the set that signed the block before it; a change of
+  powers alone lists nothing. The node lists a frame as it commits the block before it, whose record
+  entry the walk reads, so a frame whose start a catch-up skipped is not listed (`Node.noteFrame`).
+  As it lists one, it drops those that started more than `retainBlocks` heights before, and keeps at
+  most the newest 100. The file is their only copy: the node reads it back as it opens
+  (`Node.openFrames`), and drops a line above its height in progress, which a newer snapshot it no
+  longer has, or the other side of a fork, wrote.
+- **The walk** (`Node.walkFrames`, `Node.signsOff`). A checkpoint that more than ⅔ of the trusted
+  frame did not sign, but that is sound on its own (steps 1, 2 and 4), starts a walk. The node reads
+  `hdls/frames` from the public face of each other validator of its trusted frame whose status is
+  ahead of it, one face after another. From the first frame after the one it holds, it takes a frame
+  only when the record entry of the height before that frame, read from the same face
+  (`hdls/record/…`):
+  1. holds a commit that is a quorum of the set that signed it, in which names holding more than ⅔
+     of the held frame's power signed under the held frame's keys;
+  2. recomputes to that commit's block hash; and
+  3. names the new frame's set as its `NextValidatorsHash`.
+
+  The node then holds the new frame, and stops as soon as more than ⅔ of the frame it holds signed
+  the checkpoint: that frame is the trusted frame the checkpoint passes against, and the node adopts
+  the checkpoint as above. A frame that is not signed off, or the face's last line, ends the walk of
+  that face, and the next face is read. A walk takes at most 100 frames from one face, and reads
+  each file up to 64 MiB, as a checkpoint.
+- **Why listing only changes of names or keys is safe.** Nothing in the file is taken on a face's
+  word: each frame is checked against a commit, as above, so a wrong line, or a missing one, costs a
+  fetch, never a false frame. Between two listed frames the names and keys stay the same, and only
+  the powers can change. The walker holds a frame's powers as they were at its first height, past
+  later changes: the trust of a node that checks a checkpoint against its own older view, as every
+  node did before frames. The signatures it counts are still those of the frame's own names, under
+  the frame's own keys, and they must hold more than ⅔ of its power.
+- **How far back.** The record keeps each height for `retainBlocks` heights (604,800 by default),
+  and the file lists frames as far back. A node whose trusted frame is older than that cannot walk:
+  it needs a newer seed from its bank.
+
+## The alarms and the confirmation
+
+- **The fork alarm** (`Node.raiseForkAlarm`). Two checkpoints that both pass commit different blocks
+  at one height ahead of the node: more than ⅓ of a set signed twice. The node adopts neither, logs
+  both commits in full, as the evidence people need, and halts. It does not pick one.
+- **The divergence alarm** (`node/alarms.go`), in three cases:
+  - any node: a checkpoint of the node's committed height, checked against the set that signed it,
+    passes and commits another block than the node's own (`Node.raiseDivergenceAlarmAt`);
+  - a seated node: a checkpoint that passes, of the node's height in progress, commits a block that
+    does not build on the node's last block (`Node.divergesFrom`);
+  - a seated node: it holds precommits from more than ⅔ of the set, in one round, for the block of
+    an authentic proposal it refused (`Node.noteDivergence`): the network committed a block that its
+    own state says is invalid.
+
+  The node logs what the network committed, and its own block, and halts. It is a fork, a broken
+  node, or a false seed, and people must look: the node does not seed itself again.
+- **Halted** (`Node.halt`). A halted node ends its driver and starts no other, so it signs nothing
+  more. It adopts no checkpoint and asks for none: on a fork it would otherwise follow whichever
+  side its peers are on. Its status says why (`halted`, below), in its public folder too. The first
+  alarm is the one kept, and only a restart clears it. What the operator does then is in
+  [operating-a-network.md](operating-a-network.md).
+- **The confirmation** (`Node.noteConfirmation`). A validator precommits only a block it applied to
+  its own state, and its precommit counts only toward a commit of that block. So the first commit
+  that holds the node's own precommit, while it is seated under its own key, is more than ⅔ of the
+  current set agreeing with its state, whoever seeded it. From then the node is **confirmed**: its
+  status says `"confirmed": <that height>`, and `"confirmed": null` before. It is kept in memory
+  only: after a restart the node is unconfirmed until its next such commit.
+- **An observer**, a node that never signs, is never confirmed. The fork alarm applies to it, and
+  only the first case of the divergence alarm. It relies on the checks above.
+
+The status (`/hdls/status`, and the public folder's `hdls/status`) carries `lastBlockHash`,
+`confirmed` and `halted` (see [api.md](api.md#routes-that-answer-reads-get)).
+
+## What a node still trusts, and the limits
+
+- **The first frame.** A fresh node trusts the genesis it is given, and a joiner its bank seeds
+  trusts that snapshot. Someone has to vouch for a new key once. If the seed itself is false, every
+  later check runs inside a false world. A seated joiner on an altered seed is never confirmed, and
+  halts with the divergence alarm once more than ⅔ of the set commit a block its state refuses
+  (`TestJoinerWithAnAlteredSeedHaltsWithTheDivergenceAlarm`). An observer gets no such check. Check
+  a seed's height and block hash with a second bank, by phone, before the joiner starts.
+- **No single peer after it.** Every checkpoint needs more than ⅔ of a frame the node trusts, every
+  frame of a walk is signed off by more than ⅔ of the one before, and every validator of the trusted
+  frame is asked.
+
+The limits:
+
+- **A fork far ahead goes unseen.** The check against the node's own block needs a peer still at
+  the node's height. A checkpoint two or more heights ahead, on the other side of a fork, is adopted
+  without an alarm unless a peer on that side is at the node's own height: nothing else ties it to
+  the node's own block. On an idle chain the peers wait at that height, and the check works. On a
+  busy chain, a node that fell behind on the other side of a fork, with every peer already ahead,
+  adopts their side silently. Seeing it would take a chain of headers. For an observer, which does
+  not run the check of its height in progress, the same holds one height ahead.
+- **The walk reads only public faces.** The gossip port and the operator port serve no frames and no
+  record. A joiner that reaches no public face, or a network whose banks run no fetcher, must be
+  seeded again across a large change of the set.
+- **A carried checkpoint walks no frames** (`POST /hdls/checkpoint`, in pigeon mode): more than ⅔ of
+  the node's own set must have signed it.
+- **No trusting period.** The keys of more than ⅔ of any old frame on the walk's path, stolen or
+  sold, can forge a history: an old frame never stops counting.
+- **A large shift of power with no change of names or keys** can stop a walk. Frames are listed
+  only on a change of names or keys, and the walker holds a frame's powers from its first height.
+  If the powers drift a lot with no such change, and the validators whose power fell are absent
+  from the commit before the next listed frame, that commit may hold ⅔ or less of the held frame's
+  older powers. The walk then fails, and the node needs a newer seed. This was chosen over writing
+  the frames file again at nearly every busy block, as a list of every change of powers would.
+- **A reseed onto the other side of a fork** at the same height keeps the line of the frames file
+  at exactly the height in progress, which may be the other side's. A walker checks it against the
+  record, so it costs a fetch.
+- **More than ⅓ of a set lying together** can still sign two commits at one height. The fork alarm
+  turns that into a stop, not a silent choice, when the node sees both checkpoints in one round of
+  catch-up.
 
 ## Mapping to the audit
 

@@ -1,12 +1,14 @@
 # go_ledger docs
 
-The docs follow the four parts the system is split into, one container each. Three are built: the
-engine (`cmd/server`), the fetcher in front of it (`cmd/fetcher`), and the wallet (`ui/`). The
-signer is not split out yet: the engine still holds the key and signs.
+The docs follow the four parts the system is split into, one container each: the signer
+(`cmd/signer`), which holds a bank's key; the engine (`cmd/server`); the fetcher in front of it
+(`cmd/fetcher`); and the wallet (`ui/`). A bank may also keep its key in the engine and the wallet,
+as the tests and `make demo` do.
 
 **Signature**: the signer. ML-DSA-65, the signing domains and what a signature binds, keys, seeds
-and `keygen`, the sign log that keeps a node from signing twice, and what a double-sign costs.
-Code: `signing/`, `cmd/keygen/`, the sign log in `node/persist.go`.
+and `keygen`, the signer program, its clients, rules and logs, the sign log that keeps a node from
+signing twice, and what a double-sign costs. Code: `signing/`, `cmd/keygen/`, `cmd/signer/`, the
+sign log in `node/persist.go`.
 
 - [signature.md](signature.md)
 
@@ -15,24 +17,25 @@ Code: `signing/`, `cmd/keygen/`, the sign log in `node/persist.go`.
 the snapshot, catch-up, the idle chain, the signature record, the public folder it writes, and
 bundles. Code: `ledger/`, `consensus/`, and `node/` but its HTTP side.
 
-- [architecture.md](architecture.md): the packages, the state, the block, the pools, the event
-  loop, the idle chain, the signature record, the public folder and bundles.
+- [architecture.md](architecture.md): the packages, where the key lives, the state, the block, the
+  pools, the event loop, the idle chain, the signature record, the public folder and bundles.
 - [consensus.md](consensus.md): the ⅔ commit rule, the round driver, the timers and the slow-down
-  switch, intake of proposals and votes, the double-sign freeze and the one-third cap, catch-up and
-  the checkpoint.
+  switch, intake of proposals and votes, the two sign logs, the double-sign freeze and the one-third
+  cap, catch-up and the checkpoint, frames and the walk, the fork and divergence alarms and the
+  confirmation, and what a joiner still trusts.
 - [governance.md](governance.md): the ten parameters, parameter changes, the ⅔ name action, and the
-  names as a name service.
+  names as a name service: TLS keys and the zone file.
 
 **API/CDN**: the engine's two ports, and the public face in front of them. The gossip port and its
 allow list, the operator port, the fetcher that serves the public face behind a CDN, the HTTP routes
 and what each costs, peers and relay, the record served a unit at a time, the server's and the
 fetcher's config, and the containers. Code: `node/httptransport.go` (the record, bundle and
 checkpoint routes too), `node/allowlist.go`, `node/relay.go`, `node/topology.go`, `node/peerdns.go`,
-the fetches in `node/sync.go`, `cmd/server/`, `cmd/fetcher/`, `cmd/demo/`, `cmd/quickstart/`,
-`deploy/`.
+the fetches in `node/sync.go` and `node/frames.go`, `cmd/server/`, `cmd/fetcher/`, `cmd/demo/`,
+`cmd/quickstart/`, `deploy/`.
 
-- [api.md](api.md): the two ports and the public face, every route, its answer and its cost; how
-  messages travel.
+- [api.md](api.md): the two ports and the public face, every route, its answer and its cost, the
+  public files of the name service and the frames; the signer's one route; how messages travel.
 - [operating-a-network.md](operating-a-network.md): build, keys, the genesis file, the node config,
   network exposure and the allow list, the fetcher and the CDN, restarts, the record on disk, a
   leaked bank key, when the network splits (pigeon mode), a new genesis, `make demo` and

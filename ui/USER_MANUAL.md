@@ -72,7 +72,10 @@ The form can also publish where your name is reached. Most people leave these bl
   `https://`, the host in lowercase and maybe a port, with nothing after, such as
   `https://bank-a.example`;
 - up to 4 **IP addresses**, separated by spaces, such as `203.0.113.7 2001:db8::7`. They replace the
-  ones you published before. A bank's are where the other banks send it their messages.
+  ones you published before. A bank's are where the other banks send it their messages;
+- up to 2 **TLS keys**, for a website: the SHA-256 of the web server's key, 64 hex digits each, the
+  current one and the next. They replace the ones you published before. When a bank lists them,
+  every wallet takes from the bank's website only a key it lists.
 
 The wallet refuses another form, a trailing `/` included, and says why. **What you publish is public
 for good:** anyone can read it, and anyone may have kept a copy, even after you clear it with `-`.
@@ -204,6 +207,16 @@ votes waiting for a block, but a vote you submit gets: *"votes are submitted on 
 node, not at its public address, which passes on only payments, account updates and name
 requests"*. Your desk, below, works at either address.
 
+**If your bank runs a signer**, your wallet holds no key: the bank's key is in the signer, a
+program of its own on your bank's own network, and your wallet asks it for each signature. Your
+organiser starts the wallet with three more settings, `-signer-url`, `-signer-client` and
+`-signer-secret-file`, and with a wallet file that holds the bank's public key only. It asks for no
+passphrase. The signer signs only what your terminal's list allows: a desk terminal co-signs and
+freezes, an admin terminal pays, updates the bank's account and votes, and a terminal may do both.
+Anyone who can open your wallet's page can sign as the bank, so open it only on your own machine,
+never where others reach it. A wallet that others could reach, such as one in a container, asks for
+a password when you open it: any user name, and the password your organiser gives you.
+
 A customer may bring a payment saved as text. Save the text as a file, and take it in on your
 engine's operator port, as [the runbook](../docs/operating-a-network.md#bundles) shows:
 `curl --data-binary @payment.txt http://10.0.0.2:8080/hdls/bundle`. The answer says whether it was
@@ -211,9 +224,9 @@ taken or refused, not why.
 
 ## For banks: the desk
 
-Your desk is the Requests page of your bank's wallet, which holds the bank's key. Co-sign a request
-only after checking the holder in person or by a second channel. For a key change, confirm with the
-name's holder, by a second channel, that they asked for it.
+Your desk is the Requests page of your bank's wallet, which holds the bank's key or signs through
+its signer. Co-sign a request only after checking the holder in person or by a second channel. For a
+key change, confirm with the name's holder, by a second channel, that they asked for it.
 
 When you sign, the page shows the request's facts; nothing is sent yet. If they name a **new key**,
 compare its fingerprint with the "your key" fingerprint on the new key's own wallet page: the
@@ -297,6 +310,19 @@ the wallet uses it.
 
 **It says "votes are submitted on the bank's operator node".** You run a bank, and your wallet uses
 your public address. Restart it with your engine's operator port: see "For banks: your own wallet".
+
+**It says "the signer answered 403 Forbidden in …: domain … is not in this client's list".** You
+run a bank, and your terminal may not sign that: a desk terminal may not pay, update the bank's
+account or vote. Use the terminal that may, or ask your organiser.
+
+**It says "the signer answered 401 Unauthorized", or "connection refused" with the signer's
+address.** Your bank's wallet cannot reach its signer, or the signer does not know it. Tell your
+organiser. "The signer failed less than a second ago" means the same: wait a second and try again.
+
+**It says a bank's "web server … shows a key that is not the one on chain".** The bank lists the
+keys of its website on the ledger, and the website showed another. Someone may stand between you
+and the bank, or the bank changed its key without listing the new one first. Don't send anything,
+and ask your bank.
 
 **It says "this node does not take …: it answered 404 Not Found".** The address your wallet uses
 is not a bank's public address or node. Check it with your organiser.

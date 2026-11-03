@@ -1,10 +1,11 @@
 # go_ledger_ui — wallet
 
-Area: **UI**. A local wallet for a go_ledger network. It holds your key on your own machine, shows
-your name, your balance and the accounts on the ledger, pays by name, freezes your name, and drafts
-and signs name requests and governance votes with simple forms. When the bank can't be reached, it
-can sign a payment as text for someone to carry to a bank, and read a checkpoint from a file. Code:
-`ui/`, with its pages in `ui/templates/`.
+Area: **UI**. A local wallet for a go_ledger network. It holds your key on your own machine, or, as
+a bank's wallet, signs through the bank's signer. It shows your name, your balance and the accounts
+on the ledger, pays by name, freezes your name, and drafts and signs name requests and governance
+votes with simple forms. When the bank can't be reached, it can sign a payment as text for someone
+to carry to a bank, and read a checkpoint from a file. Code: `ui/`, with its pages in
+`ui/templates/`.
 
 It is a separate program and Go module from the node. It lives under `ui/` and can move to its own
 repository once the root module is published: drop the `replace` in `go.mod` and require that
@@ -25,6 +26,10 @@ Then open <http://127.0.0.1:8090> in a browser. From the repository root, `make 
 | `-wallet` | the key file; created on first run if absent | `wallet.json` |
 | `-listen` | where the wallet serves its pages (keep it local) | `127.0.0.1:8090` |
 | `-lookahead` | how many blocks ahead a payment or a freeze names, at most 32: a burst of payments runs up to 32 blocks further, inside the node's 64-block window | `3` |
+| `-signer-url` | a bank's wallet whose key is in the bank's signer: where the signer listens, such as `http://172.28.71.254:7000`. `-wallet` then holds the bank's public key only (below) | none |
+| `-signer-client` | with `-signer-url`: the client name the signer's config gives this wallet, such as `desk` or `admin` | none |
+| `-signer-secret-file` | with `-signer-url`: the file that holds that client's secret, as `keygen -secret` prints it | none |
+| `-password-file` | a file holding the password the wallet asks for, under any user name; required unless `-listen` is a loopback IP address, such as `127.0.0.1` (see "Security notes") | none |
 
 ## Which address to give `-node`
 
@@ -68,7 +73,9 @@ The main page also asks `GET /hdls/status` of every validator, at its public add
 
 The wallet keeps three files side by side. Back them up and restore them together.
 
-- **`wallet.json`, the key file.** `publicKey`, the key the seed derives, and the 32-byte seed:
+- **`wallet.json`, the key file.** For a bank's wallet that signs through its signer, the bank's
+  public key only, `{"publicKey": "<base64>"}` (below). Otherwise `publicKey`, the key the seed
+  derives, and the 32-byte seed:
   `privateKey` in plain base64, or `encryptedPrivateKey`, sealed with a passphrase (PBKDF2-HMAC-SHA256
   and AES-256-GCM, mode `0600`). On load the wallet derives the key from the seed and refuses a file
   whose `publicKey` differs. A file whose private key is not a 32-byte seed belongs to an earlier
@@ -129,6 +136,64 @@ The wallet keeps three files side by side. Back them up and restore them togethe
   sent (`freezeName`, `freezeBlockID`). Started on another network name, the wallet begins a fresh
   one.
 
+## A bank's wallet through its signer
+
+A bank whose key is in its signer (`cmd/signer`, see
+[signature.md](../docs/signature.md#the-signer)) runs its wallet with no key. The wallet asks the
+signer for each signature, as one of the signer's clients, and checks each answer under the bank's
+public key before it uses it. Everything else, the pin, the drafts and the pages, stays as it is.
+
+    ./wallet -node http://10.0.0.2:8080 -network village -wallet bank-a.wallet.json \
+        -signer-url http://172.28.71.254:7000 -signer-client desk -signer-secret-file desk.secret
+
+- **Its file** holds the bank's public key only, the one the engine's config gives:
+  `{"publicKey": "<base64>"}`. The wallet never writes a key into it, and asks for no passphrase.
+  Its `.trust` and `.state` files go beside it, as for any wallet.
+- **Its client.** The signer signs only the domains its config lists for the client the wallet
+  names: the desk's (`registration`, `name-request-bank`, `freeze`), the admin page's
+  (`parameter-vote`, `reassignment-vote`, `payment`, `account-update`, `freeze`), or both, for one
+  wallet that is both, as the quickstart's `wallet` client is. A page that asks for any other gets the
+  signer's refusal. No client gets `key-change` or `bank-change`: a bank's own key changes by the ⅔
+  name action.
+- **Who may reach it.** A bank's wallet signs as the bank: whoever drives it signs with the bank's
+  key. Keep it on `127.0.0.1`, or on a network only its operator's machine joins, never on a network
+  others share. Anywhere but a loopback address it asks for a password (see "Security notes").
+- **It shares the signer with the engine.** The signer answers one request, then the next, so a
+  wallet, or a script, that sends request after request delays the bank's votes.
+
+At start it checks its flags and its file, not the signer, and refuses with one of:
+
+- `-signer-url, -signer-client and -signer-secret-file go together: where the signer listens, the
+  client name its config gives this wallet, and that client's secret file`
+- `with -signer-url, the wallet file must hold the bank's public key, as {"publicKey": "<base64>"}: …`,
+  such as `open bank-a.wallet.json: no such file or directory`: a missing file is an error, never a
+  new key
+- `wallet file bank-a.wallet.json holds a private key, and -signer-url names a signer: a wallet signs
+  with its own key or through the signer, not both. A bank's wallet file for its signer holds the
+  bank's public key only`
+- `wallet file bank-a.wallet.json: its publicKey is not a public key of the network's scheme: …`
+- `-signer-secret-file: the secret file desk.secret does not hold 64 lowercase hex digits, as keygen
+  -secret prints them`
+
+And a file that holds a public key only, started without the flags, gets: `wallet file
+bank-a.wallet.json holds a public key only, as a bank's wallet whose key is in its signer does: name
+the signer with -signer-url, -signer-client and -signer-secret-file`.
+
+The first signature is the first time it asks the signer. When the signer says no, the page shows
+why:
+
+| The page says | What it means |
+|---|---|
+| `the signer answered 403 Forbidden in parameter-vote: domain "parameter-vote" is not in this client's list` | this wallet's client may not sign that: use the terminal whose client may |
+| `the signer answered 401 Unauthorized in payment: unknown client` | the signer's config has no client of the `-signer-client` name |
+| `the signer answered 401 Unauthorized in payment: the HMAC does not match the body under this client's secret` | the wallet's secret file is not the signer's for that client |
+| `Post "http://172.28.71.254:7000/sign": dial tcp 172.28.71.254:7000: connect: connection refused` | the signer is down, or not at `-signer-url` |
+| `the signer failed less than a second ago: no request until a second has passed` | within a second of a failure, every request fails at once: try again |
+| `the signer's answer in payment does not verify under publicKey: the signer holds another key, or another program answered` | the wallet file's key is not the signer's |
+
+A payment or an account update the signer refuses has still taken its block of the payment counter
+(below), as one the node refuses does.
+
 ## How it works
 
 - **One verified state per page.** Each page reads the node's `/hdls/checkpoint` once, checks it
@@ -176,6 +241,28 @@ The wallet keeps three files side by side. Back them up and restore them togethe
   be: they choose a note, never the state the page shows, which the pinned ⅔ signed. Lying nodes
   raise a false "behind" only if their banks hold more than ⅓ of the power, and make a hiding node
   look aligned only if they hold more than ⅓ too.
+- **The TLS pin.** A bank may list its web server's TLS keys on its account. Once the wallet holds a
+  verified state, it reaches the public address of a bank of that state, if the address is
+  `https://` and the bank lists TLS keys and is not frozen, only through a server whose
+  certificate's key is one of them (`tlspin.go`). It asks no certificate authority then, so the
+  chain's record stands in for one. Where two banks publish one address, the key must be one that
+  each lists. It holds for the wallet's own node and for the other banks' check.
+  - Only a bank's record counts, a validator's: any name may list any address, so a name that is not
+    a bank could otherwise list a bank's address with a key of its own.
+  - The address must match as the bank wrote it on chain, `https://host[:port]`.
+  - The keys are those of the newest state the wallet verified. A bank that switches its server to a
+    key it listed after that state is refused by a running wallet, which then cannot read the newer
+    state through that server, until it restarts. So a bank lists its next key well before it
+    switches to it.
+  - Before the wallet verifies a state, at its first read after each start, there is nothing to pin,
+    and the usual check by certificate authority applies. So a bank keeps a certificate one signed.
+    The pin guards the channel after that; the state itself is believed only when the pinned ⅔
+    signed it, whatever channel it came by.
+  - A server whose key is not on chain is refused: "bank-a's web server at https://bank-a.example
+    shows a key that is not the one on chain: someone may stand between this wallet and the bank, or
+    the bank changed its web server's key without listing the new one first". From the wallet's own
+    node, the page shows it after "cannot read a verified state from the node"; from another bank,
+    that bank counts as one that did not answer.
 - **Its name.** The wallet's name is the account whose current key is the wallet's key. A name whose
   pending key change is to this key shows as "becomes yours at block N". With neither, the page
   says "not registered" and shows the key's fingerprint (the first 16 hex digits of the SHA-256 of
@@ -246,15 +333,20 @@ The wallet keeps three files side by side. Back them up and restore them togethe
     wallet runs, the file's state stands in for a node that serves an older one, and after a
     restart such a node is refused as older.
 - **Account form.** A description; the name your balance backs as stake (a delegate); a public
-  address (a bank's public face, or a website); and up to 4 IP addresses, separated by spaces, which
-  replace the whole list. A validator's IP addresses are where the others send it gossip, on the
-  network's gossip port, and the addresses the others take its gossip from (the allow list). A blank
-  field is left as it is; `-` clears it.
+  address (a bank's public face, or a website); up to 4 IP addresses, separated by spaces, which
+  replace the whole list; and up to 2 TLS keys, separated by spaces, which replace the whole list
+  too. A validator's IP addresses are where the others send it gossip, on the network's gossip port,
+  and the addresses the others take its gossip from (the allow list). A blank field is left as it
+  is; `-` clears it.
   - A public address is `http://` or `https://`, a host in lowercase and an optional `:port`, nothing
     after it (for example `https://bank-a.example`, never `https://bank-a.example/`).
   - An IP address is written in its one plain form: `10.0.0.2`, or IPv6 in its shortest lowercase
     form such as `2001:db8::1`; no zone, no IPv4 address written as IPv6, no `0.0.0.0`, `::` or
     multicast address, none twice.
+  - A TLS key is the SHA-256 of the web server's key (its SubjectPublicKeyInfo), as 64 lowercase hex
+    digits: the current key and the next, so the server can change keys without a gap. The runbook
+    gives the `openssl` command
+    ([operating-a-network.md](../docs/operating-a-network.md#the-genesis-file)).
   - The wallet and every node refuse another form with the reason, as the ledger does.
   - The form says what it publishes is public. It stays public: anyone may have kept a copy, even
     after it is cleared.
@@ -328,11 +420,18 @@ warns on every start.
 ## Running in a container
 
 `make images` builds the wallet's image, `go-ledger-ui` (`deploy/ui.Dockerfile`): one static binary in
-an empty image, run as the numeric user 65532. It listens on `:8090` in the container and keeps its
-three files in `/wallet`:
+an empty image, run as the numeric user 65532. It listens on `:8090` in the container, where any
+other container on its network reaches it, so it asks for a password, from a file you mount, and
+keeps its three files in `/wallet`:
 
-    docker run -p 127.0.0.1:8090:8090 -v wallet:/wallet go-ledger-ui -node https://bank-a.example -network village
+    docker run -p 127.0.0.1:8090:8090 -v wallet:/wallet -v "$PWD/wallet.password":/wallet.password:ro \
+        go-ledger-ui -node https://bank-a.example -network village -password-file /wallet.password
 
+- `wallet.password` holds the password on one line; make one with
+  `head -c 18 /dev/urandom | base64 > wallet.password`, before the `docker run`, or Docker makes a
+  folder of that name. The container's user, 65532, must be able to read it: keep it in a folder
+  only you can open, and make the file itself readable (`chmod 644 wallet.password`). The browser
+  asks for the password once, under any user name.
 - Publish the port on this machine only (`127.0.0.1`), and under the same number, 8090: the wallet
   refuses a request for another port (see "Security notes").
 - A container has no terminal unless it is started with `-it`. Without one, pass the passphrase in
@@ -347,14 +446,25 @@ holding 0% of the power. A wallet run in a container on that network checks them
 [operating-a-network.md](../docs/operating-a-network.md#four-banks-on-one-machine-the-quickstart)
 gives the command.
 
+The quickstart also runs each bank's own wallet, in a container that signs through the bank's
+signer, at `http://127.0.0.1:18091` to `18094`. It asks for the password the quickstart wrote for it,
+such as `deploy/quickstart/bank-a.wallet.password`, under any user name. It is on the Compose
+network, so it checks all four banks.
+
 ## Security notes
 
 - The wallet answers only requests addressed to it: a `Host` naming the `-listen` host, `localhost`
   or a loopback address on the `-listen` port, or, when it listens on every interface, any IP
   address on that port. So it can be reached across the LAN by IP, but not under a host name another
-  page controls (DNS rebinding). Anyone who can reach it can use it: it has no login, so keep it on
-  `127.0.0.1`. A form must come from the wallet's own page (its `Origin` or `Referer`), and no other
-  page can frame it.
+  page controls (DNS rebinding). A form must come from the wallet's own page (its `Origin` or
+  `Referer`), and no other page can frame it.
+- That guard stops another page in the browser, never a program on the network, which sends the
+  headers the guard wants. On a loopback IP address the wallet asks for nothing more, so keep it on
+  `127.0.0.1`. Listening anywhere else, such as `:8090` in a container, or on a host name, even
+  `localhost`, which the hosts file or DNS resolves, it refuses to start without `-password-file`,
+  a file holding a password, and asks for that password, under any user name, in the browser's own
+  login box, behind the guard. Over plain http the password crosses the network as it is: never let
+  others watch the wallet's traffic.
 - The "copy my full key" button uses the browser's clipboard, which browsers allow only in a secure
   context. `localhost` and `127.0.0.1`, the default `-listen`, work. A wallet opened by LAN address
   over plain http cannot copy its full key, and a key change needs the new wallet's full key.
@@ -369,6 +479,9 @@ gives the command.
   the wallet shows, never forge it.
 - A first use through a public address trusts whatever banks that address and its CDN serve. Give
   customers the bank's list, or have their first use at the bank (see "Its files").
+- A bank's wallet that signs through its signer signs as the bank. Reach it from the operator's
+  machine only, never from a network others share, and beyond a loopback address give it its password (see "A
+  bank's wallet through its signer").
 - One account per wallet: a multi-account wallet is not planned (spec §1 lists it as a non-goal).
   A pair from `keygen` goes in only by writing the key file before the first start (above); there
   is no import or export page.

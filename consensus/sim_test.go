@@ -84,7 +84,7 @@ type consensusSimulator struct {
 	decisions map[int][32]byte // driver index -> decided digest
 }
 
-func newSimulator(t *testing.T, seed int64, validatorCount int, dropProbability float64, maxDelay int64) (*consensusSimulator, []*signing.Signer) {
+func newSimulator(t *testing.T, seed int64, validatorCount int, dropProbability float64, maxDelay int64) (*consensusSimulator, []signing.Signer) {
 	t.Helper()
 	random := rand.New(rand.NewSource(seed))
 	signers, validatorSet := makeValidators(t, validatorCount)

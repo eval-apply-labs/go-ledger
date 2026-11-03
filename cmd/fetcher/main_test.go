@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +25,9 @@ const (
 	testGovernance  = `{"parameters":{}}`
 	testBundle      = `{"bundle":1,"networkId":"village/00ab","from":"bank","heightInProgress":200}`
 	testNameRecord  = `{"name":"alice","publicKey":"…","bank":"bank","frozen":false}`
+	testZone        = "$ORIGIN hdls.example.org.\n$TTL 60\n@ SOA ns1.example.org. hostmaster.example.org. 199 300 60 86400 60\n"
+	testFrames      = `{"height":1,"validatorsHash":"…","validators":[]}` + "\n"
+	testIPLookup    = `["carol","dave (frozen)"]` + "\n"
 	testUnit        = "{\"Height\":0}\n{\"Height\":1}\n"
 	testLifelong    = "{\"Height\":7}\n"
 	testSecret      = "a file outside the folders"
@@ -61,6 +67,10 @@ func writeTestFolders(t *testing.T) testFolders {
 		filepath.Join(folders.publicFolder, "hdls", "resolve", "name", "alice"):      testNameRecord,
 		filepath.Join(folders.publicFolder, "hdls", "resolve", "name", "alice.tmp"):  testIncoming,
 		filepath.Join(folders.publicFolder, "hdls", "resolve", "key", testKey):       testNameRecord,
+		filepath.Join(folders.publicFolder, "hdls", "zone"):                          testZone,
+		filepath.Join(folders.publicFolder, "hdls", "frames"):                        testFrames,
+		filepath.Join(folders.publicFolder, "hdls", "resolve", "ip", "198.51.100.7"): testIPLookup,
+		filepath.Join(folders.publicFolder, "hdls", "resolve", "ip", "2001:db8::7"):  testIPLookup,
 		filepath.Join(folders.publicFolder, ".incoming", "status"):                   testIncoming,
 		filepath.Join(folders.publicFolder, "hdls", ".incoming", "status"):           testIncoming,
 		filepath.Join(folders.publicFolder, "hdls", "resolve", "name", ".incoming"):  testIncoming,
@@ -90,7 +100,7 @@ func newTestFetcher(t *testing.T, folders testFolders, engineURL string, maxSubm
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewFetcher(folders.publicFolder, folders.recordFolder, folders.lifelongRecordPath, parsedEngineURL, maxSubmissionsPerSecond)
+	return NewFetcher(folders.publicFolder, folders.recordFolder, folders.lifelongRecordPath, parsedEngineURL, maxSubmissionsPerSecond, "", nil)
 }
 
 // serve sends one request, its target as it would stand on the request line, raw, so ".." and %2e
@@ -117,6 +127,10 @@ func TestFetcherServesEveryListedPath(t *testing.T) {
 		{"/hdls/bundle", testBundle, "application/x-ndjson", "max-age=1"},
 		{"/hdls/resolve/name/alice", testNameRecord, "application/json", "max-age=5"},
 		{"/hdls/resolve/key/" + testKey, testNameRecord, "application/json", "max-age=5"},
+		{"/hdls/zone", testZone, "text/plain; charset=utf-8", "max-age=5"},
+		{"/hdls/frames", testFrames, "application/x-ndjson", "max-age=1"},
+		{"/hdls/resolve/ip/198.51.100.7", testIPLookup, "application/json", "max-age=5"},
+		{"/hdls/resolve/ip/2001:db8::7", testIPLookup, "application/json", "max-age=5"},
 		{"/hdls/record/" + firstUnit, testUnit, "application/x-ndjson", "max-age=31536000, immutable"},
 		{"/hdls/record/" + secondUnit, testUnit, "application/x-ndjson", "max-age=31536000, immutable"},
 		{"/hdls/record/" + unitInProgress, testUnit, "application/x-ndjson", "max-age=5"},
@@ -251,6 +265,16 @@ func TestFetcherRefusesEverythingElse(t *testing.T) {
 		{"GET", "/hdls/resolve/key/" + strings.ToUpper(testKey), 404, ""},
 		{"GET", "/hdls/resolve/key/" + strings.Repeat("g", 64), 404, ""},
 		{"GET", "/hdls/resolve/key/alice", 404, ""},
+		// IP addresses not in their one plain form (ledger.CanonicalIPAddress).
+		{"GET", "/hdls/resolve/ip/198.051.100.7", 404, ""},
+		{"GET", "/hdls/resolve/ip/2001:DB8::7", 404, ""},
+		{"GET", "/hdls/resolve/ip/2001:db8:0::7", 404, ""},
+		{"GET", "/hdls/resolve/ip/::ffff:198.51.100.7", 404, ""},
+		{"GET", "/hdls/resolve/ip/fe80::1%25eth0", 404, ""},
+		{"GET", "/hdls/resolve/ip/0.0.0.0", 404, ""},
+		{"GET", "/hdls/resolve/ip/bank-a.example", 404, ""},
+		{"GET", "/hdls/resolve/ip/%2e%2e", 404, ""},
+		{"GET", "/hdls/resolve/ip/", 404, ""},
 		// Record units that are not 20 digits and ".jsonl".
 		{"GET", "/hdls/record/0000000000000000000.jsonl", 404, ""},
 		{"GET", "/hdls/record/000000000000000000000.jsonl", 404, ""},
@@ -263,6 +287,9 @@ func TestFetcherRefusesEverythingElse(t *testing.T) {
 		{"PUT", "/hdls/checkpoint", 405, "GET, HEAD"},
 		{"DELETE", "/hdls/resolve/name/alice", 405, "GET, HEAD"},
 		{"POST", "/hdls/resolve/key/" + testKey, 405, "GET, HEAD"},
+		{"POST", "/hdls/resolve/ip/198.51.100.7", 405, "GET, HEAD"},
+		{"PUT", "/hdls/zone", 405, "GET, HEAD"},
+		{"POST", "/hdls/frames", 405, "GET, HEAD"},
 		{"POST", "/hdls/record/" + firstUnit, 405, "GET, HEAD"},
 		{"POST", "/hdls/lifelong-record.jsonl", 405, "GET, HEAD"},
 		{"GET", "/hdls/pay", 405, "POST"},
@@ -292,11 +319,16 @@ func TestFetcherRefusesEverythingElse(t *testing.T) {
 func TestFetcherAnswersAMissingListedFile404ForASecond(t *testing.T) {
 	folders := writeTestFolders(t)
 	fetcher := newTestFetcher(t, folders, "http://engine.invalid", 100)
-	if err := os.Remove(filepath.Join(folders.publicFolder, "hdls", "bundle")); err != nil {
-		t.Fatal(err)
+	for _, file := range []string{"bundle", "frames", "zone"} {
+		if err := os.Remove(filepath.Join(folders.publicFolder, "hdls", file)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, target := range []string{
 		"/hdls/bundle",
+		"/hdls/frames",
+		"/hdls/zone",
+		"/hdls/resolve/ip/192.0.2.1",
 		"/hdls/resolve/name/nobody",
 		"/hdls/resolve/name/carol", // a folder
 		"/hdls/resolve/key/" + strings.Repeat("cd", 32),
@@ -459,7 +491,7 @@ func TestFetcherCapsTheSubmissionBody(t *testing.T) {
 // The window counts submissions per second of the clock: the cap's worth pass, the next is refused
 // until the next second, and a refused submission is not counted.
 func TestSubmissionLimitAllowsTheCapEachSecond(t *testing.T) {
-	limit := &submissionLimit{perSecond: 2}
+	limit := &submissionLimit{perSecond: 2, senders: map[netip.Addr]int{}}
 	second := time.Unix(1_000_000, 0)
 	for i, test := range []struct {
 		at        time.Time
@@ -474,7 +506,7 @@ func TestSubmissionLimitAllowsTheCapEachSecond(t *testing.T) {
 		{second.Add(time.Second + 2*time.Millisecond), false},
 		{second.Add(5 * time.Second), true},
 	} {
-		if got := limit.allow(test.at); got != test.wantAllow {
+		if got := limit.allow(test.at, netip.MustParseAddr("192.0.2.1")); got != test.wantAllow {
 			t.Errorf("submission %d at %v: allowed %v, want %v", i, test.at, got, test.wantAllow)
 		}
 	}
@@ -505,4 +537,120 @@ func TestFetcherAnswers429AboveTheCap(t *testing.T) {
 		return
 	}
 	t.Fatal("100 submissions at a cap of 1 a second: none refused")
+}
+
+// captureLog sends the log to a buffer until the test ends, and returns the buffer.
+func captureLog(t *testing.T) *bytes.Buffer {
+	logged, previousOutput := &bytes.Buffer{}, log.Writer()
+	log.SetOutput(logged)
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+	return logged
+}
+
+// submitFrom posts count payments to fetcher from address, as the connection's address.
+func submitFrom(fetcher *Fetcher, address string, count int) {
+	for range count {
+		request := httptest.NewRequest(http.MethodPost, "/hdls/pay", strings.NewReader(`{}`))
+		request.RemoteAddr = netip.AddrPortFrom(netip.MustParseAddr(address), 40000).String()
+		fetcher.ServeHTTP(httptest.NewRecorder(), request)
+	}
+}
+
+// After a minute in which the cap answered 429, the fetcher logs the five addresses that sent the most
+// submissions, the most first, each with the names its hdls/resolve/ip file lists, or no name (spec
+// §3.4). After a minute with no 429 it logs nothing, however many submissions came.
+func TestFetcherLogsTheAddressesThatSentTheMost(t *testing.T) {
+	stub := &engineStub{}
+	engine := httptest.NewServer(stub)
+	defer engine.Close()
+	fetcher := newTestFetcher(t, writeTestFolders(t), engine.URL, 1)
+	logged := captureLog(t)
+	for i, address := range []string{"203.0.113.1", "198.51.100.7", "203.0.113.3", "2001:db8::7", "203.0.113.5", "203.0.113.6", "203.0.113.7"} {
+		submitFrom(fetcher, address, []int{3, 9, 4, 6, 5, 2, 1}[i])
+	}
+	fetcher.reportSenders()
+	want := "the cap of 1 submissions a second answered 429 in the last minute; the addresses that sent the most: " +
+		"198.51.100.7 sent 9, listed by carol, dave (frozen); 2001:db8::7 sent 6, listed by carol, dave (frozen); " +
+		"203.0.113.5 sent 5, listed by no name; 203.0.113.3 sent 4, listed by no name; 203.0.113.1 sent 3, listed by no name\n"
+	if line := logged.String(); !strings.HasSuffix(line, want) || strings.Count(line, "\n") != 1 {
+		t.Errorf("the line is\n%s\nwant\n%s", line, want)
+	}
+
+	logged.Reset()
+	fetcher.reportSenders()
+	fetcher.submissionLimit.perSecond = 100
+	submitFrom(fetcher, "203.0.113.1", 20)
+	fetcher.reportSenders()
+	if logged.Len() != 0 {
+		t.Errorf("minutes without a 429 were logged: %q", logged.String())
+	}
+}
+
+// The senders the CDN's header gave no address for are counted together, and the line says so: they
+// are no address, and no name lists them.
+func TestFetcherLogsTheSendersOfNoAddress(t *testing.T) {
+	fetcher := NewFetcher("", "", "", &url.URL{}, 1, "X-Forwarded-For", []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24")})
+	logged := captureLog(t)
+	for range 3 {
+		request := httptest.NewRequest(http.MethodPost, "/hdls/pay", strings.NewReader(`{}`))
+		request.RemoteAddr = "198.51.100.10:443"
+		request.Header.Set("X-Forwarded-For", "192.0.2.66:51234")
+		fetcher.ServeHTTP(httptest.NewRecorder(), request)
+	}
+	fetcher.reportSenders()
+	if want := "the addresses that sent the most: senders the CDN's header gave no address for sent 3\n"; !strings.HasSuffix(logged.String(), want) {
+		t.Errorf("the line is\n%s\nwant it to end with\n%s", logged.String(), want)
+	}
+}
+
+// Behind a CDN the client's address is the last one in the header the CDN sets, but only on a
+// connection from the CDN's addresses (spec §3.4, Q11): from anyone else the header is ignored, or
+// anyone could blame any address. A header from the CDN that holds no address, such as one with a port,
+// gives an unknown sender, the zero Addr ("" below), never the CDN's own address, which a name may list.
+func TestFetcherTakesTheClientAddressFromTheCDNHeaderOnly(t *testing.T) {
+	cdn := []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("2001:db8:cd::/48")}
+	behindCDN := NewFetcher("", "", "", &url.URL{}, 1, "X-Forwarded-For", cdn)
+	noCDN := NewFetcher("", "", "", &url.URL{}, 1, "", nil)
+	for _, test := range []struct {
+		fetcher    *Fetcher
+		connection string
+		header     []string
+		want       string
+	}{
+		{behindCDN, "198.51.100.10:443", []string{"192.0.2.66"}, "192.0.2.66"},
+		{behindCDN, "198.51.100.10:443", []string{"203.0.113.5, 192.0.2.66"}, "192.0.2.66"}, // the CDN adds the address it saw last
+		{behindCDN, "198.51.100.10:443", []string{"203.0.113.5", "192.0.2.66"}, "192.0.2.66"},
+		{behindCDN, "[::ffff:198.51.100.10]:443", []string{"2001:db8::66"}, "2001:db8::66"},
+		{behindCDN, "[2001:db8:cd::1]:443", []string{"::ffff:192.0.2.66"}, "192.0.2.66"},
+		{behindCDN, "198.51.100.10:443", []string{"not an address"}, ""},
+		{behindCDN, "198.51.100.10:443", []string{"192.0.2.66:51234"}, ""},
+		{behindCDN, "198.51.100.10:443", []string{"[2001:db8::66]"}, ""},
+		{behindCDN, "198.51.100.10:443", nil, "198.51.100.10"},
+		{behindCDN, "203.0.113.9:443", []string{"192.0.2.66"}, "203.0.113.9"}, // not the CDN's
+		{noCDN, "198.51.100.10:443", []string{"192.0.2.66"}, "198.51.100.10"},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/hdls/pay", nil)
+		request.RemoteAddr = test.connection
+		for _, value := range test.header {
+			request.Header.Add("X-Forwarded-For", value)
+		}
+		want, _ := netip.ParseAddr(test.want) // "" gives the zero Addr
+		if got := test.fetcher.clientAddress(request); got != want {
+			t.Errorf("from %s with %q (CDN %v): the client's address is %s, want %s", test.connection, test.header, test.fetcher.cdnAddresses, got, want)
+		}
+	}
+}
+
+// -cdn-addresses takes addresses and prefixes, comma-separated, written as the fetcher compares them.
+func TestAddressPrefixes(t *testing.T) {
+	prefixes, err := addressPrefixes("198.51.100.0/24,203.0.113.7,2001:db8::/32")
+	want := []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("203.0.113.7/32"), netip.MustParsePrefix("2001:db8::/32")}
+	if err != nil || !slices.Equal(prefixes, want) {
+		t.Errorf("addressPrefixes: %v (error %v), want %v", prefixes, err, want)
+	}
+	for _, list := range []string{"", "198.51.100.0/24,", "198.51.100.7/24", "::ffff:198.51.100.7", "fe80::1%eth0", "cdn.example", "198.51.100.0/33"} {
+		if _, err := addressPrefixes(list); err == nil {
+			t.Errorf("addressPrefixes took %q", list)
+		}
+	}
 }

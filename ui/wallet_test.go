@@ -39,7 +39,7 @@ func TestWalletFindsItsNameByKey(t *testing.T) {
 	if _, _, err := wallet.Send("shop", "1"); err == nil || !strings.Contains(err.Error(), "not the key of any name") {
 		t.Errorf("a wallet holding no name paid: %v", err)
 	}
-	if _, err := wallet.UpdateAccount("hello", "", "", ""); err == nil || !strings.Contains(err.Error(), "not the key of any name") {
+	if _, err := wallet.UpdateAccount("hello", "", "", "", ""); err == nil || !strings.Contains(err.Error(), "not the key of any name") {
 		t.Errorf("a wallet holding no name sent an update: %v", err)
 	}
 	if posts := testNode.posted(); len(posts) != 0 {
@@ -266,10 +266,10 @@ func TestAccountUpdatesNameBlocksOfTheirOwn(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	testNode.setState(nil, ledger.Account{Name: "kay", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
-	if _, err := wallet.UpdateAccount("the corner shop", "", "", ""); err != nil {
+	if _, err := wallet.UpdateAccount("the corner shop", "", "", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := wallet.UpdateAccount("", "kay", "", ""); err != nil {
+	if _, err := wallet.UpdateAccount("", "kay", "", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	var description, delegation ledger.AccountUpdate
@@ -341,7 +341,7 @@ func TestSaveStepSignsOnceWhateverTheReloads(t *testing.T) {
 	shop := testNodeSigner(t)
 	testNode.setState(nil, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(50, 1)}, accountOf(shop, "0"))
 	nothingSaved := httptest.NewRecorder()
-	routes(wallet, "127.0.0.1:8090").ServeHTTP(nothingSaved, httptest.NewRequest("GET", "http://127.0.0.1:8090/send", nil))
+	routes(wallet, "127.0.0.1:8090", "").ServeHTTP(nothingSaved, httptest.NewRequest("GET", "http://127.0.0.1:8090/send", nil))
 	if nothingSaved.Code != http.StatusSeeOther || nothingSaved.Header().Get("Location") != "/" {
 		t.Errorf("GET /send with nothing saved: status %d to %q, want a redirect to /", nothingSaved.Code, nothingSaved.Header().Get("Location"))
 	}
@@ -371,7 +371,7 @@ func TestAccountFormDelegates(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	testNode.setState(nil, ledger.Account{Name: "kay", PublicKey: wallet.PublicKey(), Amount: big.NewRat(500, 1)})
-	walletUI := routes(wallet, "127.0.0.1:8090")
+	walletUI := routes(wallet, "127.0.0.1:8090", "")
 	post := func(delegate string) string {
 		request := httptest.NewRequest("POST", "http://127.0.0.1:8090/update", strings.NewReader(url.Values{"delegate": {delegate}}.Encode()))
 		request.Header.Set("Origin", "http://127.0.0.1:8090")
@@ -412,7 +412,7 @@ func TestAmountsOffTheGridAreRefusedBeforeSigning(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	target := "target"
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet)}, accountOf(walletSigner(t, wallet), "5"),
+	testNode.setState([]signing.Signer{walletSigner(t, wallet)}, accountOf(walletSigner(t, wallet), "5"),
 		ledger.Account{Name: target, PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: big.NewRat(7, 1)})
 	for _, amount := range []string{"0.123456789", "1/3", "1e-9", "1e2"} {
 		if _, _, err := wallet.Send(target, amount); err == nil {
@@ -529,7 +529,7 @@ func nextBlockID(t *testing.T, wallet *Wallet, heightInProgress int64) int64 {
 func page(t *testing.T, wallet *Wallet, path string) string {
 	t.Helper()
 	recorder := httptest.NewRecorder()
-	routes(wallet, "127.0.0.1:8090").ServeHTTP(recorder, httptest.NewRequest("GET", "http://127.0.0.1:8090"+path, nil))
+	routes(wallet, "127.0.0.1:8090", "").ServeHTTP(recorder, httptest.NewRequest("GET", "http://127.0.0.1:8090"+path, nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("GET %s: status %d", path, recorder.Code)
 	}
@@ -542,7 +542,7 @@ func submitForm(wallet *Wallet, path string, form url.Values) *httptest.Response
 	request.Header.Set("Origin", "http://127.0.0.1:8090")
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	recorder := httptest.NewRecorder()
-	routes(wallet, "127.0.0.1:8090").ServeHTTP(recorder, request)
+	routes(wallet, "127.0.0.1:8090", "").ServeHTTP(recorder, request)
 	return recorder
 }
 
@@ -592,8 +592,8 @@ func TestUnregisteredWalletShowsOnlyAfterAStateVerifies(t *testing.T) {
 	stale := newTestWallet(t, testNode.baseURL)
 	alice := ledger.Account{Name: "alice", PublicKey: stale.PublicKey(), Amount: big.NewRat(5, 1)}
 	testNode.setState(nil, alice)
-	verified(t, stale)                                             // it pins the node's validators
-	testNode.setState([]*signing.Signer{testNodeSigner(t)}, alice) // the banks re-key: no state verifies for it
+	verified(t, stale)                                            // it pins the node's validators
+	testNode.setState([]signing.Signer{testNodeSigner(t)}, alice) // the banks re-key: no state verifies for it
 	unregistered := newTestWallet(t, testNode.baseURL)
 	closed := httptest.NewServer(http.NotFoundHandler())
 	closed.Close()
@@ -799,7 +799,7 @@ func TestFreezeWorksWhenNoStateVerifies(t *testing.T) {
 	testNode.setState(nil, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
 	verified(t, wallet)
 	verified(t, stranger)
-	testNode.setState([]*signing.Signer{testNodeSigner(t)}, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
+	testNode.setState([]signing.Signer{testNodeSigner(t)}, ledger.Account{Name: "alice", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
 	if _, err := wallet.verifiedState(); err == nil {
 		t.Fatal("premise: a state signed by validators the wallet did not pin verifies")
 	}
@@ -912,7 +912,7 @@ func TestAccountUpdateRunsTheLedgersRules(t *testing.T) {
 	closed := ledger.Account{Name: "closed", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: new(big.Rat), Frozen: true}
 	refused := func(description, delegate, reason string) {
 		t.Helper()
-		if _, err := wallet.UpdateAccount(description, delegate, "", ""); err == nil || !strings.Contains(err.Error(), reason) {
+		if _, err := wallet.UpdateAccount(description, delegate, "", "", ""); err == nil || !strings.Contains(err.Error(), reason) {
 			t.Errorf("an update (a %d-byte description, delegate %q): %v, want a refusal saying %q", len(description), delegate, err, reason)
 		}
 	}
@@ -929,7 +929,7 @@ func TestAccountUpdateRunsTheLedgersRules(t *testing.T) {
 
 	kay.Frozen = false
 	testNode.setState(nil, kay, closed)
-	if update, err := wallet.UpdateAccount("hello", "", "", ""); err != nil || update.BlockID != 13 {
+	if update, err := wallet.UpdateAccount("hello", "", "", "", ""); err != nil || update.BlockID != 13 {
 		t.Errorf("the update after the refusals names block %d (err %v), want 13: a refusal used up a block", update.BlockID, err)
 	}
 }
@@ -939,7 +939,7 @@ func TestAccountUpdateRunsTheLedgersRules(t *testing.T) {
 func TestWalletRefusesNonCanonicalNames(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet)}, accountOf(walletSigner(t, wallet), "5"),
+	testNode.setState([]signing.Signer{walletSigner(t, wallet)}, accountOf(walletSigner(t, wallet), "5"),
 		ledger.Account{Name: "shop", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: new(big.Rat)})
 	checkpoint := verified(t, wallet)
 	for _, refused := range []string{"sh op", "sh_op", "-", "-shop", "", wallet.PublicKey(), strings.Repeat("a", 33)} {
@@ -947,7 +947,7 @@ func TestWalletRefusesNonCanonicalNames(t *testing.T) {
 			t.Errorf("a payment to %q passed review", refused)
 		}
 		if refused != "" && refused != ledger.ClearField {
-			if _, err := wallet.UpdateAccount("", refused, "", ""); err == nil {
+			if _, err := wallet.UpdateAccount("", refused, "", "", ""); err == nil {
 				t.Errorf("a delegation to %q was signed", refused)
 			}
 		}
@@ -995,26 +995,29 @@ func TestTypedKeyGivesTheSchemesReason(t *testing.T) {
 	}
 }
 
-// The account form takes a public address and IP addresses, as well as a description and a delegate
-// (spec 7.3, §4): a bank publishes its public face, and the IP addresses the other validators send it
-// their messages at, separated by spaces, which replace the whole list; "-" withdraws either. An
-// address in another form than the ledger's (ledger.CanonicalAddress, ledger.CanonicalIPAddress), here
-// with a path or a leading zero, is refused with the reason, and nothing is sent.
+// The account form takes a public address, IP addresses and TLS keys, as well as a description and a
+// delegate (spec 7.3, §4; Phase 4 §3.3): a bank publishes its public face, the IP addresses the other
+// validators send it their messages at, and the hashes of its web server's keys, each list separated by
+// spaces, which replaces the whole list; "-" withdraws any of them. An address or key in another form
+// than the ledger's (ledger.CanonicalAddress, ledger.CanonicalIPAddress, ledger.CanonicalTLSKey), here
+// with a path, a leading zero or capitals, is refused with the reason, and nothing is sent.
 func TestAccountFormTakesAnAddress(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
 	testNode.setState(nil, ledger.Account{Name: "kay", PublicKey: wallet.PublicKey(), Amount: big.NewRat(5, 1)})
+	tlsKey, nextTLSKey := strings.Repeat("0123456789abcdef", 4), strings.Repeat("fedcba9876543210", 4)
 	for _, refused := range []struct{ field, value, want string }{
 		{"publicAddress", "https://bank-a.example/", `the public address "https://bank-a.example/" is not an address`},
 		{"ipAddresses", "203.0.113.7 010.0.0.2", `the IP address "010.0.0.2" is not an IP address`},
+		{"tlsKeys", strings.ToUpper(tlsKey), `is not a TLS key`},
 	} {
 		if refusal := redirectError(submitForm(wallet, "/update", url.Values{refused.field: {refused.value}})); !strings.Contains(refusal, refused.want) {
 			t.Errorf("the %s %q: %q, want its refusal", refused.field, refused.value, refusal)
 		}
 	}
 	for _, form := range []url.Values{
-		{"publicAddress": {"https://bank-a.example"}, "ipAddresses": {" 203.0.113.7  2001:db8::7 "}},
-		{"publicAddress": {ledger.ClearField}, "ipAddresses": {ledger.ClearField}},
+		{"publicAddress": {"https://bank-a.example"}, "ipAddresses": {" 203.0.113.7  2001:db8::7 "}, "tlsKeys": {tlsKey + " " + nextTLSKey}},
+		{"publicAddress": {ledger.ClearField}, "ipAddresses": {ledger.ClearField}, "tlsKeys": {ledger.ClearField}},
 	} {
 		if refusal := redirectError(submitForm(wallet, "/update", form)); refusal != "" {
 			t.Fatal(refusal)
@@ -1026,11 +1029,12 @@ func TestAccountFormTakesAnAddress(t *testing.T) {
 		t.Fatalf("want two account updates sent, got %d request(s)", len(posts))
 	}
 	if published.PublicAddress != "https://bank-a.example" || !slices.Equal(published.IPAddresses, []string{"203.0.113.7", "2001:db8::7"}) ||
-		!ledger.VerifyAccountUpdate(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(), published) {
-		t.Errorf("the first update publishes %q and %v, want https://bank-a.example and the two IP addresses, signed under the wallet's key", published.PublicAddress, published.IPAddresses)
+		!slices.Equal(published.TLSKeys, []string{tlsKey, nextTLSKey}) || !ledger.VerifyAccountUpdate(signing.NetworkScheme(), testNetworkID, wallet.PublicKey(), published) {
+		t.Errorf("the first update publishes %q, %v and %v, want https://bank-a.example, the two IP addresses and the two TLS keys, signed under the wallet's key",
+			published.PublicAddress, published.IPAddresses, published.TLSKeys)
 	}
-	if withdrawn.PublicAddress != ledger.ClearField || !slices.Equal(withdrawn.IPAddresses, []string{ledger.ClearField}) {
-		t.Errorf("the second update publishes %q and %v, want %q for both", withdrawn.PublicAddress, withdrawn.IPAddresses, ledger.ClearField)
+	if withdrawn.PublicAddress != ledger.ClearField || !slices.Equal(withdrawn.IPAddresses, []string{ledger.ClearField}) || !slices.Equal(withdrawn.TLSKeys, []string{ledger.ClearField}) {
+		t.Errorf("the second update publishes %q, %v and %v, want %q for each", withdrawn.PublicAddress, withdrawn.IPAddresses, withdrawn.TLSKeys, ledger.ClearField)
 	}
 }
 
@@ -1041,7 +1045,7 @@ func TestUnknownPathIsNotFound(t *testing.T) {
 	wallet := newTestWallet(t, testNode.baseURL)
 	for _, path := range []string{"/favicon.ico", "/nowhere"} {
 		recorder := httptest.NewRecorder()
-		routes(wallet, "127.0.0.1:8090").ServeHTTP(recorder, httptest.NewRequest("GET", "http://127.0.0.1:8090"+path, nil))
+		routes(wallet, "127.0.0.1:8090", "").ServeHTTP(recorder, httptest.NewRequest("GET", "http://127.0.0.1:8090"+path, nil))
 		if recorder.Code != http.StatusNotFound {
 			t.Errorf("GET %s: status %d, want %d", path, recorder.Code, http.StatusNotFound)
 		}
@@ -1058,7 +1062,7 @@ func TestUnknownPathIsNotFound(t *testing.T) {
 func TestPagesReadTheCheckpointOnce(t *testing.T) {
 	testNode := newGovernanceNode(t)
 	wallet := newTestWallet(t, testNode.baseURL)
-	testNode.setState([]*signing.Signer{walletSigner(t, wallet), testNodeSigner(t), testNodeSigner(t)}, accountOf(walletSigner(t, wallet), "5"),
+	testNode.setState([]signing.Signer{walletSigner(t, wallet), testNodeSigner(t), testNodeSigner(t)}, accountOf(walletSigner(t, wallet), "5"),
 		ledger.Account{Name: "shop", PublicKey: testNodeSigner(t).PublicKeyBase64(), Amount: new(big.Rat)})
 	checkpoint := verified(t, wallet) // the first use pins the network
 	registration, _ := json.Marshal(ledger.NameRequest{Kind: ledger.RegistrationKind, Name: "newcomer", Requestor: nameOf(walletSigner(t, wallet)),

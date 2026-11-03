@@ -97,7 +97,7 @@ func TestCatchUpGivesUpAURLThatNeverConnectsAfterTwoSeconds(t *testing.T) {
 	config.Bootstrap = []string{"http://" + silent.Addr().String()}
 	straggler := New(config, &peeredRecorder{peers: [][]string{{ahead.URL}}})
 	started := time.Now()
-	_, found := straggler.catchUpCheckpoint()
+	_, _, found := straggler.catchUpCheckpoint()
 	if elapsed := time.Since(started); !found || elapsed < peerDialTimeout/2 || elapsed >= 5*time.Second {
 		t.Errorf("catch-up found the gossip peer's checkpoint %v, after %v; want found, after about %v", found, elapsed, peerDialTimeout)
 	}

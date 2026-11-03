@@ -248,12 +248,13 @@ func TestTransportSendsASlowPeerAMessageOnce(t *testing.T) {
 }
 
 // The decentralized name server: GET /hdls/resolve turns a name into the account's current public key,
-// its bank of record, whether it is frozen, AND where it is reached, its publicAddress and its
-// ipAddresses, each only when set (or the reverse, by key), each answer naming the committed height
+// its bank of record, whether it is frozen, AND where it is reached, its publicAddress, its ipAddresses
+// and its tlsKeys, each only when set (or the reverse, by key), each answer naming the committed height
 // and digest it was read from.
 func TestResolveEndpointServesNameAndAddress(t *testing.T) {
 	alice := testAccount("alice", "50")
 	alice.Bank, alice.Description, alice.PublicAddress, alice.IPAddresses = "validator", "the bakery", "https://bakery.example", []string{"10.0.0.7", "2001:db8::7"}
+	alice.TLSKeys = []string{strings.Repeat("0123456789abcdef", 4)}
 	carol := testAccount("carol", "1")
 	carol.Frozen = true
 	genesis := testGenesis([]ledger.Account{testAccount("validator", "100"), alice, carol},
@@ -282,13 +283,14 @@ func TestResolveEndpointServesNameAndAddress(t *testing.T) {
 	status, record := resolve("?name=alice")
 	if status != http.StatusOK || record.PublicKey != alice.PublicKey || record.Bank != "validator" || record.Frozen ||
 		record.PublicAddress != "https://bakery.example" || !slices.Equal(record.IPAddresses, alice.IPAddresses) || record.Description != "the bakery" ||
-		!strings.Contains(answers["?name=alice"], `"publicAddress":"https://bakery.example","ipAddresses":["10.0.0.7","2001:db8::7"]`) {
+		!strings.Contains(answers["?name=alice"], `"publicAddress":"https://bakery.example","ipAddresses":["10.0.0.7","2001:db8::7"],"tlsKeys":["`+alice.TLSKeys[0]+`"]`) {
 		t.Fatalf("resolve by name: status=%d record=%+v", status, record)
 	}
 	if status, record := resolve("?name=carol"); status != http.StatusOK || !record.Frozen || record.Bank != "" {
 		t.Fatalf("a frozen name must resolve as frozen: status=%d record=%+v", status, record)
 	}
-	if answer := answers["?name=carol"]; strings.Contains(answer, "publicAddress") || strings.Contains(answer, "ipAddresses") || strings.Contains(answer, `"address"`) {
+	if answer := answers["?name=carol"]; strings.Contains(answer, "publicAddress") || strings.Contains(answer, "ipAddresses") || strings.Contains(answer, "tlsKeys") ||
+		strings.Contains(answer, `"address"`) {
 		t.Errorf("the answer for a name that publishes no address names one: %s", answer)
 	}
 	// The answer names the state it was read from: block 1 and the digest of the state it committed,
@@ -537,7 +539,7 @@ func TestResolveServesTheStateDigest(t *testing.T) {
 func TestResolveToleratesRawPlusInKey(t *testing.T) {
 	scheme := signing.NetworkScheme()
 	validatorSigner := testSigner("validator")
-	var alice *signing.Signer
+	var alice signing.Signer
 	for i := 0; i < 4000 && alice == nil; i++ {
 		if candidate, _ := signing.Generate(scheme, "testnet"); strings.Contains(candidate.PublicKeyBase64(), "+") {
 			alice = candidate

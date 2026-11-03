@@ -16,24 +16,9 @@ import (
 // serving a real engine's public folder and passing submissions on to the engine's operator port. A
 // payment is sent and its receipt verifies, an account update publishes a public address and two IP
 // addresses, the admin page shows the governance the fetcher serves, and a freeze lands. The fetcher is
-// a main package, so the test builds it with the go command; it skips under -short, and when no
-// toolchain is at hand to build it.
+// a main package, so the test builds it (buildCommand).
 func TestCustomersWalletWorksAgainstTheRealFetcher(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipped under -short: it builds cmd/fetcher and runs it over a real engine")
-	}
-	goCommand, err := exec.LookPath("go")
-	if err != nil {
-		t.Skipf("skipped: no go command to build cmd/fetcher with (%v)", err)
-	}
-	fetcherBinary := filepath.Join(t.TempDir(), "fetcher")
-	if output, err := exec.Command(goCommand, "build", "-o", fetcherBinary, "github.com/eval-apply-labs/go-ledger/cmd/fetcher").CombinedOutput(); err != nil {
-		if strings.Contains(string(output), "toolchain") {
-			t.Skipf("skipped: no toolchain to build cmd/fetcher with: %s", output)
-		}
-		t.Fatalf("building cmd/fetcher: %v: %s", err, output)
-	}
-
+	fetcherBinary := buildCommand(t, "fetcher")
 	wallet := newTestWallet(t, "")
 	bankEngine := startEngine(t, wallet)
 	operatorPort := httptest.NewServer(bankEngine.handler)
@@ -81,4 +66,25 @@ func TestCustomersWalletWorksAgainstTheRealFetcher(t *testing.T) {
 		t.Errorf("the freeze: %q", message)
 	}
 	eventually(t, "commit of the freeze", func() bool { return accountIn(wallet, "alice").Frozen })
+}
+
+// buildCommand builds the root module's cmd/<name>, a main package, with the go command, and returns the
+// binary's path. It skips the test under -short, and when no toolchain is at hand to build it.
+func buildCommand(t *testing.T, name string) string {
+	t.Helper()
+	if testing.Short() {
+		t.Skipf("skipped under -short: it builds cmd/%s and runs it", name)
+	}
+	goCommand, err := exec.LookPath("go")
+	if err != nil {
+		t.Skipf("skipped: no go command to build cmd/%s with (%v)", name, err)
+	}
+	binary := filepath.Join(t.TempDir(), name)
+	if output, err := exec.Command(goCommand, "build", "-o", binary, "github.com/eval-apply-labs/go-ledger/cmd/"+name).CombinedOutput(); err != nil {
+		if strings.Contains(string(output), "toolchain") {
+			t.Skipf("skipped: no toolchain to build cmd/%s with: %s", name, output)
+		}
+		t.Fatalf("building cmd/%s: %v: %s", name, err, output)
+	}
+	return binary
 }

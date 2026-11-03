@@ -13,44 +13,6 @@ import (
 	"github.com/eval-apply-labs/go-ledger/signing"
 )
 
-// A wallet sealed before the KDF moved to the standard library's crypto/pbkdf2 must still open. This
-// fixture was sealed by the hand-written PBKDF2-HMAC-SHA256 the wallet used until then, at 1000
-// iterations so the test is fast (a key file records its own count).
-func TestWalletSealedBeforeStdlibKDFStillOpens(t *testing.T) {
-	var sealed encryptedKey
-	fixture := `{"kdf":"pbkdf2-hmac-sha256","iterations":1000,"salt":"Z28tbGVkZ2VyLXNhbHQxNg==","nonce":"bm9uY2UtMTJieXRl","ciphertext":"tSh8iOY3KoYXJc0XxL4ER2v/aldVki/JXwU4pOcFYxuRIILptdD/84JEesSlRlP9"}`
-	if err := json.Unmarshal([]byte(fixture), &sealed); err != nil {
-		t.Fatal(err)
-	}
-	if opened, err := sealed.open("correct horse"); err != nil || string(opened) != "this-stands-in-for-a-private-key" {
-		t.Fatalf("a wallet sealed by the earlier KDF no longer opens: %q, %v", opened, err)
-	}
-}
-
-// Seal/open round-trip: the right passphrase recovers the key, a wrong one (or a tampered
-// ciphertext) is rejected by the AEAD, never returning garbage key bytes.
-func TestSealedKeyRoundTrip(t *testing.T) {
-	privateKey := []byte("this-stands-in-for-a-private-key")
-	sealed, err := sealPrivateKey(privateKey, "correct horse")
-	if err != nil {
-		t.Fatal(err)
-	}
-	opened, err := sealed.open("correct horse")
-	if err != nil || !bytes.Equal(opened, privateKey) {
-		t.Fatalf("round-trip failed: %v", err)
-	}
-	if _, err := sealed.open("wrong horse"); err == nil {
-		t.Fatal("a wrong passphrase must not unlock the key")
-	}
-	tampered := *sealed
-	encodedCiphertext := []byte(tampered.Ciphertext)
-	encodedCiphertext[0] ^= 1
-	tampered.Ciphertext = string(encodedCiphertext)
-	if _, err := tampered.open("correct horse"); err == nil {
-		t.Fatal("a tampered ciphertext must not unlock")
-	}
-}
-
 // The publicKey field is outside the seal, so the wallet's account comes from the private key: a
 // sealed backup whose publicKey was swapped (to misdirect payments meant for "your account") still
 // unlocks with the right passphrase, but must not load.
@@ -60,7 +22,7 @@ func TestKeyFileRefusesForeignPublicKey(t *testing.T) {
 	if _, _, err := loadOrCreateKey(path); err != nil {
 		t.Fatal(err)
 	}
-	var storedKey keyFile
+	var storedKey signing.KeyFile
 	data, _ := os.ReadFile(path)
 	if err := json.Unmarshal(data, &storedKey); err != nil {
 		t.Fatal(err)
@@ -99,7 +61,7 @@ func TestPlaintextKeyIsSealedOncePassphraseIsSet(t *testing.T) {
 	if _, _, err := loadOrCreateKey(path); err != nil {
 		t.Fatal(err)
 	}
-	var storedKey keyFile
+	var storedKey signing.KeyFile
 	data, _ := os.ReadFile(path)
 	if err := json.Unmarshal(data, &storedKey); err != nil {
 		t.Fatal(err)
@@ -147,7 +109,7 @@ func TestPlaintextKeyIsSealedThroughASymlink(t *testing.T) {
 	if _, _, err := loadOrCreateKey(link); err != nil {
 		t.Fatal(err)
 	}
-	var storedKey keyFile
+	var storedKey signing.KeyFile
 	data, _ := os.ReadFile(target)
 	if err := json.Unmarshal(data, &storedKey); err != nil || storedKey.PrivateKey != "" || storedKey.Encrypted == nil {
 		t.Fatalf("the file the link points to still holds the private key in plaintext (%v)", err)
@@ -186,7 +148,7 @@ func TestKeyFileRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	var storedKey keyFile
+	var storedKey signing.KeyFile
 	if err := json.Unmarshal(data, &storedKey); err != nil {
 		t.Fatal(err)
 	}
@@ -230,15 +192,12 @@ func TestKeyFileHoldsTheSeed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var storedKey keyFile
+		var storedKey signing.KeyFile
 		data, _ := os.ReadFile(path)
 		if err := json.Unmarshal(data, &storedKey); err != nil {
 			t.Fatal(err)
 		}
-		stored, err := base64.StdEncoding.DecodeString(storedKey.PrivateKey)
-		if passphrase != "" {
-			stored, err = storedKey.Encrypted.open(passphrase)
-		}
+		stored, err := storedKey.Unlock(passphrase)
 		if err != nil || !bytes.Equal(stored, privateKey) {
 			t.Fatalf("%s holds a %d-byte private key (%v), not the wallet's", name, len(stored), err)
 		}
@@ -252,7 +211,7 @@ func TestKeyFileHoldsTheSeed(t *testing.T) {
 
 	t.Setenv(passphraseEnvironmentVariable, "")
 	earlier := filepath.Join(directory, "earlier.json")
-	data, _ := json.Marshal(keyFile{PublicKey: base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	data, _ := json.Marshal(signing.KeyFile{PublicKey: base64.StdEncoding.EncodeToString(make([]byte, 32)),
 		PrivateKey: base64.StdEncoding.EncodeToString(make([]byte, 64))})
 	if err := os.WriteFile(earlier, data, 0o600); err != nil {
 		t.Fatal(err)
